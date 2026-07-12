@@ -1,0 +1,89 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`defineProject > golden snapshot: a realistic layered project compiles to a stable IR shape 1`] = `
+{
+  "components": {
+    "api": {
+      "allowEmpty": false,
+      "name": "api",
+      "selector": {
+        "kind": "glob",
+        "patterns": [
+          "application/api/**",
+        ],
+      },
+    },
+    "core": {
+      "allowEmpty": false,
+      "name": "core",
+      "selector": {
+        "kind": "glob",
+        "patterns": [
+          "packages/core/**",
+        ],
+      },
+    },
+    "ui": {
+      "allowEmpty": false,
+      "name": "ui",
+      "selector": {
+        "kind": "glob",
+        "patterns": [
+          "application/ui/**",
+        ],
+      },
+    },
+  },
+  "irVersion": "1",
+  "rules": [
+    {
+      "id": "arch.layers:api",
+      "kind": "arch.layers",
+      "layers": [
+        {
+          "canDependOn": [
+            "core",
+          ],
+          "layer": "api",
+        },
+      ],
+      "provenance": {},
+    },
+    {
+      "from": "api",
+      "id": "arch.no-dependency:api->core",
+      "kind": "arch.no-dependency",
+      "provenance": {},
+      "to": "core",
+    },
+    {
+      "from": "core",
+      "id": "arch.no-dependency:core->api",
+      "kind": "arch.no-dependency",
+      "provenance": {},
+      "to": "api",
+    },
+    {
+      "from": "ui",
+      "id": "arch.no-dependency:ui->core",
+      "kind": "arch.no-dependency",
+      "provenance": {},
+      "to": "core",
+    },
+    {
+      "from": "core",
+      "id": "arch.no-dependency:core->ui",
+      "kind": "arch.no-dependency",
+      "provenance": {},
+      "to": "ui",
+    },
+    {
+      "id": "arch.no-cycles:repo",
+      "includeTypeOnly": false,
+      "kind": "arch.no-cycles",
+      "provenance": {},
+      "scope": "repo",
+    },
+  ],
+}
+`;
