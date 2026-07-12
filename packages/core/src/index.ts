@@ -11,3 +11,4 @@ export * from './plugin/registry.js';
 export * from './orchestrator.js';
 export * from './payload/builder.js';
 export * from './payload/mermaid.js';
+export * from './build/index.js';
