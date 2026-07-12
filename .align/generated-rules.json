@@ -1,7 +1,7 @@
 {
   "irVersion": "1",
   "docPath": "docs/ARCHITECTURE-RULES.md",
-  "generatedAt": 1783844190126,
+  "generatedAt": 1783877032772,
   "rules": [
     {
       "kind": "arch.no-cycles",
@@ -46,6 +46,22 @@
           "endLine": 23
         },
         "sourceQuote": "- **Rule**: `core` must not depend on `cli`."
+      }
+    },
+    {
+      "kind": "arch.metric",
+      "id": "arch.metric:loc:cli",
+      "target": "cli",
+      "metric": "loc",
+      "max": 500,
+      "provenance": {
+        "because": "Enforced by docs/ARCHITECTURE-RULES.md:36: '- **Rule**: files in `cli` must stay under 500 lines.'",
+        "sourceFile": "docs/ARCHITECTURE-RULES.md",
+        "sourceLineRange": {
+          "startLine": 36,
+          "endLine": 36
+        },
+        "sourceQuote": "- **Rule**: files in `cli` must stay under 500 lines."
       }
     }
   ]

@@ -1,7 +1,7 @@
 # align build report
 
-Doc: `docs/ARCHITECTURE-RULES.md` (b5204f866bbf7d9e)
-Built: 2026-07-12T08:16:30.126Z
+Doc: `docs/ARCHITECTURE-RULES.md` (f8e0fbacf2bb9c85)
+Built: 2026-07-12T17:23:52.773Z
 
 ## Impact
 
@@ -28,9 +28,13 @@ Built: 2026-07-12T08:16:30.126Z
 - Quote: "- **Rule**: `core` must not depend on `cli`."
 - IR: `{"kind":"arch.no-dependency","from":"core","to":"cli"}`
 
+### `arch.metric:loc:cli`
+
+- Source: `docs/ARCHITECTURE-RULES.md:36`
+- Quote: "- **Rule**: files in `cli` must stay under 500 lines."
+- IR: `{"kind":"arch.metric","target":"cli","metric":"loc","max":500}`
+
 ## Diff vs. previous generated-rules.json
 
-- + added `arch.no-cycles:repo`
-- + added `arch.no-dependency:core->pluginTypescript`
-- + added `arch.no-dependency:core->cli`
+- + added `arch.metric:loc:cli`
 

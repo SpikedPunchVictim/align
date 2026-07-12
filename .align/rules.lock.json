@@ -1,8 +1,8 @@
 {
   "irVersion": "1",
   "docPath": "docs/ARCHITECTURE-RULES.md",
-  "docContentHash": "b5204f866bbf7d9e",
-  "builtAt": 1783844190126,
+  "docContentHash": "f8e0fbacf2bb9c85",
+  "builtAt": 1783877032773,
   "sections": [
     {
       "anchor": "architecture-rules",
@@ -47,14 +47,25 @@
       ]
     },
     {
+      "anchor": "cli-file-size",
+      "headingText": "CLI File Size",
+      "startLine": 25,
+      "endLine": 37,
+      "contentHash": "b9a1acd463f7657b",
+      "tier": "bullet",
+      "ruleIds": [
+        "arch.metric:loc:cli"
+      ]
+    },
+    {
       "anchor": "future-direction",
       "headingText": "Future Direction",
-      "startLine": 25,
-      "endLine": 30,
+      "startLine": 38,
+      "endLine": 43,
       "contentHash": "cd6e53ce878f83f0",
       "tier": "prose",
       "ruleIds": []
     }
   ],
-  "generatedRulesContentHash": "c94c570f7f792158"
+  "generatedRulesContentHash": "7bc3d65adbb73ce9"
 }

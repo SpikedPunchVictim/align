@@ -41,3 +41,10 @@ export default defineProject({
       .because('@align/agent (Stage 4 BYOK fix loop, ADR 010) depends only on @align/core + @anthropic-ai/sdk — it never imports plugin-typescript or cli; the CLI composition root wires concrete effects (git, fs, the TS scanner) into it, not the reverse (IMPLEMENTATION_PLAN.md Stage 4).'),
   ],
 });
+
+// align:generated-rules-note:start
+// `.align/generated-rules.json` (written by `align build --apply`, ADR 011) is merged into
+// this ruleset automatically at load time (`mergeGeneratedRules`) — you never need to import
+// it here. Run `align explain <ruleId>` to see a rule's provenance (hand-authored vs.
+// doc-built).
+// align:generated-rules-note:end

@@ -22,6 +22,19 @@ rip-and-replace.
 
 - **Rule**: `core` must not depend on `cli`.
 
+## CLI File Size
+
+`arch.metric` (max-LOC only) was promoted from Design Reserve 2026-07-12 on kluster ruleset evidence
+(`test-apps/kluster/RULESET_REPORT.md` §6.2, `IMPLEMENTATION_PLAN.md`'s Promotion log). This is align's
+own dogfood instance of it: `packages/cli/src/commands/build.ts` is the repo's largest source file at 468
+lines (checked directly, `wc -l`, excluding `test/`/`dist/`) — a real, present-tense number, not a
+round/aspirational one padded far above it. 500 is close enough to today's actual max that continued
+growth in `cli` (the composition root, ARCHITECTURE.md §5 — the package most likely to accumulate
+wiring code as new gates/commands land) will trip this rule rather than silently drift the way
+`build-worker.ts` did in kluster.
+
+- **Rule**: files in `cli` must stay under 500 lines.
+
 ## Future Direction
 
 We'd eventually like every package boundary in this repo to carry an explicit layering statement,
