@@ -133,7 +133,7 @@ interface GateResult {
 
 **Tests**: unit — fingerprint stability, baseline move-detection, DSL→IR golden snapshots, Tarjan (self-loops, multi-node SCCs), realpath classification, workspace-name fallback, empty-selector-fails, reserved-component-name type guards (expect-type); integration — fixtures (clean / probe-violation / cycle / pnpm-workspace / orphaned-package); MCP contract tests via in-process SDK client (shapes, caps, pagination, priority sort); CLI smoke (exit codes, `--json` shape).
 
-**Status**: Not Started
+**Status**: In Progress (Sonnet agent implementing against the ADRs)
 
 ## Stage 2: External validation + explain polish
 

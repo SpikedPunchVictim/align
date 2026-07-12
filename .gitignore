@@ -6,3 +6,4 @@ test-apps/
 spike/out/
 *.tsbuildinfo
 .DS_Store
+coverage/
