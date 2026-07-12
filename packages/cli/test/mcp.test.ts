@@ -40,6 +40,13 @@ describe('align mcp — align_check', () => {
     expect(payload.violations[0]).not.toHaveProperty('message');
   });
 
+  it('never includes a mermaid field — diagrams are explain-only (ADR 007 pull-on-demand)', async () => {
+    const client = await connectedClient(path.join(fixturesDir, 'simple-app-violation'));
+    const result = await client.callTool({ name: 'align_check', arguments: {} });
+    const text = textOf(result);
+    expect(text).not.toContain('mermaid');
+  });
+
   it('green fixture reports zero violations and passCount, not per-item text', async () => {
     const client = await connectedClient(path.join(fixturesDir, 'simple-app'));
     const result = await client.callTool({ name: 'align_check', arguments: {} });
@@ -83,5 +90,24 @@ describe('align mcp — align_explain_rule', () => {
     const client = await connectedClient(path.join(fixturesDir, 'simple-app-violation'));
     const result = await client.callTool({ name: 'align_explain_rule', arguments: { ruleId: 'no-such-rule' } });
     expect(result.isError).toBe(true);
+  });
+
+  it('includes a fenced Mermaid diagram for a rule with a live violation', async () => {
+    const client = await connectedClient(path.join(fixturesDir, 'simple-app-violation'));
+    const result = await client.callTool({
+      name: 'align_explain_rule',
+      arguments: { ruleId: 'arch.no-dependency:api->ui' },
+    });
+    const payload = JSON.parse(textOf(result)) as { mermaid?: string };
+    expect(payload.mermaid).toBeDefined();
+    expect(payload.mermaid).toContain('```mermaid');
+    expect(payload.mermaid).toContain('graph LR');
+  });
+
+  it('omits mermaid for a rule with no current violation to diagram', async () => {
+    const client = await connectedClient(path.join(fixturesDir, 'simple-app'));
+    const result = await client.callTool({ name: 'align_explain_rule', arguments: { ruleId: 'arch.no-cycles:repo' } });
+    const payload = JSON.parse(textOf(result)) as { mermaid?: string };
+    expect(payload.mermaid).toBeUndefined();
   });
 });

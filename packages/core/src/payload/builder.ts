@@ -92,5 +92,6 @@ export interface McpExplainRulePayload {
   readonly kind: RuleIR['kind'];
   readonly because?: string;
   readonly components: readonly { readonly name: ComponentName; readonly exampleFiles: readonly RepoRelativePath[] }[];
-  readonly mermaid?: string; // cycle/dependency-path diagram, arch kinds only — deferred to Stage 2
+  readonly mermaid?: string; // fenced cycle/dependency-path diagram (payload/mermaid.ts), present
+  // only when the rule currently has a violation instance to diagram — explain-only (ADR 007)
 }

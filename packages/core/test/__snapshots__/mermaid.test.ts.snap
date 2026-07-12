@@ -1,0 +1,31 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildViolationMermaid > renders a layers violation the same way, using layer names 1`] = `
+"\`\`\`mermaid
+graph LR
+  a["api<br/>src/api/service.ts"]
+  b["ui<br/>src/ui/component.ts"]
+  a -->|"../ui/component.js (forbidden)"| b
+\`\`\`"
+`;
+
+exports[`buildViolationMermaid > renders a no-cycles chain with the suggested break edge visually marked 1`] = `
+"\`\`\`mermaid
+graph LR
+  n0["a.ts"]
+  n1["b.ts"]
+  n0 -->|"./b"| n1
+  n2["c.ts"]
+  n1 -->|"./c"| n2
+  n2 -. "BREAK: ./a" .-> n0
+\`\`\`"
+`;
+
+exports[`buildViolationMermaid > renders a no-dependency violation as the offending component/file relationship 1`] = `
+"\`\`\`mermaid
+graph LR
+  a["api<br/>src/api/service.ts"]
+  b["ui<br/>src/ui/component.ts"]
+  a -->|"../ui/component.js (forbidden)"| b
+\`\`\`"
+`;

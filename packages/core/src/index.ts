@@ -9,3 +9,4 @@ export * from './baseline/fingerprint.js';
 export * from './plugin/registry.js';
 export * from './orchestrator.js';
 export * from './payload/builder.js';
+export * from './payload/mermaid.js';

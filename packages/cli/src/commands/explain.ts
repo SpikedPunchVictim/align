@@ -1,5 +1,5 @@
 import type { McpExplainRulePayload, RepoRelativePath } from '@align/core';
-import { toComponentName, toRuleId } from '@align/core';
+import { buildViolationMermaid, evaluateRule, toComponentName, toRuleId } from '@align/core';
 import { TypeScriptPlugin } from '@align/plugin-typescript';
 import { loadConfig } from '../config.js';
 
@@ -26,11 +26,19 @@ export async function buildExplainPayload(rootDir: string, ruleId: string): Prom
     exampleFiles: filesByComponent.get(name) ?? [],
   }));
 
+  // Mermaid is explain-only (ADR 007: pull-on-demand, never in align_check/align_violations).
+  // Diagram ONE representative violation instance, if the rule currently has any — a rule with
+  // no live violations has no "offending path" to visualize.
+  const violations = evaluateRule(rule, graph, ruleset.components);
+  const firstViolation = violations[0];
+  const mermaid = firstViolation === undefined ? undefined : buildViolationMermaid(firstViolation);
+
   return {
     ruleId: toRuleId(rule.id),
     kind: rule.kind,
     ...(rule.provenance.because === undefined ? {} : { because: rule.provenance.because }),
     components,
+    ...(mermaid === undefined ? {} : { mermaid }),
   };
 }
 
