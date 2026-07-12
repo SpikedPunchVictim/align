@@ -163,6 +163,8 @@ Dogfood: `docs/ARCHITECTURE-RULES.md` (1 fenced block + 2 bullets, plus two pros
 
 ## Stage 5: Growth path & reserve promotions
 
+**Elevated first items (user-proposed 2026-07-12): `align skill` + packaging.** `align skill [--topic authoring|fixing|all] [--install]` emits the LLM authoring/fixing guide from the binary itself — reference sections (rule kinds, DSL verbs, bullet grammar) GENERATED from the live zod schema registry so the skill can never drift from the installed version (a separately-installed skill would have stranded on the naming/metric demotion). Progressive disclosure: init's CLAUDE.md block stays small and points at the command; `--install` writes `.claude/skills/align/SKILL.md` via the proven idempotent delimited-block pattern; the MCP server carries the condensed form in its native `instructions` field (zero-file path). Pairs with the packaging/bin item (both live probes tried bare `align`/npx first). Evidence base: probe 1 proved instructions-drive-behavior; the kluster ruleset exercise's DX friction log is the requirements list.
+
 Tool-wrapping gate stack (format/lint/types/security/tests — the superseded stage designs below are the reference material, governed by ADR 008's `dependsOn` contract), caching promotion (~10 s trigger), `align watch`, DX backlog, second language plugin → `@align/plugin-api` extraction. Everything promotes on evidence. **Status**: Not Started
 
 ---
@@ -412,6 +414,7 @@ Likely reserve candidates (final call at re-audit):
 - Doc frontmatter versioning, `--fallback-manual` — build-pipeline insurance that can wait for the build pipeline to exist.
 - Flaky-test retry machinery — until the tests gate exists and flakes appear.
 - The entire Stage 5 DX backlog (playground, wizard, doctor rules, config linter, evolution assistant, VS Code extension).
+- **`tests.quality` gate (mutation testing, user-approved reserve entry 2026-07-12)**: wrap a mutation runner (Stryker-class) and normalize surviving mutants into Violations (file, line, "mutant survived: <mutation> — zero tests failed", fixHint "add a test that kills this mutant") — deterministically catches BOTH incomplete edge-case coverage and false-positive "liar tests"; the agent loop then writes the missing tests (fix→verify→mutant dies). The honest upgrade for Stage 4's reachability coverage heuristic, and the only gate class that measures the green≠correct gap rather than assuming it. The shelved CIA/impact-scoping machinery is its enabling mechanism (mutate only changed files, run only reaching tests). Promotion trigger: `tests.tool` gate exists AND a repo demonstrates align-green-while-tests-lied in practice. Near-term cheap kin: `custom.host` test-reachability rules (expressible in v1 today); static test-smell rules (assertion-free tests, leftover `.only`, mock-of-SUT) with the lint-gate promotion. NOT for spec-level completeness — no deterministic oracle exists there; at most advisory via the prose/propose_rules path, never a hard gate.
 
 Likely v1 (the moat + the skeleton): components registry + typed DSL, arch engine (`no-dependency`, `no-cycles`, layers), impact scope, baseline (+ `--rule`), edit-block apply pipeline (exact match + `nearLine`), MCP oracle, `align build` core loop (precision ladder, dry-run gates, provenance), gate dependencies, git rails.
 
