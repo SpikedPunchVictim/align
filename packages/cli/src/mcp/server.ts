@@ -7,14 +7,17 @@
  *
  * IMPORTANT (stdio transport): stdout carries JSON-RPC frames; all logging goes to stderr.
  */
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { buildMcpCheckPayload, type CheckRun } from '@align/core';
+import { buildMcpCheckPayload, proposeRulesFromDoc, ruleFragmentSchema, toRepoRelativePath, type CheckRun } from '@align/core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, writeBaseline } from '../align-dir.js';
 import { buildExplainPayload } from '../commands/explain.js';
+import { DEFAULT_DOC_PATH, proposeFromClientSubmission, writeBuildArtifacts, type DryRunResult } from '../commands/build.js';
 
 /** Shared by `align_check`/`align_violations`: runs a fresh check and persists any move-transfer
  * (ADR 006) the run performed, so a renamed file's baselined violation doesn't need a separate
@@ -96,6 +99,106 @@ export function createMcpServer(rootDir: string): McpServer {
         return { isError: true, content: [{ type: 'text', text: `Unknown rule id '${ruleId}'.` }] };
       }
       return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+    },
+  );
+
+  const proposalInputSchema = z.object({
+    section: z.string(),
+    fragment: ruleFragmentSchema,
+    sourceLineRange: z.object({ startLine: z.number().int(), endLine: z.number().int() }),
+    sourceQuote: z.string(),
+  });
+
+  server.registerTool(
+    'align_propose_rules',
+    {
+      title: 'Propose architecture rules from a markdown doc (build)',
+      description:
+        'Compiles an architecture/best-practices markdown doc into align rules — the same ' +
+        'precision ladder as `align build` (fenced ```align blocks, structured `- **Rule**:` ' +
+        'bullets, prose needing judgment). TWO-PASS: call with ONLY `doc_path` first (discovery) ' +
+        'to get per-section tier classification, deterministically-extracted rules, and an empty ' +
+        '"concerns" scaffold for prose sections for YOU to fill with your own judgment (align ' +
+        'never invents rules from prose). Then call again with `proposals` (your confirmed ' +
+        'concerns turned into rule fragments with provenance, plus any deterministic rules you ' +
+        'want to keep) to validate, ground selectors against the components registry, and dry-run ' +
+        'the impact (added/flagged-ungroundable/violation-count delta) — nothing is written yet. ' +
+        'Add `apply: true` on a follow-up call once you have reviewed the dry run to write ' +
+        '.align/generated-rules.json + rules.lock.json + the audit report. align validates and ' +
+        'grounds; no API key or LLM call happens inside align itself.',
+      inputSchema: {
+        doc_path: z.string().optional(),
+        proposals: z.array(proposalInputSchema).optional(),
+        apply: z.boolean().optional(),
+        accept_new_into_baseline: z.boolean().optional(),
+      },
+    },
+    async ({ doc_path, proposals, apply, accept_new_into_baseline }) => {
+      const docRelPath = doc_path ?? DEFAULT_DOC_PATH;
+
+      if (proposals === undefined) {
+        // Pass 1 — Discovery (ADR 011 two-pass clarification): classify sections, surface the
+        // deterministic tier-1/2 rules ready to pass through verbatim, and an empty `concerns`
+        // scaffold per prose section for the client to fill — align never invents rules from
+        // prose.
+        const absDocPath = path.join(rootDir, docRelPath);
+        if (!fs.existsSync(absDocPath)) {
+          return { isError: true, content: [{ type: 'text', text: `Doc not found: ${docRelPath}` }] };
+        }
+        const docText = fs.readFileSync(absDocPath, 'utf8');
+        const { ruleset } = await loadConfig(rootDir, { includeGenerated: false });
+        const proposal = proposeRulesFromDoc(docText, toRepoRelativePath(docRelPath), ruleset.components);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  docPath: docRelPath,
+                  sections: proposal.sections,
+                  deterministicRules: proposal.rules,
+                  flagged: proposal.flagged,
+                  proseSections: proposal.proseSections,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+
+      // Pass 2 (validate/ground/dry-run, no write) or `{ apply: true }` (writes via the same
+      // pipeline as `align build --apply`).
+      let result: DryRunResult;
+      try {
+        result = await proposeFromClientSubmission(rootDir, docRelPath, proposals);
+      } catch (err) {
+        return { isError: true, content: [{ type: 'text', text: err instanceof Error ? err.message : String(err) }] };
+      }
+
+      const diffPayload = {
+        docPath: docRelPath,
+        accepted: result.proposal.rules.map((r) => ({ id: r.id, kind: r.kind, provenance: r.provenance })),
+        flaggedUngroundable: result.proposal.flagged,
+        diff: {
+          added: result.diff.added.map((r) => r.id),
+          changed: result.diff.changed.map((c) => c.after.id),
+          removed: result.diff.removed.map((r) => r.id),
+          unchanged: result.diff.unchanged.map((r) => r.id),
+        },
+        impact: { addsNewViolations: result.impact.addedNew.length, masksBaselined: result.impact.maskedBaselined.length },
+      };
+
+      if (apply !== true) {
+        return { content: [{ type: 'text', text: JSON.stringify(diffPayload, null, 2) }] };
+      }
+
+      const applied = writeBuildArtifacts(rootDir, result, { acceptNewIntoBaseline: accept_new_into_baseline === true });
+      if (!applied.ok) {
+        return { isError: true, content: [{ type: 'text', text: applied.message }] };
+      }
+      return { content: [{ type: 'text', text: JSON.stringify({ ...diffPayload, applied: true, message: applied.message }, null, 2) }] };
     },
   );
 

@@ -1,17 +1,35 @@
-import { buildUncertaintyAdvisories, toComponentName, type Advisory } from '@align/core';
+import { buildUncertaintyAdvisories, toComponentName, type Advisory, type UncertaintyMarker } from '@align/core';
 import { TypeScriptPlugin, UNMAPPED_COMPONENT, findDeadAliases, findOrphanedPackages } from '@align/plugin-typescript';
 import { loadConfig } from '../config.js';
 
 const UNMAPPED_EXAMPLES = 5;
+/** Stage 2 live-probe DX finding, carried into Stage 3: the agent had to script against the
+ * scanner API to get per-specifier uncertainty detail — `buildUncertaintyAdvisories` only
+ * produces grouped counts. `--json` exposes the raw markers directly, capped so a repo with
+ * thousands of uncertain specifiers can't blow up the payload (ADR 007 discipline extended to
+ * doctor's own output). */
+const UNCERTAINTY_DETAIL_CAP = 50;
 
-/**
- * `align doctor` — read-only advisory survey (Stage 2). Unlike `align check`, doctor never fails
- * a build: it's a diagnostic tool for the humans/agents configuring align on a repo, not a gate.
- * Exit code is always 0; every failure mode downgrades to an advisory instead of throwing, since a
- * misconfigured repo is exactly the case doctor exists to help someone understand.
- */
-export async function runDoctor(rootDir: string): Promise<number> {
+export interface DoctorOptions {
+  readonly json: boolean;
+}
+
+export interface DoctorJsonPayload {
+  readonly advisories: readonly Advisory[];
+  readonly uncertainty: {
+    readonly total: number;
+    readonly detail: readonly UncertaintyMarker[]; // capped at UNCERTAINTY_DETAIL_CAP
+  };
+}
+
+interface DoctorReport {
+  readonly advisories: readonly Advisory[];
+  readonly uncertain: readonly UncertaintyMarker[];
+}
+
+async function collectDoctorReport(rootDir: string): Promise<DoctorReport> {
   const advisories: Advisory[] = [];
+  let uncertain: readonly UncertaintyMarker[] = [];
 
   const loaded = await loadConfig(rootDir).catch((err: unknown) => {
     advisories.push({
@@ -23,14 +41,15 @@ export async function runDoctor(rootDir: string): Promise<number> {
   const excludes = loaded?.excludes ?? [];
 
   if (loaded !== undefined) {
-    const { ruleset, excludes } = loaded;
+    const { ruleset, excludes: loadedExcludes } = loaded;
     const plugin = new TypeScriptPlugin();
-    const graph = await plugin.scanner.scan({ rootDir, components: ruleset.components, excludes }).catch((err: unknown) => {
+    const graph = await plugin.scanner.scan({ rootDir, components: ruleset.components, excludes: loadedExcludes }).catch((err: unknown) => {
       advisories.push({ kind: 'scan-error', message: err instanceof Error ? err.message : String(err) });
       return undefined;
     });
 
     if (graph !== undefined) {
+      uncertain = graph.uncertain;
       advisories.push(...buildUncertaintyAdvisories(graph.uncertain));
 
       const unmapped = graph.nodes.filter((n) => n.component === UNMAPPED_COMPONENT);
@@ -68,6 +87,28 @@ export async function runDoctor(rootDir: string): Promise<number> {
       kind: 'workspace-orphaned-package',
       message: `${pkg.dir} (package '${pkg.name}') is on disk but not covered by any pnpm-workspace.yaml glob.`,
     });
+  }
+
+  return { advisories, uncertain };
+}
+
+/**
+ * `align doctor` — read-only advisory survey (Stage 2; `--json` per-specifier uncertainty detail
+ * added Stage 3). Unlike `align check`, doctor never fails a build: it's a diagnostic tool for the
+ * humans/agents configuring align on a repo, not a gate. Exit code is always 0; every failure mode
+ * downgrades to an advisory instead of throwing, since a misconfigured repo is exactly the case
+ * doctor exists to help someone understand.
+ */
+export async function runDoctor(rootDir: string, options: DoctorOptions = { json: false }): Promise<number> {
+  const { advisories, uncertain } = await collectDoctorReport(rootDir);
+
+  if (options.json) {
+    const payload: DoctorJsonPayload = {
+      advisories,
+      uncertainty: { total: uncertain.length, detail: uncertain.slice(0, UNCERTAINTY_DETAIL_CAP) },
+    };
+    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    return 0;
   }
 
   printReport(advisories);

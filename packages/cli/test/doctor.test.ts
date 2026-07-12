@@ -64,4 +64,50 @@ describe('align doctor', () => {
     expect(logs.join('\n')).toContain('dead-alias');
     expect(logs.join('\n')).toContain('@dead/*');
   });
+
+  it('--json emits structured advisories plus capped per-specifier uncertainty detail (carried Stage 2 DX item)', async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-doctor-test-'));
+    fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });
+    // A non-literal dynamic import specifier is genuine graph uncertainty (ADR 004) — gives the
+    // JSON payload a real per-specifier entry to assert on, not just an empty array.
+    fs.writeFileSync(
+      path.join(tmpDir, 'src/index.ts'),
+      `export async function load(name: string) {\n  return import(\`./modules/\${name}.js\`);\n}\n`,
+      'utf8',
+    );
+    writeTsconfig(tmpDir, { compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext' } });
+    fs.writeFileSync(
+      path.join(tmpDir, 'align.config.ts'),
+      `import { defineProject } from '@align/core/dsl';\nexport default defineProject({ components: { app: 'src/**' } });\n`,
+      'utf8',
+    );
+    // Resolve `@align/core/dsl` so align.config.ts's own import doesn't add unrelated
+    // 'unresolvable-specifier' noise to this test's uncertainty assertions.
+    fs.symlinkSync(path.join(process.cwd(), 'node_modules'), path.join(tmpDir, 'node_modules'), 'dir');
+
+    const logs: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string) => {
+      logs.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+    let code: number;
+    try {
+      code = await runDoctor(tmpDir, { json: true });
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+    expect(code).toBe(0);
+
+    const payload = JSON.parse(logs.join('')) as {
+      advisories: { kind: string; message: string }[];
+      uncertainty: { total: number; detail: { file: string; specifier: string; line: number; reason: string }[] };
+    };
+    expect(Array.isArray(payload.advisories)).toBe(true);
+    expect(payload.uncertainty.total).toBeGreaterThanOrEqual(1);
+    expect(payload.uncertainty.detail.length).toBeLessThanOrEqual(50);
+    expect(payload.uncertainty.detail[0]).toMatchObject({ reason: 'non-literal-dynamic-specifier' });
+    expect(payload.uncertainty.detail[0]?.file).toBeDefined();
+    expect(payload.uncertainty.detail[0]?.line).toBeDefined();
+  });
 });

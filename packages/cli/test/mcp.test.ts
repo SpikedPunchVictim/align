@@ -1,3 +1,5 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -109,5 +111,88 @@ describe('align mcp — align_explain_rule', () => {
     const result = await client.callTool({ name: 'align_explain_rule', arguments: { ruleId: 'arch.no-cycles:repo' } });
     const payload = JSON.parse(textOf(result)) as { mermaid?: string };
     expect(payload.mermaid).toBeUndefined();
+  });
+});
+
+describe('align mcp — align_propose_rules (ADR 011 two-pass clarification)', () => {
+  it('pass 1 (doc_path only) classifies sections and never invents concerns for prose', async () => {
+    const client = await connectedClient(path.join(fixturesDir, 'build-app-mcp'));
+    const result = await client.callTool({
+      name: 'align_propose_rules',
+      arguments: { doc_path: 'docs/ARCHITECTURE-RULES.md' },
+    });
+    const payload = JSON.parse(textOf(result)) as {
+      sections: { anchor: string; tier: string }[];
+      deterministicRules: { id: string }[];
+      proseSections: { anchor: string; concerns: string[] }[];
+    };
+    const byAnchor = new Map(payload.sections.map((s) => [s.anchor, s.tier]));
+    expect(byAnchor.get('api-isolation')).toBe('bullet');
+    expect(byAnchor.get('no-cycles')).toBe('verbatim');
+    expect(byAnchor.get('module-size')).toBe('prose');
+    expect(payload.deterministicRules.map((r) => r.id).sort()).toEqual(['arch.no-cycles:repo', 'arch.no-dependency:api->ui']);
+    expect(payload.proseSections).toHaveLength(1);
+    expect(payload.proseSections[0]?.concerns).toEqual([]); // align never invents concerns
+  });
+
+  it('pass 2 (proposals, no apply) validates, grounds, and dry-runs without writing', async () => {
+    const rootDir = path.join(fixturesDir, 'build-app-mcp');
+    const client = await connectedClient(rootDir);
+    const result = await client.callTool({
+      name: 'align_propose_rules',
+      arguments: {
+        doc_path: 'docs/ARCHITECTURE-RULES.md',
+        proposals: [
+          {
+            section: 'api-isolation',
+            fragment: { kind: 'arch.no-dependency', from: 'api', to: 'ui' },
+            sourceLineRange: { startLine: 5, endLine: 5 },
+            sourceQuote: '`api` must not depend on `ui`.',
+          },
+        ],
+      },
+    });
+    const payload = JSON.parse(textOf(result)) as { accepted: { id: string }[]; diff: { added: string[] } };
+    expect(payload.accepted.map((r) => r.id)).toContain('arch.no-dependency:api->ui');
+    expect(fs.existsSync(path.join(rootDir, '.align/generated-rules.json'))).toBe(false);
+  });
+
+  it('flags an ungroundable proposal instead of accepting it', async () => {
+    const client = await connectedClient(path.join(fixturesDir, 'build-app-mcp'));
+    const result = await client.callTool({
+      name: 'align_propose_rules',
+      arguments: {
+        doc_path: 'docs/ARCHITECTURE-RULES.md',
+        proposals: [
+          {
+            section: 'module-size',
+            fragment: { kind: 'arch.no-dependency', from: 'api', to: 'nonexistent' },
+            sourceLineRange: { startLine: 13, endLine: 13 },
+            sourceQuote: 'modules should stay small',
+          },
+        ],
+      },
+    });
+    const payload = JSON.parse(textOf(result)) as { flaggedUngroundable: { reason: string }[] };
+    expect(payload.flaggedUngroundable.some((f) => f.reason === 'ungroundable-selector')).toBe(true);
+  });
+
+  it('{ apply: true } writes generated-rules.json, rules.lock.json, and the audit report', async () => {
+    const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-mcp-build-test-'));
+    fs.cpSync(path.join(fixturesDir, 'build-app-mcp'), rootDir, { recursive: true });
+    try {
+      const client = await connectedClient(rootDir);
+      const result = await client.callTool({
+        name: 'align_propose_rules',
+        arguments: { doc_path: 'docs/ARCHITECTURE-RULES.md', proposals: [], apply: true },
+      });
+      const payload = JSON.parse(textOf(result)) as { applied: boolean };
+      expect(payload.applied).toBe(true);
+      expect(fs.existsSync(path.join(rootDir, '.align/generated-rules.json'))).toBe(true);
+      expect(fs.existsSync(path.join(rootDir, '.align/rules.lock.json'))).toBe(true);
+      expect(fs.existsSync(path.join(rootDir, '.align/last-build-report.md'))).toBe(true);
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
   });
 });
