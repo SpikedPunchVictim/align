@@ -1,0 +1,210 @@
+[
+  {
+    "fingerprint": "14efe0574bc2a2e8",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/cli/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "51d581fc09afb970"
+  },
+  {
+    "fingerprint": "17292dad2a5f3011",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/agent/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "8809c97b55f338d5"
+  },
+  {
+    "fingerprint": "17e9cc58cd7d4379",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/cli/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "207faac5ac4b5d78"
+  },
+  {
+    "fingerprint": "185ae8865543f1c8",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/agent/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "918d03bcfc04b543"
+  },
+  {
+    "fingerprint": "1a74937aa5acdb3f",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/cli/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "c84b955c874dbd11"
+  },
+  {
+    "fingerprint": "22ba81897f096fbb",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/cli/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "d5667c316b0c0ca9"
+  },
+  {
+    "fingerprint": "32636ab006b75ee2",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/agent/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "207faac5ac4b5d78"
+  },
+  {
+    "fingerprint": "338cbe40bbbd4cb0",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/plugin-typescript/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "d2d3a37b38fb6b66"
+  },
+  {
+    "fingerprint": "3ea4644670c0c22b",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/cli/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "e19675e30cd56fe1"
+  },
+  {
+    "fingerprint": "416c565e4b95689f",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/core/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "207faac5ac4b5d78"
+  },
+  {
+    "fingerprint": "49b7605b509c526b",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/cli/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "c1ec03e9857a67be"
+  },
+  {
+    "fingerprint": "66cfcd4f55be790b",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/core/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "d5667c316b0c0ca9"
+  },
+  {
+    "fingerprint": "68ea1bee02bea026",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/cli/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "98379e232e33289c"
+  },
+  {
+    "fingerprint": "78a9098460bcaed8",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/plugin-typescript/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "bb860c98ea17a4a3"
+  },
+  {
+    "fingerprint": "84e25f1f01b02748",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/plugin-typescript/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "207faac5ac4b5d78"
+  },
+  {
+    "fingerprint": "87e428f4f4ca0ad4",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/agent/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "f5d1cc81b2cd82e3"
+  },
+  {
+    "fingerprint": "8c1a62933b3fc184",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "918d03bcfc04b543"
+  },
+  {
+    "fingerprint": "91b46f8913355c6d",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/cli/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "918d03bcfc04b543"
+  },
+  {
+    "fingerprint": "9b1716da7753d2af",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/plugin-typescript/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "51d581fc09afb970"
+  },
+  {
+    "fingerprint": "9fe69357554fa221",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/agent/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "d5667c316b0c0ca9"
+  },
+  {
+    "fingerprint": "a16ebd14442f9825",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "207faac5ac4b5d78"
+  },
+  {
+    "fingerprint": "a96fcad8fc9374c0",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/core/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "bb860c98ea17a4a3"
+  },
+  {
+    "fingerprint": "c0aaebe6c49393aa",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "d9c944c0b50e3e6f"
+  },
+  {
+    "fingerprint": "c0d391ef933b747f",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/agent/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "51d581fc09afb970"
+  },
+  {
+    "fingerprint": "d006f6eae09832d0",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "c42cf7842a362e54"
+  },
+  {
+    "fingerprint": "db26c8120dca7fd4",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/cli/package.json",
+    "acceptedAt": 1783891052720,
+    "acceptedBy": "manual",
+    "contentFingerprint": "8809c97b55f338d5"
+  }
+]

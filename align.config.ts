@@ -83,6 +83,19 @@ export default defineProject({
     c.custom
       .host('typesLayerIsLeaf')
       .because("packages/core/src/types/ is align's foundation layer (branded types, IR zod schema, Violation model) and must not acquire a dependency on any sibling subdirectory of packages/core/src/ — a sub-path-scoped invariant arch.layers/arch.no-dependency can't express at core's whole-component granularity (docs/proposals/rule-expansion-evaluation.md §A.2.2). Predicate registered in this file's hostRules export."),
+    // security.manifest gate dogfood (ADR 013, promoted 2026-07-12 on spike/MANIFEST_PROBE_REPORT.md
+    // probe evidence): align adopts its own two rules. `newDependencyGate` fingerprints every
+    // current runtime/dev dependency across root + every workspace member's package.json —
+    // `align init`/`baseline accept` seeds today's set once, so only a genuinely new dependency
+    // (e.g. the probe's own real-world catch, `@anthropic-ai/sdk` entering `packages/agent` in
+    // Stage 4) shows red going forward. `sourceHygiene` has zero pre-existing findings on align
+    // itself (probe-measured) — align's own deps are all registry/workspace-protocol.
+    c.security.manifest
+      .sourceHygiene()
+      .because('Non-registry dependency sources need explicit human sign-off before they enter the tree (spike/MANIFEST_PROBE_REPORT.md Rule 1).'),
+    c.security.manifest
+      .newDependencyGate()
+      .because('A newly added dependency is a genuinely new, externally-sourced surface worth a deliberate look before it merges (spike/MANIFEST_PROBE_REPORT.md Rule 7 — real historical catch: @anthropic-ai/sdk entering this repo in Stage 4).'),
   ],
 });
 
