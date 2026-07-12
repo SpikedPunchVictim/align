@@ -23,8 +23,24 @@ function stripProvenance(r: RuleIR): unknown {
   return rest;
 }
 
+/** Sorted-key JSON serialization (same technique as `diff.ts`'s `canonical`) — comparison must not
+ * depend on incidental object property insertion order between a DSL-constructed rule and a
+ * ground.ts-constructed one. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, val: unknown) => {
+    if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
+      const sorted: Record<string, unknown> = {};
+      for (const key of Object.keys(val as Record<string, unknown>).sort()) {
+        sorted[key] = (val as Record<string, unknown>)[key];
+      }
+      return sorted;
+    }
+    return val;
+  });
+}
+
 function structurallyEqual(a: RuleIR, b: RuleIR): boolean {
-  return JSON.stringify(stripProvenance(a)) === JSON.stringify(stripProvenance(b));
+  return canonical(stripProvenance(a)) === canonical(stripProvenance(b));
 }
 
 /**

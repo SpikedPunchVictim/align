@@ -1,0 +1,60 @@
+{
+  "irVersion": "1",
+  "docPath": "docs/ARCHITECTURE-RULES.md",
+  "docContentHash": "b5204f866bbf7d9e",
+  "builtAt": 1783844190126,
+  "sections": [
+    {
+      "anchor": "architecture-rules",
+      "headingText": "Architecture Rules",
+      "startLine": 1,
+      "endLine": 10,
+      "contentHash": "bc5dd527354a1744",
+      "tier": "prose",
+      "ruleIds": []
+    },
+    {
+      "anchor": "no-cycles",
+      "headingText": "No Cycles",
+      "startLine": 11,
+      "endLine": 16,
+      "contentHash": "8e631c8827894178",
+      "tier": "verbatim",
+      "ruleIds": [
+        "arch.no-cycles:repo"
+      ]
+    },
+    {
+      "anchor": "core-cannot-depend-on-plugin-typescript",
+      "headingText": "Core Cannot Depend On Plugin-TypeScript",
+      "startLine": 17,
+      "endLine": 20,
+      "contentHash": "aa6d4e13378ac5bb",
+      "tier": "bullet",
+      "ruleIds": [
+        "arch.no-dependency:core->pluginTypescript"
+      ]
+    },
+    {
+      "anchor": "core-cannot-depend-on-cli",
+      "headingText": "Core Cannot Depend On CLI",
+      "startLine": 21,
+      "endLine": 24,
+      "contentHash": "d5a2de6d723b1937",
+      "tier": "bullet",
+      "ruleIds": [
+        "arch.no-dependency:core->cli"
+      ]
+    },
+    {
+      "anchor": "future-direction",
+      "headingText": "Future Direction",
+      "startLine": 25,
+      "endLine": 30,
+      "contentHash": "cd6e53ce878f83f0",
+      "tier": "prose",
+      "ruleIds": []
+    }
+  ],
+  "generatedRulesContentHash": "c94c570f7f792158"
+}

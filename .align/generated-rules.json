@@ -1,0 +1,52 @@
+{
+  "irVersion": "1",
+  "docPath": "docs/ARCHITECTURE-RULES.md",
+  "generatedAt": 1783844190126,
+  "rules": [
+    {
+      "kind": "arch.no-cycles",
+      "id": "arch.no-cycles:repo",
+      "scope": "repo",
+      "includeTypeOnly": false,
+      "provenance": {
+        "because": "Enforced by docs/ARCHITECTURE-RULES.md:14: '{\"kind\":\"arch.no-cycles\",\"scope\":\"repo\"}'",
+        "sourceFile": "docs/ARCHITECTURE-RULES.md",
+        "sourceLineRange": {
+          "startLine": 14,
+          "endLine": 14
+        },
+        "sourceQuote": "{\"kind\":\"arch.no-cycles\",\"scope\":\"repo\"}"
+      }
+    },
+    {
+      "kind": "arch.no-dependency",
+      "id": "arch.no-dependency:core->pluginTypescript",
+      "from": "core",
+      "to": "pluginTypescript",
+      "provenance": {
+        "because": "Enforced by docs/ARCHITECTURE-RULES.md:19: '- **Rule**: `core` must not depend on `pluginTypescript`.'",
+        "sourceFile": "docs/ARCHITECTURE-RULES.md",
+        "sourceLineRange": {
+          "startLine": 19,
+          "endLine": 19
+        },
+        "sourceQuote": "- **Rule**: `core` must not depend on `pluginTypescript`."
+      }
+    },
+    {
+      "kind": "arch.no-dependency",
+      "id": "arch.no-dependency:core->cli",
+      "from": "core",
+      "to": "cli",
+      "provenance": {
+        "because": "Enforced by docs/ARCHITECTURE-RULES.md:23: '- **Rule**: `core` must not depend on `cli`.'",
+        "sourceFile": "docs/ARCHITECTURE-RULES.md",
+        "sourceLineRange": {
+          "startLine": 23,
+          "endLine": 23
+        },
+        "sourceQuote": "- **Rule**: `core` must not depend on `cli`."
+      }
+    }
+  ]
+}
