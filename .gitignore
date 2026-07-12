@@ -1,0 +1,8 @@
+node_modules/
+dist/
+out/
+.align/cache/
+test-apps/
+spike/out/
+*.tsbuildinfo
+.DS_Store

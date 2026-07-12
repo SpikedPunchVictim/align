@@ -1,0 +1,22 @@
+{
+  "name": "align-spike",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway spike: architecture-conformance verification over kluster (Stage S)",
+  "scripts": {
+    "scan": "tsx src/scan-kluster.ts",
+    "mcp": "tsx src/mcp.ts",
+    "client-test": "tsx src/client-test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "typescript": "^5.9.3",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0"
+  }
+}
