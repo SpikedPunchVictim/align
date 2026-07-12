@@ -34,6 +34,10 @@ describe('align init', () => {
     expect(claudeMd).toContain('<!-- align:start -->');
     expect(claudeMd).toContain('align_check');
 
+    // Carried Stage 3 affordance: align.config.ts gets the generated-rules auto-merge note too.
+    const configTs = fs.readFileSync(path.join(tmpDir, 'align.config.ts'), 'utf8');
+    expect(configTs).toContain('align:generated-rules-note:start');
+
     expect(await runCheck(tmpDir, { json: false })).toBe(0);
   });
 

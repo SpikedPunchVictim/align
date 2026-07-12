@@ -157,7 +157,7 @@ Dogfood: `docs/ARCHITECTURE-RULES.md` (1 fenced block + 2 bullets, plus two pros
 
 ## Stage 4: BYOK agent loop (ADR 010 + green≠correct guards)
 
-**Goal**: unchanged in substance from the pre-restage design: group-by-file, memoized raw-API FixProvider, edit-block apply pipeline (exact match + `nearLine`), mechanical post-format before commit, oscillation detection, git rails, terminal merge (`--pr` default), exported-symbol surface diff + zero-coverage refusal. **Status**: Not Started
+**Goal**: unchanged in substance from the pre-restage design: group-by-file, memoized raw-API FixProvider, edit-block apply pipeline (exact match + `nearLine`), mechanical post-format before commit, oscillation detection, git rails, terminal merge (`--pr` default), exported-symbol surface diff + zero-coverage refusal. Carries two approved Stage 3 affordances: check-output line for active generated rules + init/build-written config comment (visibility for the implicit merge). **Status**: In Progress (Sonnet agent)
 
 ## Stage 5: Growth path & reserve promotions
 

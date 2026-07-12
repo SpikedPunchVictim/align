@@ -28,7 +28,8 @@ import {
   type SourceRange,
 } from '@align/core';
 import { TypeScriptPlugin } from '@align/plugin-typescript';
-import { loadConfig } from '../config.js';
+import { loadConfig, CONFIG_FILENAME } from '../config.js';
+import { writeGeneratedRulesNote } from '../init/config-comment.js';
 import {
   readBaseline,
   readGeneratedRules,
@@ -212,6 +213,7 @@ export function writeBuildArtifacts(
   };
   const rawWritten = writeGeneratedRules(rootDir, generatedFile);
   const generatedRulesContentHash = sha256Hex(rawWritten);
+  writeGeneratedRulesNote(path.join(rootDir, CONFIG_FILENAME));
 
   if (options.acceptNewIntoBaseline && result.impact.addedNew.length > 0) {
     const store = new InMemoryBaselineStore(readBaseline(rootDir));

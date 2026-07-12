@@ -1,5 +1,5 @@
 {
-  "name": "@align/core",
+  "name": "@align/agent",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,14 +7,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./dsl": {
-      "types": "./dist/dsl/index.d.ts",
-      "default": "./dist/dsl/index.js"
-    },
-    "./fix": {
-      "types": "./dist/fix/index.d.ts",
-      "default": "./dist/fix/index.js"
     }
   },
   "scripts": {
@@ -23,10 +15,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@align/core": "workspace:*",
+    "@anthropic-ai/sdk": "^0.68.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "typescript": "^5.6.3",
-    "vitest": "^2.1.4"
+    "vitest": "^2.1.4",
+    "@types/node": "^22.9.0"
   }
 }

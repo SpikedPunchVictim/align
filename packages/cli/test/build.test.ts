@@ -58,6 +58,52 @@ describe('align build --apply', () => {
     expect(await runCheck(tmpDir, { json: false })).toBe(0);
   });
 
+  it('writes an idempotent note into align.config.ts about the generated-rules auto-merge (carried Stage 3 affordance)', async () => {
+    tmpDir = copyFixture('build-app');
+    const configPath = path.join(tmpDir, 'align.config.ts');
+    const before = fs.readFileSync(configPath, 'utf8');
+
+    await runBuild(tmpDir, { apply: true, ifChanged: false, verify: false, acceptNewIntoBaseline: false });
+    const afterFirst = fs.readFileSync(configPath, 'utf8');
+    expect(afterFirst).toContain('align:generated-rules-note:start');
+    expect(afterFirst).toContain('merged into');
+    expect(afterFirst.length).toBeGreaterThan(before.length);
+
+    // Re-running --apply must not duplicate the block.
+    await runBuild(tmpDir, { apply: true, ifChanged: false, verify: false, acceptNewIntoBaseline: false });
+    const afterSecond = fs.readFileSync(configPath, 'utf8');
+    expect(afterSecond.split('align:generated-rules-note:start')).toHaveLength(2);
+  });
+
+  it('surfaces "+N rules from <doc> (built <date>)" in `align check` output once rules are generated', async () => {
+    tmpDir = copyFixture('build-app');
+    await runBuild(tmpDir, { apply: true, ifChanged: false, verify: false, acceptNewIntoBaseline: false });
+
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = (msg: string) => logs.push(String(msg));
+    try {
+      await runCheck(tmpDir, { json: false });
+    } finally {
+      console.log = originalLog;
+    }
+    expect(logs.some((l) => /\+2 rules from docs\/ARCHITECTURE-RULES\.md \(built \d{4}-\d{2}-\d{2}\)/.test(l))).toBe(true);
+
+    const stdoutChunks: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string) => {
+      stdoutChunks.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      await runCheck(tmpDir, { json: true });
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+    const payload = JSON.parse(stdoutChunks.join('')) as { generatedRules?: { count: number; doc: string } };
+    expect(payload.generatedRules).toEqual({ count: 2, doc: 'docs/ARCHITECTURE-RULES.md', builtAt: expect.any(String) });
+  });
+
   it('a violation of a generated rule quotes the doc file:lines in the violation message', async () => {
     tmpDir = copyFixture('build-app');
     await runBuild(tmpDir, { apply: true, ifChanged: false, verify: false, acceptNewIntoBaseline: false });

@@ -7,6 +7,7 @@ import { detectComponents } from '../init/detect-components.js';
 import { suggestLayers } from '../init/suggest-layers.js';
 import { renderConfig } from '../init/render-config.js';
 import { writeAgentInstructions } from '../init/claude-md.js';
+import { writeGeneratedRulesNote } from '../init/config-comment.js';
 import { createOrchestrator } from '../composition-root.js';
 import { CONFIG_FILENAME, loadConfig } from '../config.js';
 import { writeBaseline, ensureAlignDir } from '../align-dir.js';
@@ -37,6 +38,7 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     console.log(`${CONFIG_FILENAME} already exists — leaving it as-is.`);
   }
 
+  writeGeneratedRulesNote(configPath);
   writeAgentInstructions(rootDir);
   console.log('Wrote/updated CLAUDE.md agent-instructions block.');
 

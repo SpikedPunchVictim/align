@@ -1,8 +1,19 @@
 import { buildMcpCheckPayload, renderViolationMessage, type CheckRun } from '@align/core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
-import { readBaseline, writeBaseline } from '../align-dir.js';
+import { readBaseline, readGeneratedRules, readRulesLock, writeBaseline } from '../align-dir.js';
 import { verifyFrozenRules } from './build.js';
+
+/** Carried Stage 3 affordance (approved ahead of Stage 4): when generated rules are active
+ * (`.align/generated-rules.json` + `.align/rules.lock.json` both present, ADR 011), surface a
+ * one-line summary so a human/agent reading `align check` output knows doc-built rules are in
+ * force without having to separately inspect `.align/`. */
+function generatedRulesSummary(rootDir: string): { readonly count: number; readonly doc: string; readonly builtAt: string } | undefined {
+  const generated = readGeneratedRules(rootDir);
+  const lock = readRulesLock(rootDir);
+  if (generated === undefined || lock === undefined || generated.rules.length === 0) return undefined;
+  return { count: generated.rules.length, doc: lock.docPath, builtAt: new Date(lock.builtAt).toISOString().slice(0, 10) };
+}
 
 export interface CheckOptions {
   readonly json: boolean;
@@ -44,17 +55,21 @@ export async function runCheck(rootDir: string, options: CheckOptions): Promise<
     };
   }
 
+  const generatedRules = generatedRulesSummary(rootDir);
+
   if (options.json) {
     const payload = buildMcpCheckPayload(effectiveRun);
-    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    const withGeneratedRules =
+      generatedRules === undefined ? payload : { ...payload, generatedRules: { ...generatedRules } };
+    process.stdout.write(`${JSON.stringify(withGeneratedRules, null, 2)}\n`);
     return effectiveRun.verdict === 'green' ? 0 : 1;
   }
 
-  printHuman(effectiveRun);
+  printHuman(effectiveRun, generatedRules);
   return effectiveRun.verdict === 'green' ? 0 : 1;
 }
 
-function printHuman(run: CheckRun): void {
+function printHuman(run: CheckRun, generatedRules?: { readonly count: number; readonly doc: string; readonly builtAt: string }): void {
   for (const gate of run.gates) {
     const label = `${gate.gate}`.padEnd(12);
     if (gate.status === 'error') {
@@ -67,6 +82,10 @@ function printHuman(run: CheckRun): void {
     }
     const suffix = gate.baselinedCount > 0 ? ` (${gate.baselinedCount} baselined)` : '';
     console.log(`  ${label} ${gate.status === 'green' ? 'green ' : 'RED   '} ${gate.violations.length} violation(s)${suffix}`);
+  }
+
+  if (generatedRules !== undefined) {
+    console.log(`  +${generatedRules.count} rules from ${generatedRules.doc} (built ${generatedRules.builtAt})`);
   }
 
   const violations = run.gates.flatMap((g) => g.violations);
