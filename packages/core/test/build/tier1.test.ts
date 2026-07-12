@@ -18,6 +18,17 @@ describe('extractFencedAlignBlocks', () => {
     expect(fragments[0]?.sourceQuote).toContain('"kind":"arch.no-dependency"');
   });
 
+  it('parses an arch.metric (max-LOC) ```align block into a RuleFragment for free (no tier-1 code change needed)', () => {
+    const doc = ['## Size', '', '```align', '{"kind":"arch.metric","target":"api","metric":"loc","max":800}', '```', ''].join('\n');
+    const { sections } = parseMarkdownDoc(doc);
+    const section = sections[0];
+    if (section === undefined) throw new Error('unreachable');
+    const { fragments, errors } = extractFencedAlignBlocks(doc.split('\n'), section, docPath);
+    expect(errors).toHaveLength(0);
+    expect(fragments).toHaveLength(1);
+    expect(fragments[0]?.fragment).toEqual({ kind: 'arch.metric', target: 'api', metric: 'loc', max: 800 });
+  });
+
   it('flags invalid JSON as invalid-fragment, never throwing', () => {
     const doc = ['## Isolation', '', '```align', '{not valid json', '```', ''].join('\n');
     const { sections } = parseMarkdownDoc(doc);

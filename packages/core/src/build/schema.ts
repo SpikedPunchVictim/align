@@ -51,11 +51,22 @@ const customHostFragmentSchema = z.object({
   because: z.string().optional(),
 });
 
+// `arch.metric` (max-LOC only, promoted 2026-07-12 on kluster ruleset evidence,
+// IMPLEMENTATION_PLAN.md's Promotion log) — mirrors the DSL's `.maxLinesPerFile(max)` (dsl/index.ts).
+const metricFragmentSchema = z.object({
+  kind: z.literal('arch.metric'),
+  target: componentRefText,
+  metric: z.literal('loc'),
+  max: z.number().int().positive(),
+  because: z.string().optional(),
+});
+
 export const ruleFragmentSchema = z.discriminatedUnion('kind', [
   noDependencyFragmentSchema,
   noCyclesFragmentSchema,
   layersFragmentSchema,
   customHostFragmentSchema,
+  metricFragmentSchema,
 ]);
 
 export type RuleFragment = z.infer<typeof ruleFragmentSchema>;

@@ -56,6 +56,31 @@ describe('defineProject', () => {
     expect(ir.rules[0]).toMatchObject({ kind: 'arch.no-cycles', scope: 'repo', includeTypeOnly: false });
   });
 
+  it('maxLinesPerFile compiles to a single arch.metric rule with metric: "loc" (ADR 002 vocabulary promotion)', () => {
+    const ir = defineProject({
+      components: { api: 'application/api/**' },
+      rules: (c) => [c.arch.component(c.api).maxLinesPerFile(800)],
+    });
+    expect(ir.rules).toHaveLength(1);
+    expect(ir.rules[0]).toMatchObject({
+      kind: 'arch.metric',
+      id: 'arch.metric:loc:api',
+      target: 'api',
+      metric: 'loc',
+      max: 800,
+    });
+  });
+
+  it('maxLinesPerFile supports .because() like every rule', () => {
+    const ir = defineProject({
+      components: { api: 'application/api/**' },
+      rules: (c) => [c.arch.component(c.api).maxLinesPerFile(800).because('Route/service files should decompose before they become build-worker.ts-shaped.')],
+    });
+    expect(ir.rules[0]?.provenance.because).toBe(
+      'Route/service files should decompose before they become build-worker.ts-shaped.',
+    );
+  });
+
   it('.because() hoists into provenance', () => {
     const ir = defineProject({
       components: { api: 'application/api/**', ui: 'application/ui/**' },
@@ -88,6 +113,14 @@ describe('defineProject', () => {
         c.arch.component(c.core).isIsolated(),
         c.arch.noCycles(),
       ],
+    });
+    expect(ir).toMatchSnapshot();
+  });
+
+  it('golden snapshot: maxLinesPerFile compiles to a stable arch.metric IR shape', () => {
+    const ir = defineProject({
+      components: { api: 'application/api/**' },
+      rules: (c) => [c.arch.component(c.api).maxLinesPerFile(800).because('Route/service files should decompose before they become build-worker.ts-shaped.')],
     });
     expect(ir).toMatchSnapshot();
   });

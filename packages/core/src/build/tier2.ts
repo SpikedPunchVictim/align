@@ -17,6 +17,11 @@ const NO_CYCLES_BARE_RE = /^no\s+cycles?\.?$/i;
 const NO_CYCLES_SUBJECT_RE = /^(.+?)\s+must\s+have\s+no\s+cycles?\.?$/i;
 const NO_DEPENDENCY_RE = /^(.+?)\s+must\s+not\s+depend\s+on\s+(.+?)\.?$/i;
 const LAYERS_RE = /^(.+?)\s+(?:may|can)\s+only\s+depend\s+on\s+(.+?)\.?$/i;
+// `arch.metric` (max-LOC only, promoted 2026-07-12 on kluster ruleset evidence,
+// IMPLEMENTATION_PLAN.md's Promotion log). Mirrors the DSL's `.maxLinesPerFile(max)`
+// (dsl/index.ts) — only the `loc` metric has a tier-2 grammar; fan-in/fan-out/instability stay
+// reserved pending their own evidence and gain their own bullet grammar when promoted.
+const MAX_LOC_RE = /^files\s+in\s+(.+?)\s+must\s+stay\s+under\s+(\d+)\s+lines?\.?$/i;
 
 /** Splits a target-list clause ("`core`, `cli` and `pluginTypescript`") into raw tokens.
  * Backtick/quote stripping happens at grounding time (`ground.ts`), not here — tier 2 stays a
@@ -30,7 +35,8 @@ function splitTokens(clause: string): string[] {
 
 /**
  * Parses one bullet's sentence into a `RuleFragment` per ADR 011's constrained grammar: component
- * names, "must not depend on", "no cycles", "layers." Returns `undefined` for a sentence that
+ * names, "must not depend on", "no cycles", "layers," "must stay under N lines" (`arch.metric`,
+ * max-LOC only). Returns `undefined` for a sentence that
  * doesn't match any known pattern — the caller flags it as `unparsed-bullet` rather than guessing.
  * Deterministic regex matching only — no LLM, no fuzzy matching (this stage's CLI build path is
  * zero-LLM by design; see the Stage 3 report's ADR-011-ambiguity resolutions).
@@ -70,6 +76,17 @@ export function parseBulletSentence(sentence: string): RuleFragment | undefined 
     return { kind: 'arch.layers', layers: [{ layer, canDependOn }] };
   }
 
+  const maxLoc = MAX_LOC_RE.exec(sentence);
+  if (maxLoc?.[1] !== undefined && maxLoc[2] !== undefined) {
+    const targetTokens = splitTokens(maxLoc[1]);
+    const target = targetTokens[0];
+    const max = Number.parseInt(maxLoc[2], 10);
+    // Single target only — same "a RuleFragment can express one grounded target" discipline as
+    // `NO_DEPENDENCY_RE`/`LAYERS_RE` above.
+    if (target === undefined || targetTokens.length > 1 || !Number.isFinite(max)) return undefined;
+    return { kind: 'arch.metric', target, metric: 'loc', max };
+  }
+
   return undefined;
 }
 
@@ -104,7 +121,7 @@ export function extractStructuredBullets(
         sourceLineRange: range,
         sourceQuote: line.trim(),
         reason: 'unparsed-bullet',
-        detail: `Bullet did not match the tier-2 grammar (component names + "must not depend on" / "no cycles" / "may only depend on"): "${sentence}"`,
+        detail: `Bullet did not match the tier-2 grammar (component names + "must not depend on" / "no cycles" / "may only depend on" / "must stay under N lines"): "${sentence}"`,
       });
       continue;
     }

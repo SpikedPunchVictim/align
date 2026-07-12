@@ -66,6 +66,35 @@ describe('groundFragment', () => {
     expect(result.rule).toMatchObject({ kind: 'arch.no-cycles', scope: 'repo', id: 'arch.no-cycles:repo' });
   });
 
+  it('builds a fully-provenanced arch.metric rule (max-LOC)', () => {
+    const result = groundFragment(
+      { kind: 'arch.metric', target: '`core`', metric: 'loc', max: 800 },
+      'size',
+      docPath,
+      range,
+      'Files in `core` must stay under 800 lines.',
+      components,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    expect(result.rule).toMatchObject({ kind: 'arch.metric', id: 'arch.metric:loc:core', target: 'core', metric: 'loc', max: 800 });
+    expect(result.rule.provenance.sourceFile).toBe(docPath);
+  });
+
+  it('flags an arch.metric fragment with an ungroundable target', () => {
+    const result = groundFragment(
+      { kind: 'arch.metric', target: '`nonexistent`', metric: 'loc', max: 800 },
+      'size',
+      docPath,
+      range,
+      'quote',
+      components,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.flagged.reason).toBe('ungroundable-selector');
+  });
+
   it('prepends an author-supplied because to the auto-populated Enforced-by text', () => {
     const result = groundFragment(
       { kind: 'arch.no-dependency', from: 'core', to: 'cli', because: 'Keeps core headless.' },

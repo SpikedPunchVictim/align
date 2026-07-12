@@ -87,3 +87,33 @@ exports[`defineProject > golden snapshot: a realistic layered project compiles t
   ],
 }
 `;
+
+exports[`defineProject > golden snapshot: maxLinesPerFile compiles to a stable arch.metric IR shape 1`] = `
+{
+  "components": {
+    "api": {
+      "allowEmpty": false,
+      "name": "api",
+      "selector": {
+        "kind": "glob",
+        "patterns": [
+          "application/api/**",
+        ],
+      },
+    },
+  },
+  "irVersion": "1",
+  "rules": [
+    {
+      "id": "arch.metric:loc:api",
+      "kind": "arch.metric",
+      "max": 800,
+      "metric": "loc",
+      "provenance": {
+        "because": "Route/service files should decompose before they become build-worker.ts-shaped.",
+      },
+      "target": "api",
+    },
+  ],
+}
+`;

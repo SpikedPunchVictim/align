@@ -40,6 +40,28 @@ describe('parseBulletSentence', () => {
     });
   });
 
+  it('parses a max-LOC ("must stay under N lines") sentence (arch.metric, loc-only)', () => {
+    expect(parseBulletSentence('Files in `api` must stay under 800 lines')).toEqual({
+      kind: 'arch.metric',
+      target: '`api`',
+      metric: 'loc',
+      max: 800,
+    });
+  });
+
+  it('parses a max-LOC sentence with the trailing period and singular "line" tolerated', () => {
+    expect(parseBulletSentence('files in api must stay under 1 line.')).toEqual({
+      kind: 'arch.metric',
+      target: 'api',
+      metric: 'loc',
+      max: 1,
+    });
+  });
+
+  it('returns undefined for an unsupported multi-target max-LOC sentence', () => {
+    expect(parseBulletSentence('Files in `api` and `ui` must stay under 800 lines')).toBeUndefined();
+  });
+
   it('returns undefined for a sentence outside the grammar', () => {
     expect(parseBulletSentence('the system should be modular')).toBeUndefined();
   });

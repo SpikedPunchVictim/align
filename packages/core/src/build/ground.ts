@@ -121,6 +121,19 @@ export function groundFragment(
       });
       return { ok: true, rule };
     }
+    case 'arch.metric': {
+      const target = groundComponentRef(fragment.target, components);
+      if (target === undefined) return flag(section, sourceFile, sourceLineRange, sourceQuote, `unknown component '${fragment.target}'`);
+      const rule = ruleIRSchema.parse({
+        kind: 'arch.metric',
+        id: toRuleId(`arch.metric:${fragment.metric}:${target}`),
+        target,
+        metric: fragment.metric,
+        max: fragment.max,
+        provenance,
+      });
+      return { ok: true, rule };
+    }
     default: {
       const exhaustive: never = fragment;
       throw new Error(`unhandled fragment kind: ${JSON.stringify(exhaustive)}`);

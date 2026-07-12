@@ -69,6 +69,61 @@ describe('align check', () => {
   });
 });
 
+describe('align check — arch.metric (max-LOC, promoted 2026-07-12 on kluster ruleset evidence)', () => {
+  it('a file over the max-LOC threshold fires a violation naming actual vs. max LOC; a file under it stays clean', async () => {
+    tmpDir = copyFixture('simple-app-metric-violation');
+    const logs: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string) => {
+      logs.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+    let code: number;
+    try {
+      code = await runCheck(tmpDir, { json: true });
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+    expect(code).toBe(1);
+    const payload = JSON.parse(logs.join('')) as {
+      verdict: string;
+      violations: { kind: string; file: string; ruleId: string }[];
+    };
+    expect(payload.verdict).toBe('red');
+    expect(payload.violations).toHaveLength(1); // only src/big.ts (8 lines); src/small.ts (4 lines) stays clean
+    const v = payload.violations[0];
+    expect(v?.kind).toBe('metric');
+    expect(v?.file).toBe('src/big.ts');
+    expect(v?.ruleId).toBe('arch.metric:loc:app');
+
+    const human = await (async (): Promise<string> => {
+      const humanLogs: string[] = [];
+      const originalLog = console.log;
+      // eslint-disable-next-line no-console
+      console.log = ((...args: unknown[]) => {
+        humanLogs.push(args.map(String).join(' '));
+      }) as typeof console.log;
+      try {
+        await runCheck(tmpDir, { json: false });
+      } finally {
+        console.log = originalLog;
+      }
+      return humanLogs.join('\n');
+    })();
+    expect(human).toContain('src/big.ts');
+    expect(human).toContain('8 lines');
+    expect(human).toContain('5 lines');
+    expect(human).toContain('arch.metric:loc:app');
+  });
+
+  it('fixing the file (shrinking it under the threshold) turns the next check green with no restart', async () => {
+    tmpDir = copyFixture('simple-app-metric-violation');
+    expect(await runCheck(tmpDir, { json: false })).toBe(1);
+    fs.writeFileSync(path.join(tmpDir, 'src/big.ts'), `export function a(): number {\n  return 1;\n}\n`, 'utf8');
+    expect(await runCheck(tmpDir, { json: false })).toBe(0);
+  });
+});
+
 describe('align check — stale generated-rules.json false-green guard (RULESET_REPORT.md §0)', () => {
   function writeGeneratedRules(dir: string, rules: unknown[]): void {
     fs.mkdirSync(path.join(dir, '.align'), { recursive: true });

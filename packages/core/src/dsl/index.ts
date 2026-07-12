@@ -6,6 +6,7 @@
 import { toComponentName, toRuleId, type ComponentName, type RuleId } from '../types/branded.js';
 import type {
   ArchLayersRule,
+  ArchMetricRule,
   ArchNoCyclesRule,
   ArchNoDependencyRule,
   ComponentDefinitionIR,
@@ -94,6 +95,12 @@ interface LayerRuleBuilder {
 interface ComponentRuleBuilder {
   /** no other component may depend on this one, and it depends on none */
   isIsolated(): RuleBuilder;
+  /** every file classified to this component must stay at or under `max` lines — `arch.metric`
+   * (max-LOC), promoted 2026-07-12 on kluster ruleset evidence (IMPLEMENTATION_PLAN.md's Promotion
+   * log: two 2,100+-line files were structurally invisible to every dependency/cycle rule). Only
+   * the `loc` metric is promoted — `fan-in`/`fan-out`/`instability` verbs stay reserved pending
+   * their own evidence. */
+  maxLinesPerFile(max: number): RuleBuilder;
 }
 
 interface NoCyclesOptions {
@@ -168,6 +175,19 @@ function makeArchFactory(allComponents: readonly ComponentToken[]): ArchFactory 
               });
             }
             return rules;
+          });
+        },
+        maxLinesPerFile(max: number): RuleBuilder {
+          return ruleBuilder((provenance) => {
+            const rule: ArchMetricRule = {
+              kind: 'arch.metric',
+              id: toRuleId(`arch.metric:loc:${token.name}`),
+              target: token.name,
+              metric: 'loc',
+              max,
+              provenance,
+            };
+            return [rule];
           });
         },
       };
