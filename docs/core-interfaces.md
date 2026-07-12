@@ -105,6 +105,14 @@ type Violation =
       readonly component: ComponentName;
       readonly value: number;
       readonly threshold: number;
+    })
+  // 'custom' — custom.host registration surface (§B.0, promoted 2026-07-12, ADR 002 amendment).
+  // `detail` is the registered predicate's own `HostViolation.message`; `fixHint` is always
+  // `{ code: 'manual-review' }` (no structural fix align itself can propose for host-defined logic).
+  | (ViolationBase & {
+      readonly kind: 'custom';
+      readonly hostRuleName: string;
+      readonly detail: string;
     });
   // Reserved variant (arrives with its rule kind — reserve pending evidence, docs/ir-schema.md):
   // 'naming' { actual, pattern }
@@ -250,6 +258,50 @@ type RuleEvaluator<TRule extends RuleIR = RuleIR> = (
   graph: DependencyGraph,
   components: Readonly<Record<ComponentName, ComponentDefinitionIR>>,
 ) => readonly Violation[];
+```
+
+## Host predicate registration surface (custom.host, §B.0, ADR 002 amendment)
+
+`custom.host`'s evaluator (`evaluateCustomHost`) is the one `RuleEvaluator` that also takes an
+injected, host-side registry — a fourth parameter the other kinds ignore — but stays just as pure
+and I/O-free as every other evaluator: predicates read the already-scanned graph, they never touch
+the filesystem/network/clock themselves.
+
+```ts
+// Narrow, typed predicate input — pure data in, HostViolation[] out.
+interface HostRuleContext {
+  readonly graph: DependencyGraph;
+  readonly componentOf: (file: RepoRelativePath) => ComponentName | undefined;
+  readonly files: readonly RepoRelativePath[];
+}
+
+// Minimal predicate output — core (never the predicate) fingerprints, defaults fixHint to
+// 'manual-review', and hoists the rule's .because(). range/snippet default to line 1 / the
+// scanned node's first-line snippet when omitted.
+interface HostViolation {
+  readonly file: RepoRelativePath;
+  readonly range?: SourceRange;
+  readonly snippet?: string;
+  readonly message: string;
+}
+
+type HostPredicate = (ctx: HostRuleContext) => readonly HostViolation[];
+type HostPredicateRegistry = ReadonlyMap<string, HostPredicate>;
+
+// Authored in align.config.ts's sibling `hostRules` export (never passed through `defineProject`
+// itself — RulesetIR is portable JSON, ADR 002, and functions can't survive that boundary), keyed
+// by the name a `c.custom.host(name)` rule references. The CLI composition root extracts this map
+// from the loaded config and injects it into `GateOrchestrator`; core never constructs one itself.
+
+function evaluateCustomHost(
+  rule: CustomHostRule,
+  graph: DependencyGraph,
+  predicates: HostPredicateRegistry,
+): readonly Violation[];
+// Throws UnknownHostRuleError if `rule.hostRuleName` isn't in `predicates` (defense in depth —
+// the orchestrator's `validateHostRules` guard step should already have caught this) and
+// HostPredicateExecutionError if the predicate itself throws — never a silent pass, never an
+// unattributed crash (ADR 008 amendment, "the reference-validity invariant"'s sibling).
 ```
 
 ## Gate model

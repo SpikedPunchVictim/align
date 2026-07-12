@@ -99,3 +99,38 @@ per consumer.
   `interface`, generics with genuine reuse). The IR's *portability discipline* is validated indirectly: the
   spike never needed a non-portable rule kind, so `ts.*`/`custom.host` remain a designed-but-unexercised
   escape hatch (Design Reserve posture for actual usage, not for the schema slot).
+
+## Amendment (2026-07-12): `custom.host` registration surface
+
+The escape hatch named in the Decision section above stayed schema-only through commit `064edaf`: nothing
+could register a predicate against a `custom.host` rule, so every instance hard-errored at check time and was
+refused at grounding time (defensively fixed, not functionally closed — the false-green this fix closed is
+logged in the reference-validity amendment, ADR 008). Promoted per
+`docs/proposals/rule-expansion-evaluation.md` §B.0 (evidence: the `064edaf` finding itself, a HIGH-severity
+vacuous-pass caught in a live `align_propose_rules` session).
+
+**Registration lives beside the config, not inside `RulesetIR`.** `align.config.ts` gains a sibling named
+export — `export const hostRules: Record<string, HostPredicate> = { name: (ctx) => HostViolation[] }` — the
+same pattern `excludes` already established (`packages/cli/src/config.ts`'s documented deviation: a scan-time
+concern read from a named export, never widening `defineProject`'s return type). This was chosen over adding
+a `hostRules` field to `defineProject`'s config object because `defineProject` returns `RulesetIR`, which is
+parsed once by zod and must stay JSON-portable (this ADR's locked decision #1) — a config field containing
+functions would either have to be silently dropped before the `.parse()` call or force the schema to model
+something it structurally can't represent. Keeping predicates in a sibling export means `defineProject` never
+touches them at all; cross-referencing happens by name only (`hostRuleName`), validated at check time the
+same way every other reference is (`validateHostRules`, extended to the reference-validity invariant, ADR 008
+amendment) rather than at DSL-build time.
+
+**The DSL surface**: `c.custom.host('name')` (mirroring `c.arch.layer(...)`/`c.arch.component(...)`'s
+sub-method style) builds the `{ kind: 'custom.host', hostRuleName: 'name', portable: false, ... }` IR node —
+`custom` was already reserved as a factory-name collision guard (this ADR's original text); this promotion
+implements it rather than adding a new reservation.
+
+**Predicate shape**: `HostPredicate = (ctx: HostRuleContext) => readonly HostViolation[]`, pure (no I/O) over
+`{ graph, componentOf, files }` — the same `DependencyGraph` every other `RuleEvaluator` already receives, so
+a predicate author never needs a second scan or a different data shape. `evaluateCustomHost` (core,
+`rules/host-rules.ts`) normalizes each `HostViolation` into a full `Violation` — fingerprinted, baseline-able,
+`fixHint: { code: 'manual-review' }` by default — and a predicate that throws surfaces as gate `error`
+(`HostPredicateExecutionError`), never a silent pass; see `docs/core-interfaces.md`'s "Host predicate
+registration surface" section for the full shapes and `docs/ir-schema.md`'s `custom.host` entry for the
+check/propose-time wiring.

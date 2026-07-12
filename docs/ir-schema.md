@@ -240,6 +240,31 @@ The escape hatch for host-defined logic the IR doesn't model as a first-class ki
 `portable: false` — it is never silently treated as portable, and it is not a dumping ground for kinds that
 should really be promoted to a first-class `arch.*`/`ts.*` discriminant; see ADR 002.
 
+**Registration surface, promoted 2026-07-12** (docs/proposals/rule-expansion-evaluation.md §B.0, user-approved):
+the IR shape above was always a schema slot, but through commit `064edaf` there was nothing to register a
+predicate *against* — every `custom.host` rule hard-errored at check time (`UnknownHostRuleError`) and was
+refused at grounding time (`unregistered-host-rule`), defensively, not functionally. This promotion is
+infrastructure, not a new rule kind: `align.config.ts` gains a sibling named export, `hostRules: Record<string,
+HostPredicate>` (never passed through `defineProject` — `RulesetIR` is portable JSON, and predicate functions
+can't survive that parse boundary), and the DSL gains `c.custom.host('name')` to reference an entry in it.
+`HostPredicate = (ctx: HostRuleContext) => readonly HostViolation[]` is a pure function (no I/O) over
+`{ graph, componentOf, files }` — the same already-scanned `DependencyGraph` every other evaluator sees.
+`GateOrchestrator`'s constructor takes the registered-predicate map (built by the CLI composition root from
+`align.config.ts`'s `hostRules` export) and:
+1. Passes its key set to `validateHostRules` (the check-time guard, unchanged mechanism, now fed a real set
+   instead of always-empty) — an unregistered name still hard-errors, exactly as before.
+2. Dispatches `custom.host` rules to `evaluateCustomHost`, which normalizes each `HostViolation` into a full
+   `Violation` (`kind: 'custom'`, fingerprinted, baseline-able, `fixHint: { code: 'manual-review' }` by
+   default) — the same machinery every portable rule kind gets.
+3. Catches a predicate that throws and re-raises `HostPredicateExecutionError`, which the orchestrator turns
+   into gate `error` (never a silent pass) — the reference-validity invariant's sibling (ADR 008 amendment).
+
+A registered name is now groundable at propose/build time too (`ground.ts`'s `custom.host` case checks the
+same registered-predicate set); `export-ir`/`align build` continue marking these rules `portable: false`
+regardless — registration makes a rule *evaluatable*, not portable. See `docs/core-interfaces.md`'s "Host
+predicate registration surface" section for the full type shapes, and ADR 002's amendment for the design
+rationale (why a sibling export instead of a `defineProject` field).
+
 ### `arch.metric` (max-LOC only)
 
 **Promoted 2026-07-12** (user-approved) from the reserved-discriminants list below, on evidence from the
