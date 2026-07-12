@@ -52,5 +52,6 @@ function collectComponentNames(rule: { kind: string; [k: string]: unknown }): st
     const layers = rule['layers'] as readonly { layer: string; canDependOn: readonly string[] }[];
     return [...new Set(layers.flatMap((l) => [l.layer, ...l.canDependOn]))];
   }
+  if (rule.kind === 'arch.metric') return [String(rule['target'])];
   return [];
 }

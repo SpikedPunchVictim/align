@@ -355,6 +355,8 @@ function ruleSelectors(rule: DryRunResult['proposal']['rules'][number]): Record<
       return { layers: rule.layers };
     case 'custom.host':
       return { hostRuleName: rule.hostRuleName };
+    case 'arch.metric':
+      return { target: rule.target, metric: rule.metric, max: rule.max };
     default:
       return {};
   }

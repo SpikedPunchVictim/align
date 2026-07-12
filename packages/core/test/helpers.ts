@@ -1,8 +1,14 @@
 import { toComponentName, toRepoRelativePath } from '../src/types/branded.js';
 import type { DependencyGraph, DependencyGraphEdge, DependencyGraphNode, EdgeKind } from '../src/types/graph.js';
 
-export function node(file: string, component: string, loc = 10): DependencyGraphNode {
-  return { file: toRepoRelativePath(file), component: toComponentName(component), loc, exports: [] };
+export function node(file: string, component: string, loc = 10, snippet?: string): DependencyGraphNode {
+  return {
+    file: toRepoRelativePath(file),
+    component: toComponentName(component),
+    loc,
+    exports: [],
+    snippet: snippet ?? `// ${file}`,
+  };
 }
 
 export function edge(

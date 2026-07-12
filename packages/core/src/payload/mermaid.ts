@@ -10,6 +10,8 @@ import type { CycleEdge, Violation } from '../types/violation.js';
  *   `BREAK: <specifier>` instead of a normal solid arrow.
  * - `no-dependency` / `layers`: the two-node offending edge, component/layer names alongside the
  *   concrete files, labeled with the forbidden specifier.
+ * - `metric`: a single node (there is no offending edge — the violation is file-level, not
+ *   import-direction-level) labeled with the component, file, and measured-vs-max lines.
  */
 export function buildViolationMermaid(violation: Violation): string {
   switch (violation.kind) {
@@ -21,6 +23,8 @@ export function buildViolationMermaid(violation: Violation): string {
       );
     case 'layers':
       return fence(edgeDiagram(violation.fromLayer, violation.fromFile, violation.toLayer, violation.toFile, violation.specifier));
+    case 'metric':
+      return fence(metricDiagram(violation.component, violation.file, violation.value, violation.threshold));
     default: {
       const exhaustive: never = violation;
       throw new Error(`unhandled violation kind: ${JSON.stringify(exhaustive)}`);
@@ -68,6 +72,10 @@ function edgeDiagram(fromLabel: string, fromFile: string, toLabel: string, toFil
     `  b["${escapeLabel(toLabel)}<br/>${escapeLabel(toFile)}"]`,
     `  a -->|"${escapeLabel(specifier)} (forbidden)"| b`,
   ].join('\n');
+}
+
+function metricDiagram(component: string, file: string, value: number, threshold: number): string {
+  return ['graph LR', `  a["${escapeLabel(component)}<br/>${escapeLabel(file)}<br/>${value} lines (max ${threshold})"]`].join('\n');
 }
 
 function escapeLabel(s: string): string {

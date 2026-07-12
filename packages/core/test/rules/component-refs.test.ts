@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { UnknownComponentRefError, validateRuleComponentRefs } from '../../src/rules/component-refs.js';
-import type { ArchLayersRule, ArchNoCyclesRule, ArchNoDependencyRule, ComponentDefinitionIR, CustomHostRule, RuleIR } from '../../src/types/ir.js';
+import type {
+  ArchLayersRule,
+  ArchMetricRule,
+  ArchNoCyclesRule,
+  ArchNoDependencyRule,
+  ComponentDefinitionIR,
+  CustomHostRule,
+  RuleIR,
+} from '../../src/types/ir.js';
 import type { ComponentName } from '../../src/types/branded.js';
 
 function components(...names: string[]): Readonly<Record<ComponentName, ComponentDefinitionIR>> {
@@ -24,6 +32,7 @@ describe('validateRuleComponentRefs', () => {
         provenance: {},
       } satisfies ArchLayersRule,
       { kind: 'custom.host', id: 'r5', hostRuleName: 'whatever', portable: false, provenance: {} } satisfies CustomHostRule,
+      { kind: 'arch.metric', id: 'r6', target: 'api', metric: 'loc', max: 800, provenance: {} } satisfies ArchMetricRule,
     ];
     expect(() => validateRuleComponentRefs(rules, components('api', 'ui'))).not.toThrow();
   });
@@ -77,5 +86,21 @@ describe('validateRuleComponentRefs', () => {
   it('custom.host rules carry no ComponentRef and never throw', () => {
     const rules: RuleIR[] = [{ kind: 'custom.host', id: 'r', hostRuleName: 'x', portable: false, provenance: {} } satisfies CustomHostRule];
     expect(() => validateRuleComponentRefs(rules, components())).not.toThrow();
+  });
+
+  it('throws UnknownComponentRefError naming the rule id and the missing component for arch.metric `target`', () => {
+    const rules: RuleIR[] = [
+      { kind: 'arch.metric', id: 'ghost-metric', target: 'ghost', metric: 'loc', max: 800, provenance: {} } satisfies ArchMetricRule,
+    ];
+    expect(() => validateRuleComponentRefs(rules, components('api'))).toThrow(UnknownComponentRefError);
+    try {
+      validateRuleComponentRefs(rules, components('api'));
+      expect.fail('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(UnknownComponentRefError);
+      const e = err as UnknownComponentRefError;
+      expect(e.ruleId).toBe('ghost-metric');
+      expect(e.componentName).toBe('ghost');
+    }
   });
 });

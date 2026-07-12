@@ -25,7 +25,13 @@ export type FixHint =
   | { readonly code: 'relocate-shared-code'; readonly from: ComponentName; readonly to: ComponentName }
   | { readonly code: 'invert-dependency'; readonly owner: ComponentName }
   | { readonly code: 'break-cycle-edge'; readonly suggestedEdge: CycleEdge }
-  | { readonly code: 'manual-review' };
+  | { readonly code: 'manual-review' }
+  // `arch.metric` (max-LOC), promoted 2026-07-12 on kluster ruleset evidence
+  // (IMPLEMENTATION_PLAN.md's Promotion log) — un-reserved from the comment below.
+  | { readonly code: 'split-file'; readonly file: RepoRelativePath };
+  // Reserved fix-hint codes arrive with their rule kinds (reserve, docs/ir-schema.md):
+  // 'rename-to-match-pattern' (arch.naming) · 'reduce-fan-in' / 'reduce-fan-out' (arch.metric,
+  // fan-in/fan-out/instability — still reserved pending their own evidence)
 
 interface ViolationBase {
   readonly id: ViolationId; // snippet-hash fingerprint (ADR 006) — stable under unrelated edits
@@ -65,7 +71,18 @@ export type Violation =
       readonly toFile: RepoRelativePath;
       readonly specifier: string;
       readonly line: number;
+    })
+  | (ViolationBase & {
+      readonly kind: 'metric';
+      // Literal today (only `loc` is promoted, IMPLEMENTATION_PLAN.md's Promotion log); grows to a
+      // union alongside `RuleIR`'s `arch.metric.metric` when fan-in/fan-out/instability graduate.
+      readonly metric: 'loc';
+      readonly component: ComponentName;
+      readonly value: number;
+      readonly threshold: number;
     });
+  // Reserved variant (arrives with its rule kind — reserve pending evidence, docs/ir-schema.md):
+  // 'naming' { actual, pattern }
 
 /**
  * Human-facing prose is rendered at the surface, never stored on the model (ADR 007 rule 2:
@@ -95,6 +112,11 @@ export function renderViolationMessage(v: Violation): string {
         `${v.fromFile} (layer '${v.fromLayer}') imports ${v.toFile} (layer '${v.toLayer}') via ` +
         `'${v.specifier}' at line ${v.line}, which rule '${v.ruleId}' forbids.` +
         (v.because !== undefined ? ` ${v.because}` : '')
+      );
+    case 'metric':
+      return (
+        `${v.file} (component '${v.component}') is ${v.value} lines, exceeding rule '${v.ruleId}'s ` +
+        `max-${v.metric} limit of ${v.threshold} lines.` + (v.because !== undefined ? ` ${v.because}` : '')
       );
     default: {
       const exhaustive: never = v;

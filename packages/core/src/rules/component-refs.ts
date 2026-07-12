@@ -46,6 +46,9 @@ function* componentRefsOf(rule: RuleIR): Generator<string> {
         yield* layerDef.canDependOn;
       }
       return;
+    case 'arch.metric':
+      yield rule.target;
+      return;
     case 'custom.host':
       return;
     default: {

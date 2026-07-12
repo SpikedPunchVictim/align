@@ -76,11 +76,26 @@ const customHostSchema = z.object({
   provenance: ruleProvenanceSchema,
 });
 
+// `metric` is a single literal today (`'loc'` only — promoted 2026-07-12 on kluster ruleset
+// evidence, IMPLEMENTATION_PLAN.md's Promotion log). `fan-in`/`fan-out`/`instability` remain
+// reserved (docs/ir-schema.md) pending their own evidence; this is written as a growable
+// discriminant (`z.literal('loc')` now, `z.union([...])` when a second metric is promoted) rather
+// than a bare `z.string()`, so adding one is additive, never a retrofit of this shape.
+const archMetricSchema = z.object({
+  kind: z.literal('arch.metric'),
+  id: ruleId,
+  target: componentRef,
+  metric: z.literal('loc'),
+  max: z.number().int().positive(),
+  provenance: ruleProvenanceSchema,
+});
+
 export const ruleIRSchema = z.discriminatedUnion('kind', [
   archNoDependencySchema,
   archNoCyclesSchema,
   archLayersSchema,
   customHostSchema,
+  archMetricSchema,
 ]);
 
 export const rulesetIRSchema = z.object({
@@ -98,3 +113,4 @@ export type ArchNoDependencyRule = z.infer<typeof archNoDependencySchema>;
 export type ArchNoCyclesRule = z.infer<typeof archNoCyclesSchema>;
 export type ArchLayersRule = z.infer<typeof archLayersSchema>;
 export type CustomHostRule = z.infer<typeof customHostSchema>;
+export type ArchMetricRule = z.infer<typeof archMetricSchema>;

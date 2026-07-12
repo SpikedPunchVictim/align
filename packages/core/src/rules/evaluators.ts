@@ -1,6 +1,6 @@
 import type { ComponentName, RepoRelativePath } from '../types/branded.js';
 import { toRuleId } from '../types/branded.js';
-import type { ComponentDefinitionIR, ArchLayersRule, ArchNoCyclesRule, ArchNoDependencyRule, RuleIR } from '../types/ir.js';
+import type { ArchLayersRule, ArchMetricRule, ArchNoCyclesRule, ArchNoDependencyRule, ComponentDefinitionIR, RuleIR } from '../types/ir.js';
 import type { DependencyGraph, DependencyGraphEdge, EdgeKind } from '../types/graph.js';
 import type { CycleEdge, Violation } from '../types/violation.js';
 import { computeFingerprint } from '../baseline/fingerprint.js';
@@ -163,6 +163,39 @@ export const evaluateLayers: RuleEvaluator<ArchLayersRule> = (rule, graph) => {
 };
 
 /**
+ * `arch.metric` (max-LOC only, promoted 2026-07-12 on kluster ruleset evidence —
+ * IMPLEMENTATION_PLAN.md's Promotion log: two 2,100+-line files were structurally invisible to
+ * every dependency/cycle rule). One violation per file classified to `rule.target` whose `loc`
+ * exceeds `rule.max` — `loc` is already on every `DependencyGraphNode` (no new scanning).
+ */
+export const evaluateMetric: RuleEvaluator<ArchMetricRule> = (rule, graph) => {
+  const violations: Violation[] = [];
+  for (const node of graph.nodes) {
+    if (node.component !== rule.target) continue;
+    if (node.loc <= rule.max) continue;
+
+    const id = computeFingerprint(['metric', rule.id, node.file]);
+    violations.push({
+      id,
+      ruleId: toRuleId(rule.id),
+      category: 'architecture',
+      severity: 'error',
+      file: node.file,
+      range: { startLine: 1, endLine: 1 },
+      snippet: node.snippet,
+      fixHint: { code: 'split-file', file: node.file },
+      ...becauseField(rule.provenance.because),
+      kind: 'metric',
+      metric: rule.metric,
+      component: node.component,
+      value: node.loc,
+      threshold: rule.max,
+    });
+  }
+  return violations;
+};
+
+/**
  * Exhaustive dispatcher: a new `RuleIR` discriminant without a case here is a compile error
  * (never-check, CODING_BEST_PRACTICES.md §17.2), not a silent no-op.
  */
@@ -178,6 +211,8 @@ export function evaluateRule(
       return evaluateNoCycles(rule, graph, components);
     case 'arch.layers':
       return evaluateLayers(rule, graph, components);
+    case 'arch.metric':
+      return evaluateMetric(rule, graph, components);
     case 'custom.host':
       // v1 has no host-defined rule execution mechanism (ADR 002's escape hatch is a schema
       // slot for a future need, not an exercised v1 capability) — zero violations, not an error.

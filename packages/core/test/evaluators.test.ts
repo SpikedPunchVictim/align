@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateLayers, evaluateNoCycles, evaluateNoDependency } from '../src/rules/evaluators.js';
-import type { ArchLayersRule, ArchNoCyclesRule, ArchNoDependencyRule } from '../src/types/ir.js';
+import { evaluateLayers, evaluateMetric, evaluateNoCycles, evaluateNoDependency } from '../src/rules/evaluators.js';
+import type { ArchLayersRule, ArchMetricRule, ArchNoCyclesRule, ArchNoDependencyRule } from '../src/types/ir.js';
 import { edge, graph, node } from './helpers.js';
 
 describe('evaluateNoDependency', () => {
@@ -147,5 +147,78 @@ describe('evaluateLayers', () => {
     );
     const rule: ArchLayersRule = { kind: 'arch.layers', id: 'r1', layers: [{ layer: 'cli', canDependOn: [] }], provenance: {} };
     expect(evaluateLayers(rule, g, {})).toHaveLength(0);
+  });
+});
+
+describe('evaluateMetric', () => {
+  it('flags a file over the max-LOC threshold', () => {
+    const g = graph([node('api/big.ts', 'api', 900)], []);
+    const rule: ArchMetricRule = { kind: 'arch.metric', id: 'r1', target: 'api', metric: 'loc', max: 800, provenance: {} };
+    const violations = evaluateMetric(rule, g, {});
+    expect(violations).toHaveLength(1);
+    const v = violations[0];
+    expect(v?.kind).toBe('metric');
+    if (v?.kind === 'metric') {
+      expect(v.file).toBe('api/big.ts');
+      expect(v.component).toBe('api');
+      expect(v.metric).toBe('loc');
+      expect(v.value).toBe(900);
+      expect(v.threshold).toBe(800);
+      expect(v.fixHint).toEqual({ code: 'split-file', file: 'api/big.ts' });
+    }
+  });
+
+  it('does not flag a file under the max-LOC threshold', () => {
+    const g = graph([node('api/small.ts', 'api', 100)], []);
+    const rule: ArchMetricRule = { kind: 'arch.metric', id: 'r1', target: 'api', metric: 'loc', max: 800, provenance: {} };
+    expect(evaluateMetric(rule, g, {})).toHaveLength(0);
+  });
+
+  it('does not flag a file exactly at the max-LOC threshold (boundary is inclusive)', () => {
+    const g = graph([node('api/exact.ts', 'api', 800)], []);
+    const rule: ArchMetricRule = { kind: 'arch.metric', id: 'r1', target: 'api', metric: 'loc', max: 800, provenance: {} };
+    expect(evaluateMetric(rule, g, {})).toHaveLength(0);
+  });
+
+  it('flags a file one line over the max-LOC threshold', () => {
+    const g = graph([node('api/over.ts', 'api', 801)], []);
+    const rule: ArchMetricRule = { kind: 'arch.metric', id: 'r1', target: 'api', metric: 'loc', max: 800, provenance: {} };
+    expect(evaluateMetric(rule, g, {})).toHaveLength(1);
+  });
+
+  it('ignores files outside the target component', () => {
+    const g = graph([node('ui/big.ts', 'ui', 900)], []);
+    const rule: ArchMetricRule = { kind: 'arch.metric', id: 'r1', target: 'api', metric: 'loc', max: 800, provenance: {} };
+    expect(evaluateMetric(rule, g, {})).toHaveLength(0);
+  });
+
+  it('respects allowEmpty target components (zero nodes, zero violations, no throw)', () => {
+    const g = graph([], []);
+    const rule: ArchMetricRule = { kind: 'arch.metric', id: 'r1', target: 'api', metric: 'loc', max: 800, provenance: {} };
+    expect(evaluateMetric(rule, g, {})).toHaveLength(0);
+  });
+
+  it('produces a stable fingerprint unaffected by unrelated nodes', () => {
+    const g1 = graph([node('api/big.ts', 'api', 900)], []);
+    const g2 = graph([node('api/big.ts', 'api', 900), node('ui/other.ts', 'ui', 50)], []);
+    const rule: ArchMetricRule = { kind: 'arch.metric', id: 'r1', target: 'api', metric: 'loc', max: 800, provenance: {} };
+    const id1 = evaluateMetric(rule, g1, {})[0]?.id;
+    const id2 = evaluateMetric(rule, g2, {})[0]?.id;
+    expect(id1).toBeDefined();
+    expect(id1).toBe(id2);
+  });
+
+  it('hoists .because() onto the violation', () => {
+    const g = graph([node('api/big.ts', 'api', 900)], []);
+    const rule: ArchMetricRule = {
+      kind: 'arch.metric',
+      id: 'r1',
+      target: 'api',
+      metric: 'loc',
+      max: 800,
+      provenance: { because: 'Route/service files should decompose before they become build-worker.ts-shaped.' },
+    };
+    const violations = evaluateMetric(rule, g, {});
+    expect(violations[0]?.because).toBe('Route/service files should decompose before they become build-worker.ts-shaped.');
   });
 });

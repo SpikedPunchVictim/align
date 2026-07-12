@@ -7,6 +7,14 @@ export interface DependencyGraphNode {
   readonly component: ComponentName;
   readonly loc: number;
   readonly exports: readonly string[];
+  // DEVIATION from docs/core-interfaces.md: added `snippet` (the file's first line, trimmed), for
+  // `arch.metric` (max-LOC, promoted 2026-07-12 on kluster ruleset evidence — see
+  // IMPLEMENTATION_PLAN.md's Promotion log). Same rationale as `DependencyGraphEdge.snippet` below:
+  // `Violation.snippet` is a required field (ADR 006/007) and `RuleEvaluator` is a pure, I/O-free
+  // function over the graph, so a file-level (not edge-level) violation needs its anchor text
+  // captured at scan time. The scanner already holds the file's lines in memory when computing
+  // `loc`; capturing line 1 costs nothing extra.
+  readonly snippet: string;
 }
 
 export interface DependencyGraphEdge {
