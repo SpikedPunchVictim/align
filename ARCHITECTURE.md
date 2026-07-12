@@ -128,6 +128,7 @@ package that imports both and wires them together (§5).
 | Components registry (path-prefix primary, package-name complement, `ComponentRef`) | ✅ | | |
 | TS/JS scanner: scan-and-discard, pnpm realpath, workspace-name fallback, type-only edges, nearest-tsconfig, package-entry→source mapping | ✅ | | |
 | `arch.no-dependency` / `no-cycles` / `layers` engine, per-edge cycle detail | ✅ | | |
+| `arch.metric` (max-LOC only) — promoted 2026-07-12 on kluster ruleset evidence | ✅ | | |
 | Baseline store (+move detection, `--rule`) | ✅ | | |
 | MCP server (`align_check/status/violations/explain_rule`), CLI (`init/check/baseline`) | ✅ | | |
 | Token-economy payload rules (structured-only, priority sort, dedup, caps/pagination) | ✅ | | |
@@ -139,7 +140,7 @@ package that imports both and wires them together (§5).
 | `align build` doc→ruleset pipeline, lockfile, provenance | | Stage 4 (contract fixed now, ADR 011) | |
 | Rule-conflict masking + oscillation detection | | Stage 3/4 (precedence fixed now, ADR 012) | |
 | BYOK agent loop | | Stage 4 | |
-| `arch.naming` / `arch.metric` rule kinds | | | Reserve — demoted at sign-off review; not spike-exercised, reserved discriminants in `docs/ir-schema.md` |
+| `arch.naming` rule kind; `arch.metric`'s fan-in/fan-out/instability metrics | | | Reserve — `arch.naming` demoted at sign-off review (not spike-exercised); `arch.metric`'s `loc` metric was promoted to v1 above (2026-07-12), these three metrics were not and still carry the promotion-on-evidence burden — reserved discriminants in `docs/ir-schema.md` |
 | Six-component content-hash cache + impact-scoped re-verification (CIA) | | | Reserve — promotion trigger ~10s/check (plan §Design Reserve) |
 | Plugin sessions (in-memory AST updates) | | | Reserve — same evidence |
 | Conservative Graph Mode ≥80%-of-edges heuristic | | | Reserve — no firing evidence at n=2 |

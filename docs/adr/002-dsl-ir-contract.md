@@ -40,8 +40,18 @@ export default defineProject({
 | `isIsolated()` | no other component may depend on this one, and it depends on none |
 | `canOnlyDependOn(...refs)` | dependencies outside this allowlist are violations |
 | `cannotDependOn(...refs)` | dependencies on this denylist are violations; everything else is permitted |
+| `maxLinesPerFile(max)` | every file in this component must stay at or under `max` lines |
 
 No `.not()`, no `.doesNotDependOn().unless()`. A rule reads as one sentence with one polarity.
+
+**Promotion note (2026-07-12, user-approved)**: `maxLinesPerFile(max)` is the DSL surface for
+`arch.metric` (max-LOC only), promoted from Design Reserve on kluster ruleset evidence — two
+2,100+-line files structurally invisible to every dependency/cycle verb in this table
+(`test-apps/kluster/RULESET_REPORT.md` §6.2, `IMPLEMENTATION_PLAN.md`'s Promotion log). It's the one
+verb in this table that isn't dependency-direction-shaped; it was added under `c.arch.component(x)`
+(alongside `isIsolated()`) rather than a new top-level factory, since `arch.metric`'s reserved
+sibling metrics (`fan-in`/`fan-out`/`instability`) stay unexercised and a `c.metrics` factory would
+be premature until at least one of them is promoted too.
 
 **`.because(text)` hoisting**: `.because('The API must remain headless.')` attaches to the `RuleIR` node as
 `provenance.because` (see `docs/ir-schema.md`) and is the single field feeding: terminal violation output,

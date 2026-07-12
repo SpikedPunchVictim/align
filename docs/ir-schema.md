@@ -1,13 +1,18 @@
 # align IR Schema — `irVersion: "1"`
 
 Scope: this document specifies the v1 rule kinds only (`components`, `arch.no-dependency`,
-`arch.no-cycles`, `arch.layers`, `custom.host`), plus the provenance metadata block every rule carries
-regardless of kind. Growth-path rule kinds (`arch.naming`, `arch.metric`, `lint.tool`, `format.tool`,
-`types.tool`, `tests.tool`, `security.secrets`, `security.tool`, the `ts.*` namespace) are **reserved
-discriminants only** — listed by name at the end, not specified, per `ARCHITECTURE.md` §4 and
-`IMPLEMENTATION_PLAN.md`. `arch.naming` and `arch.metric` were demoted to reserve at sign-off review:
-neither was exercised by the spike (both repos were evaluated only against `no-dependency`/`no-cycles`),
-so they carry the same promotion-on-evidence burden as every other reserve item.
+`arch.no-cycles`, `arch.layers`, `custom.host`, `arch.metric`), plus the provenance metadata block
+every rule carries regardless of kind. Growth-path rule kinds (`arch.naming`, `lint.tool`,
+`format.tool`, `types.tool`, `tests.tool`, `security.secrets`, `security.tool`, the `ts.*` namespace)
+are **reserved discriminants only** — listed by name at the end, not specified, per `ARCHITECTURE.md`
+§4 and `IMPLEMENTATION_PLAN.md`. `arch.naming` and `arch.metric` were both demoted to reserve at
+sign-off review: neither was exercised by the spike (both repos were evaluated only against
+`no-dependency`/`no-cycles`). **`arch.metric` (max-LOC only) was promoted back to v1 on 2026-07-12**,
+user-approved, on evidence from the kluster ruleset exercise — two 2,100+-line files structurally
+invisible to all 19 dependency/cycle rules (`test-apps/kluster/RULESET_REPORT.md` §6.2,
+`IMPLEMENTATION_PLAN.md`'s Promotion log). The promotion is scoped to the `loc` metric only —
+`fan-in`/`fan-out`/`instability` remain reserved discriminants pending their own evidence, and
+`arch.naming` remains in reserve unchanged.
 
 Runtime validation of this shape is zod (ADR 002); the JSON Schema below is the portable, tool-agnostic
 description of the same contract — the substrate for the cache hash, the `align_explain_rule` payload, and
@@ -105,7 +110,8 @@ the baseline contract (locked decision #1, `IMPLEMENTATION_PLAN.md`).
         { "$ref": "#/$defs/archNoDependency" },
         { "$ref": "#/$defs/archNoCycles" },
         { "$ref": "#/$defs/archLayers" },
-        { "$ref": "#/$defs/customHost" }
+        { "$ref": "#/$defs/customHost" },
+        { "$ref": "#/$defs/archMetric" }
       ]
     },
     "archNoDependency": {
@@ -171,6 +177,22 @@ the baseline contract (locked decision #1, `IMPLEMENTATION_PLAN.md`).
         "portable": { "const": false },
         "provenance": { "$ref": "#/$defs/ruleProvenance" }
       }
+    },
+    "archMetric": {
+      "type": "object",
+      "required": ["kind", "id", "target", "metric", "max", "provenance"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "arch.metric" },
+        "id": { "$ref": "#/$defs/ruleId" },
+        "target": { "$ref": "#/$defs/componentRef" },
+        "metric": {
+          "const": "loc",
+          "description": "Growable discriminant: `loc` is the only promoted metric (2026-07-12, kluster ruleset evidence). fan-in/fan-out/instability remain reserved — this becomes a `oneOf` of literals when the next one is promoted, never a retrofit of this shape."
+        },
+        "max": { "type": "integer", "minimum": 1 },
+        "provenance": { "$ref": "#/$defs/ruleProvenance" }
+      }
     }
   }
 }
@@ -218,6 +240,28 @@ The escape hatch for host-defined logic the IR doesn't model as a first-class ki
 `portable: false` — it is never silently treated as portable, and it is not a dumping ground for kinds that
 should really be promoted to a first-class `arch.*`/`ts.*` discriminant; see ADR 002.
 
+### `arch.metric` (max-LOC only)
+
+**Promoted 2026-07-12** (user-approved) from the reserved-discriminants list below, on evidence from the
+kluster ruleset exercise: `application/api/src/services/spec/build-worker.ts` (2,109 lines) and a routes
+file (2,220 lines) were structurally invisible to every one of that ruleset's 19 dependency/cycle rules —
+file size is orthogonal to import direction, and nothing else in `irVersion: "1"` could flag it
+(`test-apps/kluster/RULESET_REPORT.md` §6.2). Forbids any file classified to component `target` from
+exceeding `max` lines of the given `metric`.
+
+**Scope of this promotion — `loc` only**: `metric` is a single literal (`"loc"`) today, deliberately
+written as a growable discriminant (a `const` now, a `oneOf` of literals later) rather than a bare string,
+so promoting `fan-in`/`fan-out`/`instability` is additive — a new literal option plus new evaluator logic,
+never a retrofit of this shape. Those three remain reserved discriminants (below) pending their own
+evidence; this promotion does not carry them along.
+
+**Evaluation**: for every file in the `DependencyGraph` whose node resolves to component `target` with
+`loc > max`, emit one `Violation` (kind `metric`, category `architecture`) naming the file, its actual
+line count, and `max`. `loc` was already captured on every `DependencyGraphNode` (no new scanning); the
+required `Violation.snippet` field is the file's first line (`DependencyGraphNode.snippet`, captured at
+scan time for the same reason `DependencyGraphEdge.snippet` exists — see `docs/core-interfaces.md`'s
+deviation note). `fixHint` is `{ code: 'split-file', file }`.
+
 ### Provenance block (all kinds)
 
 `because` is the DSL's hoisted `.because(text)` call. `sourceFile`/`sourceLineRange`/`sourceQuote` are
@@ -227,8 +271,10 @@ duplicated elsewhere in the IR.
 
 ## Reserved discriminants (growth path — name only, not specified here)
 
-`arch.naming` · `arch.metric` (demoted at sign-off review — not spike-exercised; promoted when a real repo
-demands them) · `lint.tool` · `format.tool` · `types.tool` · `tests.tool` · `security.secrets` ·
-`security.tool` · the `ts.*` namespace (flagged non-portable, `portable: false`, per ADR 002). Full design
-for each lives in `IMPLEMENTATION_PLAN.md`; they are not part of `irVersion: "1"`'s v1 rule-kind surface
-and adding one is an `irVersion` bump or an additive union member, not a retrofit of the shapes above.
+`arch.naming` (demoted at sign-off review — not spike-exercised; promoted when a real repo demands it) ·
+`arch.metric`'s `fan-in`/`fan-out`/`instability` metrics (the `loc` metric was promoted 2026-07-12 — see
+`arch.metric` above; these three still carry the same promotion-on-evidence burden) · `lint.tool` ·
+`format.tool` · `types.tool` · `tests.tool` · `security.secrets` · `security.tool` · the `ts.*` namespace
+(flagged non-portable, `portable: false`, per ADR 002). Full design for each lives in
+`IMPLEMENTATION_PLAN.md`; they are not part of `irVersion: "1"`'s v1 rule-kind surface and adding one is
+an `irVersion` bump or an additive union member, not a retrofit of the shapes above.

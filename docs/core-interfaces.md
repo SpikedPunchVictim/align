@@ -49,9 +49,13 @@ type FixHint =
   | { readonly code: 'relocate-shared-code'; readonly from: ComponentName; readonly to: ComponentName }
   | { readonly code: 'invert-dependency'; readonly owner: ComponentName }
   | { readonly code: 'break-cycle-edge'; readonly suggestedEdge: CycleEdge }
-  | { readonly code: 'manual-review' };
+  | { readonly code: 'manual-review' }
+  // 'split-file' un-reserved 2026-07-12 — arch.metric (max-LOC) promotion, IMPLEMENTATION_PLAN.md's
+  // Promotion log.
+  | { readonly code: 'split-file'; readonly file: RepoRelativePath };
   // Reserved fix-hint codes arrive with their rule kinds (reserve, docs/ir-schema.md):
-  // 'rename-to-match-pattern' (arch.naming) · 'split-file' / 'reduce-fan-in' / 'reduce-fan-out' (arch.metric)
+  // 'rename-to-match-pattern' (arch.naming) · 'reduce-fan-in' / 'reduce-fan-out' (arch.metric's
+  // fan-in/fan-out metrics — still reserved pending their own evidence)
 
 interface ViolationBase {
   readonly id: ViolationId;          // snippet-hash fingerprint (ADR 006) — stable under unrelated edits
@@ -91,9 +95,19 @@ type Violation =
       readonly toFile: RepoRelativePath;
       readonly specifier: string;
       readonly line: number;
+    })
+  // 'metric' un-reserved 2026-07-12 — arch.metric (max-LOC) promotion, IMPLEMENTATION_PLAN.md's
+  // Promotion log. `metric` is a literal today (`'loc'` only); grows to a union alongside
+  // RuleIR's `arch.metric.metric` when fan-in/fan-out/instability are promoted.
+  | (ViolationBase & {
+      readonly kind: 'metric';
+      readonly metric: 'loc';
+      readonly component: ComponentName;
+      readonly value: number;
+      readonly threshold: number;
     });
-  // Reserved variants (arrive with their rule kinds — reserve pending evidence, docs/ir-schema.md):
-  // 'naming' { actual, pattern } · 'metric' { metric, value, threshold }
+  // Reserved variant (arrives with its rule kind — reserve pending evidence, docs/ir-schema.md):
+  // 'naming' { actual, pattern }
 
 // A rendering function, not a stored field — ADR 007. Lives at the CLI/MCP surface layer.
 declare function renderViolationMessage(v: Violation): string;
@@ -142,10 +156,19 @@ type RuleIR =
       readonly kind: 'custom.host'; readonly id: RuleId;
       readonly hostRuleName: string; readonly portable: false;
       readonly provenance: RuleProvenance;
+    }
+  | {
+      // Promoted 2026-07-12 (user-approved, kluster ruleset evidence — IMPLEMENTATION_PLAN.md's
+      // Promotion log). `metric` is a growable literal: `'loc'` only today, a union when
+      // fan-in/fan-out/instability graduate (still reserved, see below).
+      readonly kind: 'arch.metric'; readonly id: RuleId;
+      readonly target: ComponentRef; readonly metric: 'loc'; readonly max: number;
+      readonly provenance: RuleProvenance;
     };
   // Reserved discriminants (name only, not implemented in v1 — docs/ir-schema.md):
-  // 'arch.naming' | 'arch.metric' (demoted at sign-off review — not spike-exercised)
+  // 'arch.naming' (demoted at sign-off review — not spike-exercised)
   // 'lint.tool' | 'format.tool' | 'types.tool' | 'tests.tool' | 'security.secrets' | 'security.tool' | 'ts.*'
+  // arch.metric's fan-in / fan-out / instability metrics (loc was promoted; these still need evidence)
 
 interface RulesetIR {
   readonly irVersion: '1';
