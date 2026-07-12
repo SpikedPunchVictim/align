@@ -21,7 +21,7 @@ describe('GateOrchestrator', () => {
       rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
     });
     const registry = new StaticPluginRegistry([
-      fakePlugin(() => graph([node('application/api/a.ts', 'api')], [])),
+      fakePlugin(() => graph([node('application/api/a.ts', 'api'), node('application/ui/b.ts', 'ui')], [])),
     ]);
     const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
     const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -114,31 +114,42 @@ describe('GateOrchestrator', () => {
     expect(archGate?.errorMessage).toContain('ghost');
   });
 
-  it(
-    'adjacent gap (RULESET_REPORT.md §0, out of scope for this fix): a rule whose component is ' +
-      'declared and known-valid but currently matches zero scanned files still evaluates green, ' +
-      "not error — `validateComponents` (components/registry.ts, ADR 003's " +
-      'empty-selector-fails-by-default) is not wired into `GateOrchestrator.check` or any other ' +
-      'production path (confirmed dead code, exercised only by its own unit test), so this ' +
-      "specific vacuous-pass shape is NOT closed by this commit's `validateRuleComponentRefs` " +
-      "fix (that fix only covers a ComponentRef naming a component absent from the registry " +
-      'entirely, not one present but empty). Locking in current behavior here so a future fix ' +
-      'has a red test to turn green, rather than silently leaving the gap untested.',
-    async () => {
-      const ruleset = defineProject({
-        components: { api: 'application/api/**', ui: 'application/ui/**' },
-        rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
-      });
-      const registry = new StaticPluginRegistry([
-        // `ui` is a declared, valid component name, but nothing in this scan's file set
-        // classifies as `ui` — its selector matches zero files this run.
-        fakePlugin(() => graph([node('application/api/a.ts', 'api')], [])),
-      ]);
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
-      const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
-      expect(run.verdict).toBe('green'); // documents the gap, not the desired end state
-    },
-  );
+  it('reports architecture gate error (never green) when a declared component has zero classified files (ADR 003, false-green guard)', async () => {
+    const ruleset = defineProject({
+      components: { api: 'application/api/**', ui: 'application/ui/**' },
+      rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
+    });
+    const registry = new StaticPluginRegistry([
+      // `ui` is a declared, valid component name, but nothing in this scan classifies as `ui` —
+      // its rules would evaluate vacuously green. This is the orchestrator-level,
+      // plugin-independent half of ADR 003's empty-selector-fails-by-default doctrine (the
+      // TypeScript scanner separately enforces the selector-based half via `validateComponents`);
+      // it also covers a component fully shadowed by an earlier first-match-wins selector, which
+      // selector-based validation cannot see.
+      fakePlugin(() => graph([node('application/api/a.ts', 'api')], [])),
+    ]);
+    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+    const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+    expect(run.verdict).toBe('error');
+    const archGate = run.gates.find((g) => g.gate === 'architecture');
+    expect(archGate?.status).toBe('error');
+    expect(archGate?.errorMessage).toContain("'ui'");
+    expect(archGate?.errorMessage).toContain('application/ui/**');
+    expect(archGate?.errorMessage).toContain('allowEmpty');
+  });
+
+  it('a zero-classified-files component with allowEmpty: true stays green (ADR 003 opt-out)', async () => {
+    const ruleset = defineProject({
+      components: { api: 'application/api/**', ui: { pattern: 'application/ui/**', allowEmpty: true } },
+      rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
+    });
+    const registry = new StaticPluginRegistry([
+      fakePlugin(() => graph([node('application/api/a.ts', 'api')], [])),
+    ]);
+    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+    const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+    expect(run.verdict).toBe('green');
+  });
 
   it('freshness: a fresh scan reflects a fix with no restart required (ADR 005)', async () => {
     const ruleset = defineProject({

@@ -194,6 +194,77 @@ describe('align check — stale generated-rules.json false-green guard (RULESET_
   });
 });
 
+describe('align check — empty-component false-green guard (ADR 003 empty-selector-fails-by-default)', () => {
+  async function readHuman(run: () => Promise<number>): Promise<{ code: number; text: string }> {
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = ((...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    }) as typeof console.log;
+    let code: number;
+    try {
+      code = await run();
+    } finally {
+      console.log = originalLog;
+    }
+    return { code, text: logs.join('\n') };
+  }
+
+  it('a component whose selector matches zero files errors (scanner-level validateComponents), naming it — never green', async () => {
+    tmpDir = copyFixture('simple-app');
+    fs.writeFileSync(
+      path.join(tmpDir, 'align.config.ts'),
+      `import { defineProject } from '@align/core/dsl';\n\n` +
+        `export default defineProject({\n` +
+        `  components: { app: 'src/**', ghost: 'src/ghost/**' },\n` +
+        `  rules: (c) => [c.arch.layer(c.app).cannotDependOn(c.ghost)],\n` +
+        `});\n`,
+      'utf8',
+    );
+    const { code, text } = await readHuman(() => runCheck(tmpDir, { json: false }));
+    expect(code).not.toBe(0);
+    expect(text).toContain('verdict: error');
+    expect(text).toContain("'ghost'");
+    expect(text).toContain('allowEmpty');
+  });
+
+  it('a component fully shadowed by an earlier first-match-wins selector errors (orchestrator-level guard) — was silently green before', async () => {
+    tmpDir = copyFixture('simple-app');
+    // `shadowed`'s selector DOES match files, so selector-based validateComponents passes — but
+    // `app` (declared first) claims every one of them, so zero files classify as `shadowed` and
+    // the rule referencing it would evaluate vacuously green.
+    fs.writeFileSync(
+      path.join(tmpDir, 'align.config.ts'),
+      `import { defineProject } from '@align/core/dsl';\n\n` +
+        `export default defineProject({\n` +
+        `  components: { app: 'src/**', shadowed: 'src/**' },\n` +
+        `  rules: (c) => [c.arch.layer(c.shadowed).cannotDependOn(c.app)],\n` +
+        `});\n`,
+      'utf8',
+    );
+    const { code, text } = await readHuman(() => runCheck(tmpDir, { json: false }));
+    expect(code).not.toBe(0);
+    expect(text).toContain('verdict: error');
+    expect(text).toContain("'shadowed'");
+    expect(text).toContain('first-match-wins');
+    expect(text).toContain('allowEmpty');
+  });
+
+  it('the same zero-file component with allowEmpty: true stays green (documented opt-out)', async () => {
+    tmpDir = copyFixture('simple-app');
+    fs.writeFileSync(
+      path.join(tmpDir, 'align.config.ts'),
+      `import { defineProject } from '@align/core/dsl';\n\n` +
+        `export default defineProject({\n` +
+        `  components: { app: 'src/**', ghost: { pattern: 'src/ghost/**', allowEmpty: true } },\n` +
+        `  rules: (c) => [c.arch.layer(c.app).cannotDependOn(c.ghost)],\n` +
+        `});\n`,
+      'utf8',
+    );
+    expect(await runCheck(tmpDir, { json: false })).toBe(0);
+  });
+});
+
 describe('align baseline', () => {
   it('accept seeds the baseline and turns check green; prune removes it once fixed', async () => {
     tmpDir = copyFixture('simple-app-violation');

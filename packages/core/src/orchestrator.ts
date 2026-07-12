@@ -7,6 +7,7 @@ import { buildUncertaintyAdvisories } from './gates/advisories.js';
 import type { PluginRegistry } from './plugin/registry.js';
 import { evaluateRule } from './rules/evaluators.js';
 import { validateRuleComponentRefs } from './rules/component-refs.js';
+import { validateClassifiedComponents } from './components/registry.js';
 
 export interface CheckOptions {
   readonly rootDir: string; // absolute filesystem path
@@ -62,13 +63,20 @@ export class GateOrchestrator {
 
     const archStart = performance.now();
 
-    // Every ComponentRef a rule embeds (hand-authored or `.align/generated-rules.json`-merged,
-    // ADR 011) must name a component still present in the registry — otherwise `evaluateRule`
-    // simply never matches the stale name and the rule evaluates vacuously green with no signal
-    // (the false-green class this check exists to close, ARCHITECTURE.md's severity-zero
-    // invariant). This is an `error`, not `red` or a silent drop (ADR 008): the architecture gate
-    // itself couldn't produce a trustworthy verdict, same category as a scanner crash below.
+    // Vacuous-green guards (ARCHITECTURE.md's severity-zero false-green invariant), both
+    // surfaced as `error` — not `red`, not a silent drop (ADR 008: the architecture gate itself
+    // couldn't produce a trustworthy verdict, same category as a scanner crash above):
+    // 1. Every declared component must have at least one file classified to it this scan
+    //    (`allowEmpty: true` opts out, ADR 003). The TypeScript scanner independently enforces
+    //    the selector-based half of this doctrine (`validateComponents`, plugin-typescript
+    //    scanner.ts) at parse time; this classification-based check is plugin-independent and
+    //    additionally catches a component fully shadowed by an earlier component's selector under
+    //    first-match-wins — its rules would otherwise evaluate vacuously green.
+    // 2. Every ComponentRef a rule embeds (hand-authored or `.align/generated-rules.json`-merged,
+    //    ADR 011) must name a component present in the registry — otherwise `evaluateRule`
+    //    simply never matches the stale name and the rule silently drops out.
     try {
+      validateClassifiedComponents(this.ruleset.components, new Set(graph.nodes.map((n) => n.component)));
       validateRuleComponentRefs(this.ruleset.rules, this.ruleset.components);
     } catch (err) {
       const architectureGate: GateResult = {

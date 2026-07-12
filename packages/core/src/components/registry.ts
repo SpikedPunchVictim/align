@@ -75,10 +75,48 @@ export function validateComponents(
     const matched = allFiles.some((file) => matchesSelector(file, def, workspacePackages));
     if (!matched) {
       throw new ComponentValidationError(
-        `Component '${name}' matches zero files. If this is expected, set allowEmpty: true on ` +
-          `the component definition.`,
+        `Component '${name}' (selector: ${describeSelector(def)}) matches zero files. Likely ` +
+          `cause: its directory was renamed/moved or the selector is stale. If this is expected, ` +
+          `set allowEmpty: true on the component definition.`,
         name,
       );
     }
+  }
+}
+
+function describeSelector(def: ComponentDefinitionIR): string {
+  return def.selector.kind === 'glob'
+    ? def.selector.patterns.join(', ')
+    : `package: ${def.selector.packageNames.join(', ')}`;
+}
+
+/**
+ * Classification-based companion to `validateComponents`, for callers that only have the
+ * *classified* scan result rather than the raw file list + workspace inventory (the
+ * `GateOrchestrator` — see its check-time validation step). Enforces the same ADR 003
+ * empty-selector-fails-by-default doctrine one step later in the pipeline, where it also catches
+ * a case selector-based validation structurally cannot: a component whose selector DOES match
+ * files but loses every one of them to an earlier component under first-match-wins
+ * classification (`classifyFile` above) — zero classified files means every rule referencing the
+ * component evaluates vacuously green, the same false-green class as an unknown ComponentRef
+ * (`rules/component-refs.ts`). Fail-fast on the first offender, same convention as
+ * `validateComponents`.
+ */
+export function validateClassifiedComponents(
+  components: Readonly<Record<ComponentName, ComponentDefinitionIR>>,
+  classifiedComponents: ReadonlySet<string>,
+): void {
+  for (const name of Object.keys(components) as ComponentName[]) {
+    const def = components[name];
+    if (def === undefined || def.allowEmpty) continue;
+    if (classifiedComponents.has(name)) continue;
+    throw new ComponentValidationError(
+      `Component '${name}' (selector: ${describeSelector(def)}) has zero files classified to it ` +
+        `in this scan — every rule referencing '${name}' would silently pass. Likely cause: its ` +
+        `directory was renamed/moved, the selector is stale, or an earlier component's selector ` +
+        `claims all of its files (components classify first-match-wins, in declaration order). ` +
+        `If '${name}' is legitimately empty, set allowEmpty: true on the component definition.`,
+      name,
+    );
   }
 }
