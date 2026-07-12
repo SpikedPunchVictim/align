@@ -85,3 +85,16 @@ interface GateResult {
 No direct spike measurement (the spike ran two hardcoded rules with no gate stack) — this ADR encodes the
 plan's locked gate-model design and generalizes ADR 001's arch-first scope decision into the shared payload
 contract every later gate must honor.
+
+
+## Amendment (2026-07-12): the reference-validity invariant
+
+Three false-green-class defects shared one shape — *a dangling reference evaluating as vacuous truth*: a rule
+referencing a renamed/removed component (57a76a2), a component shadowed to zero classified files (3b9e91a),
+and a `custom.host` rule naming an unregistered predicate (064edaf). Codified as doctrine:
+
+**Every name an IR rule references — component, layer, host predicate, or any future referent — must resolve
+at check time, or the check reports gate `status: 'error'` (never green, never a silent skip).** Resolution
+is validated in the orchestrator's pre-evaluation guard step, plugin-independently, so no future language
+plugin or rule kind can reintroduce the class. New rule kinds MUST extend the exhaustive reference-validation
+switch (the compiler enforces this — see `validateRuleComponentRefs`).
