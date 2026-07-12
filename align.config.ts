@@ -1,4 +1,5 @@
 import { defineProject } from '@align/core/dsl';
+import type { HostPredicate, HostRuleContext, HostViolation } from '@align/core';
 
 // align dogfoods itself (IMPLEMENTATION_PLAN.md Stage 1 success criteria): core never imports
 // plugin-typescript or cli, and the whole repo stays cycle-free. Hand-refined from `align init`'s
@@ -17,6 +18,46 @@ export const excludes = [
   'packages/cli/test/fixtures',
   'packages/agent/test/fixtures',
 ];
+
+// `custom.host` dogfood (docs/proposals/rule-expansion-evaluation.md §B.0, registration surface
+// promoted 2026-07-12): one real predicate, registered here and referenced by
+// `c.custom.host('typesLayerIsLeaf')` below, to exercise the mechanism end-to-end on align's own
+// repo rather than a synthetic fixture.
+//
+// Scoped to a genuine, evidence-backed sub-path invariant `arch.*` cannot express today (the
+// evaluation doc's §A.2.2 "component sub-path scoping gap" — `arch.layers`/`arch.no-dependency`
+// only see whole-component granularity, and `core` is one component covering all of
+// `packages/core/**`): `packages/core/src/types/` is align's foundation layer (branded types, the
+// IR zod schema, the Violation model — CODING_BEST_PRACTICES.md §1's "the types are the design")
+// and, verified against the live import graph before writing this rule, currently imports nothing
+// from any sibling subdirectory of `packages/core/src/`. That's a real, already-true invariant
+// worth protecting from regression, not a fabricated violation to manufacture a "finding."
+//
+// (The originally-considered `no-child-process-outside-git-rails` rule turned out to be
+// inexpressible with today's `DependencyGraph`: the scanner classifies every `node:*`/builtin
+// specifier as `external` and discards it before an edge is ever recorded
+// (`packages/plugin-typescript/src/tsconfig-resolver.ts:30`), so a predicate operating on
+// `ctx.graph` alone has zero visibility into `child_process` imports — independently confirming
+// the evaluation doc's own top-of-document correction #2 from the predicate-authoring side.)
+export const hostRules: Record<string, HostPredicate> = {
+  typesLayerIsLeaf: (ctx: HostRuleContext): HostViolation[] => {
+    const violations: HostViolation[] = [];
+    for (const edge of ctx.graph.edges) {
+      if (!edge.from.startsWith('packages/core/src/types/')) continue;
+      if (edge.to.startsWith('packages/core/src/types/')) continue; // intra-types imports are fine
+      if (!edge.to.startsWith('packages/core/src/')) continue; // only within-core edges are in scope
+      violations.push({
+        file: edge.from,
+        range: { startLine: edge.line, endLine: edge.line },
+        snippet: edge.snippet,
+        message:
+          `packages/core/src/types/ is align's foundation layer and must not depend on any sibling ` +
+          `subdirectory of packages/core/src/ — '${edge.from}' imports '${edge.to}' via '${edge.specifier}'.`,
+      });
+    }
+    return violations;
+  },
+};
 
 export default defineProject({
   components: {
@@ -39,6 +80,9 @@ export default defineProject({
       .layer(c.agent)
       .canOnlyDependOn(c.core)
       .because('@align/agent (Stage 4 BYOK fix loop, ADR 010) depends only on @align/core + @anthropic-ai/sdk — it never imports plugin-typescript or cli; the CLI composition root wires concrete effects (git, fs, the TS scanner) into it, not the reverse (IMPLEMENTATION_PLAN.md Stage 4).'),
+    c.custom
+      .host('typesLayerIsLeaf')
+      .because("packages/core/src/types/ is align's foundation layer (branded types, IR zod schema, Violation model) and must not acquire a dependency on any sibling subdirectory of packages/core/src/ — a sub-path-scoped invariant arch.layers/arch.no-dependency can't express at core's whole-component granularity (docs/proposals/rule-expansion-evaluation.md §A.2.2). Predicate registered in this file's hostRules export."),
   ],
 });
 
