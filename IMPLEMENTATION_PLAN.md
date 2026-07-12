@@ -125,7 +125,43 @@ interface GateResult {
 
 ---
 
-## Stage 1: Walking Skeleton — cached oracle for format + lint + types, dogfooded
+## Stage 1: v1 Walking Skeleton — the architecture oracle (restaged at Stage 0 sign-off)
+
+**Goal**: Implement ARCHITECTURE.md's v1 in production quality — 3 packages (`@align/core` hosting `@align/core/dsl`, `@align/plugin-typescript`, `@align/cli` hosting `align mcp`). Port the spike's *proven* scanner into `plugin-typescript` per ADR 004 (realpath classification, workspace-name resolver fallback, type-only edges, nearest-tsconfig, asset/build-output vocabulary); components registry + typed DSL per ADRs 002/003 (`defineProject<T>`, negation-free verbs, `.because()`, layer macros); rule kinds **no-dependency / no-cycles (per-edge chain detail) / layers**; gates **parse + architecture** with `GateStatus` incl. `error` (ADR 008); baseline per ADR 006 (snippet-hash fingerprints, move detection, `accept --rule`, consent doctrine); **freshness per ADR 005** (rescan-on-check, no caching); CLI `init` / `check --json` / `baseline` / `explain` + `align mcp` (`align_check`, `align_violations`, `align_explain_rule`) with ADR 007 structured-only payloads; `init` performs components auto-detection, generates cycles-first starter rules (~3 layer macros), consent-aware baseline seeding, and writes the **CLAUDE.md agent-instructions block** (ADR 009).
+
+**Success Criteria**: `align.config.ts` enforces align's own package dependency direction + cycle-freedom and `align check` is green on itself (dogfood); a seeded forbidden import in a fixture → red with exact file/line/specifier; fixing it → fresh green with no server restart (freshness); the pnpm-workspace false-green fixture proves inter-package edges exist; kluster copy: `init` → consent-seeded baseline → green; n8n: `init` + baseline accept (207 cycles) → green; a red 3-violation MCP response stays ≤ ~1K tokens.
+
+**Tests**: unit — fingerprint stability, baseline move-detection, DSL→IR golden snapshots, Tarjan (self-loops, multi-node SCCs), realpath classification, workspace-name fallback, empty-selector-fails, reserved-component-name type guards (expect-type); integration — fixtures (clean / probe-violation / cycle / pnpm-workspace / orphaned-package); MCP contract tests via in-process SDK client (shapes, caps, pagination, priority sort); CLI smoke (exit codes, `--json` shape).
+
+**Status**: Not Started
+
+## Stage 2: External validation + explain polish
+
+**Goal**: Rerun both live probes against real v1 — Claude Code discovers align via the init-written CLAUDE.md block and drives the kluster copy red→green with no staleness; Mermaid cycle/path diagrams in `align_explain_rule`; advisories surfaced (dead aliases, uncertainty vocabulary); `align doctor` basics.
+
+**Success Criteria**: probe-1 rerun → `align_check` called unprompted; probe-2 rerun → loop converges green in ≤2 iterations; documented clean n8n run. **Status**: Not Started
+
+## Stage 3: `align build` — markdown as buildable intent source (ADR 011)
+
+**Goal**: MCP `align_propose_rules` (two-pass clarification; the client agent judges — no API key) + CLI `align build`: precision ladder, section-hash lockfile, `generated-rules.json` with provenance, dry-run + impact-delta gates, `--apply` + audit map, `--verify`/`--frozen-rules` CI.
+
+**Success Criteria**: per ADR 011's acceptance list (one-section reword re-proposes only that section; IR-identical re-proposal → empty diff; violations of doc-built rules quote the doc's English). **Status**: Not Started
+
+## Stage 4: BYOK agent loop (ADR 010 + green≠correct guards)
+
+**Goal**: unchanged in substance from the pre-restage design: group-by-file, memoized raw-API FixProvider, edit-block apply pipeline (exact match + `nearLine`), mechanical post-format before commit, oscillation detection, git rails, terminal merge (`--pr` default), exported-symbol surface diff + zero-coverage refusal. **Status**: Not Started
+
+## Stage 5: Growth path & reserve promotions
+
+Tool-wrapping gate stack (format/lint/types/security/tests — the superseded stage designs below are the reference material, governed by ADR 008's `dependsOn` contract), caching promotion (~10 s trigger), `align watch`, DX backlog, second language plugin → `@align/plugin-api` extraction. Everything promotes on evidence. **Status**: Not Started
+
+---
+
+# SUPERSEDED STAGING — reference designs for the growth path (Design Reserve detail; do not implement as written)
+
+> The stages below predate the Stage 0 sign-off of the **arch-first v1**. They are retained in full because their mechanism designs (tool adapters, six-component cache key, CIA, tests gate, etc.) are the pre-thought reference for Stage 5 promotions — but the staging itself is superseded by Stages 1–5 above.
+
+## [Superseded] Stage 1: Walking Skeleton — cached oracle for format + lint + types, dogfooded
 
 **Goal**: `align check` runs on align's own repo reporting green/red/error across parse/format/lint/types gates with unified Violations, baseline support, and the full six-component cache. Minimal DSL (`gates.format()/lint()/types()`). CLI: `init`, `check [--json --files --no-cache --fail-fast]`, `baseline accept|prune|show`, `fix [--category format,lint]`.
 
@@ -160,7 +196,7 @@ interface GateResult {
 
 ---
 
-## Stage 2: Architecture Engine + Full DSL + Change Impact Analysis
+## [Superseded] Stage 2: Architecture Engine + Full DSL + Change Impact Analysis
 
 **Goal**: dependency graph extraction with **nearest-tsconfig discovery** — for each source file, walk up to the first `tsconfig.json`, respect `extends` chains (e.g. `tsconfig.base.json`), resolve path aliases per package (correct behavior in pnpm monorepos; resolved chain feeds `configFingerprint`). **Cycle violations carry per-edge detail** (`{from, to, specifier, line}` per chain hop, naming the suggested break edge) — the spike showed chains without edge lines force the agent to grep every file in the chain. **`align init` rule defaults lead with `no-cycles`**: on the untouched, architecturally-healthy kluster, cycle detection found two real latent bugs (one in shipped UI code) while all no-dependency rules were green — cycles are the day-one value; no-dependency rules are the regression guardrail.
 
@@ -209,7 +245,7 @@ export default defineProject({
 
 ---
 
-## Stage 3: MCP Server + Security + Tests Gates
+## [Superseded] Stage 3: MCP Server + Security + Tests Gates
 
 **Goal**: `align mcp` (stdio, @modelcontextprotocol/sdk) with token-budgeted tools: `align_status` (incl. advisories), `align_check`, `align_violations`, `align_explain_rule` (incl. Mermaid for arch), `align_fix_hints`, `align_autofix`, `align_baseline_accept` (gated behind `allowBaselineFromMcp`, default false — agents can't self-serve amnesty), and **`align_propose_rules`** — the connected agent reads an architecture doc, does the judgment, and submits proposed RuleIR JSON; align runs the deterministic pipeline (zod-validate → ground selectors against the file tree and components registry → dry-run with pass/violation counts → render commented DSL proposals with provenance comments into `align.config.ts`). No API key needed — the client agent supplies the judgment; align supplies validation and truth.
 
@@ -237,7 +273,7 @@ Security gate: built-in secrets scanner (AWS keys, private keys, high-entropy to
 
 ---
 
-## Stage 4: Built-in Agent Loop
+## [Superseded] Stage 4: Built-in Agent Loop
 
 *Prerequisite: Stage 3 kluster validation passed. The agent is a generic `CheckRun` consumer — no gate- or rule-specific agent code.*
 
@@ -334,7 +370,7 @@ const FixProposalSchema = z.object({
 
 ---
 
-## Stage 5: Hardening & Growth Seams (rolling)
+## [Superseded] Stage 5: Hardening & Growth Seams (rolling)
 
 **DX backlog** (real value, deliberately deferred until the DSL has proven itself on kluster — building meta-tools for an unused authoring surface is premature abstraction; the prerequisites they need — stable rule ids, provenance, doctor infrastructure — all exist by now): `align playground` (rule REPL: resolved selectors, dry-run violations, Mermaid, no full check); `align rule create` interactive wizard; `align doctor rules` (never-fires / fires-too-often / selector-drift heuristics, component update suggestions); config linter (unused components, unreachable/redundant rules, merge/split suggestions); rule evolution assistant (LLM-suggested rule updates as the repo evolves); VS Code extension (quick-fixes like "convert glob to component", provenance display — hover docs already work via JSDoc without it).
 
