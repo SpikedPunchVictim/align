@@ -33,7 +33,10 @@ export async function baselinePrune(rootDir: string): Promise<number> {
     allViolations,
   );
   writeBaseline(rootDir, store.snapshot());
-  console.log(`Pruned ${result.removed.length} fixed violation(s) from the baseline; ${result.moved.length} moved.`);
+  console.log(
+    `Pruned ${result.removed.length} fixed violation(s) from the baseline; ` +
+      `${result.moved.length} ${result.moved.length === 1 ? 'entry' : 'entries'} transferred (file moves).`,
+  );
   return 0;
 }
 

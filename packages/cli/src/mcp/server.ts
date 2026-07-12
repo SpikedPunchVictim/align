@@ -10,11 +10,24 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { buildMcpCheckPayload } from '@align/core';
+import { buildMcpCheckPayload, type CheckRun } from '@align/core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
-import { readBaseline } from '../align-dir.js';
+import { readBaseline, writeBaseline } from '../align-dir.js';
 import { buildExplainPayload } from '../commands/explain.js';
+
+/** Shared by `align_check`/`align_violations`: runs a fresh check and persists any move-transfer
+ * (ADR 006) the run performed, so a renamed file's baselined violation doesn't need a separate
+ * `align baseline prune` to stop being re-reported on the next call. */
+async function freshCheck(rootDir: string): Promise<CheckRun> {
+  const { ruleset, excludes } = await loadConfig(rootDir);
+  const { orchestrator, baselineStore } = createOrchestrator(ruleset, readBaseline(rootDir));
+  const run = await orchestrator.check({ rootDir, excludes });
+  if (run.advisories.some((a) => a.kind === 'baseline-moved')) {
+    writeBaseline(rootDir, baselineStore.snapshot());
+  }
+  return run;
+}
 
 /** Builds the McpServer with tools registered but no transport attached — split out from
  * `startMcpServer` so tests can connect it to an in-process `InMemoryTransport` instead of stdio
@@ -35,9 +48,7 @@ export function createMcpServer(rootDir: string): McpServer {
       inputSchema: {},
     },
     async () => {
-      const { ruleset, excludes } = await loadConfig(rootDir);
-      const { orchestrator } = createOrchestrator(ruleset, readBaseline(rootDir));
-      const run = await orchestrator.check({ rootDir, excludes });
+      const run = await freshCheck(rootDir);
       const payload = buildMcpCheckPayload(run, { maxPerRule: 10, pageSize: 50 });
       return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
     },
@@ -55,9 +66,7 @@ export function createMcpServer(rootDir: string): McpServer {
       inputSchema: { cursor: z.string().optional() },
     },
     async ({ cursor }) => {
-      const { ruleset, excludes } = await loadConfig(rootDir);
-      const { orchestrator } = createOrchestrator(ruleset, readBaseline(rootDir));
-      const run = await orchestrator.check({ rootDir, excludes });
+      const run = await freshCheck(rootDir);
       const payload = buildMcpCheckPayload(run, { maxPerRule: 10, pageSize: 50, ...(cursor === undefined ? {} : { cursor }) });
       return {
         content: [

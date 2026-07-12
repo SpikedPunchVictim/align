@@ -84,3 +84,90 @@ describe('InMemoryBaselineStore', () => {
     expect(reloaded.isBaselined(v1.id)).toBe(true);
   });
 });
+
+describe('baseline move-transfer (ADR 006)', () => {
+  const emptyGraph = { nodes: [], edges: [], uncertain: [], scannedAt: Date.now() };
+
+  it('reconcileMoves transfers an orphaned entry to a same-snippet violation in a different file', () => {
+    const store = new InMemoryBaselineStore();
+    const original = makeViolation({
+      id: computeFingerprint(['no-dependency', 'r1', 'a.ts', 'b.ts', './b']),
+      file: toRepoRelativePath('a.ts'),
+      snippet: `import './b'`,
+    });
+    store.accept([original], 'manual');
+
+    // "a.ts" was renamed to "renamed.ts" — same snippet/content, new structural fingerprint.
+    const moved = makeViolation({
+      id: computeFingerprint(['no-dependency', 'r1', 'renamed.ts', 'b.ts', './b']),
+      file: toRepoRelativePath('renamed.ts'),
+      snippet: `import './b'`,
+    });
+
+    const result = store.reconcileMoves([moved]);
+    expect(result).toEqual([{ from: original.id, to: moved.id }]);
+    expect(store.isBaselined(moved.id)).toBe(true);
+    expect(store.isBaselined(original.id)).toBe(false);
+    expect(store.show()[0]?.file).toBe('renamed.ts');
+  });
+
+  it('prune transfers moves and removes only genuinely-fixed entries in the same pass', () => {
+    const store = new InMemoryBaselineStore();
+    const original = makeViolation({
+      id: computeFingerprint(['no-dependency', 'r1', 'a.ts', 'b.ts', './b']),
+      file: toRepoRelativePath('a.ts'),
+      snippet: `import './b'`,
+    });
+    const fixedElsewhere = makeViolation({
+      id: computeFingerprint(['no-dependency', 'r2', 'c.ts', 'd.ts', './d']),
+      ruleId: toRuleId('r2'),
+      file: toRepoRelativePath('c.ts'),
+      snippet: `import './d'`,
+    });
+    store.accept([original, fixedElsewhere], 'manual');
+
+    const moved = makeViolation({
+      id: computeFingerprint(['no-dependency', 'r1', 'renamed.ts', 'b.ts', './b']),
+      file: toRepoRelativePath('renamed.ts'),
+      snippet: `import './b'`,
+    });
+
+    const result = store.prune(emptyGraph, [moved]);
+    expect(result.moved).toEqual([{ from: original.id, to: moved.id }]);
+    expect(result.removed).toEqual([fixedElsewhere.id]);
+    expect(store.isBaselined(moved.id)).toBe(true);
+    expect(store.isBaselined(fixedElsewhere.id)).toBe(false);
+  });
+
+  it('does NOT swallow a genuinely new identical-snippet violation while the original still exists', () => {
+    const store = new InMemoryBaselineStore();
+    const original = makeViolation({
+      id: computeFingerprint(['no-dependency', 'r1', 'a.ts', 'b.ts', './b']),
+      file: toRepoRelativePath('a.ts'),
+      snippet: `import './b'`,
+    });
+    store.accept([original], 'manual');
+
+    // Original is untouched (still present) AND a second, unrelated location has an identical
+    // snippet+rule violation — both fingerprints must remain live and distinct.
+    const secondLocation = makeViolation({
+      id: computeFingerprint(['no-dependency', 'r1', 'z.ts', 'b.ts', './b']),
+      file: toRepoRelativePath('z.ts'),
+      snippet: `import './b'`,
+    });
+
+    const moved = store.reconcileMoves([original, secondLocation]);
+    expect(moved).toEqual([]);
+    expect(store.isBaselined(original.id)).toBe(true);
+    expect(store.isBaselined(secondLocation.id)).toBe(false); // new violation surfaces as red
+  });
+
+  it('an entry with no content-fingerprint match on prune is removed, not silently kept', () => {
+    const store = new InMemoryBaselineStore();
+    const original = makeViolation({ id: computeFingerprint(['a']), snippet: 'unique-a' });
+    store.accept([original], 'manual');
+    const result = store.prune(emptyGraph, []);
+    expect(result.moved).toEqual([]);
+    expect(result.removed).toEqual([original.id]);
+  });
+});

@@ -101,3 +101,75 @@ describe('align baseline', () => {
     expect(code).toBe(0);
   });
 });
+
+describe('align baseline — move detection (ADR 006, carried-over Stage 1 gap)', () => {
+  it('renaming a file with a baselined violation stays green on `align check` and reports the transfer', async () => {
+    tmpDir = copyFixture('simple-app-violation');
+    expect(await runCheck(tmpDir, { json: false })).toBe(1);
+    await baselineAccept(tmpDir, undefined);
+    expect(await runCheck(tmpDir, { json: false })).toBe(0);
+    const before = readBaseline(tmpDir);
+    expect(before).toHaveLength(1);
+    const originalFingerprint = before[0]?.fingerprint;
+
+    // Rename the offending file — the import content/snippet is unchanged.
+    fs.renameSync(path.join(tmpDir, 'src/api/service.ts'), path.join(tmpDir, 'src/api/renamed.ts'));
+
+    const logs: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string) => {
+      logs.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+    let code: number;
+    try {
+      code = await runCheck(tmpDir, { json: true });
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+    expect(code).toBe(0); // stays green across the rename — no orphaned baseline entry
+    const payload = JSON.parse(logs.join('')) as { verdict: string; advisories: { kind: string; message: string }[] };
+    expect(payload.verdict).toBe('green');
+    const advisory = payload.advisories.find((a) => a.kind === 'baseline-moved');
+    expect(advisory?.message).toBe('1 entry transferred (file moves).');
+
+    // The transfer is persisted: the baseline entry now points at the renamed file under a new
+    // fingerprint, and a second check (fresh load from disk) stays green with no further transfer.
+    const after = readBaseline(tmpDir);
+    expect(after).toHaveLength(1);
+    expect(after[0]?.file).toBe('src/api/renamed.ts');
+    expect(after[0]?.fingerprint).not.toBe(originalFingerprint);
+    expect(await runCheck(tmpDir, { json: false })).toBe(0);
+  });
+
+  it('a genuinely new identical-snippet violation in a second file is NOT swallowed as a move', async () => {
+    tmpDir = copyFixture('simple-app-violation');
+    await baselineAccept(tmpDir, undefined);
+    expect(await runCheck(tmpDir, { json: false })).toBe(0);
+
+    // Original violation file is untouched; a second, unrelated api file makes the same forbidden
+    // import. Both fingerprints must remain live — the new one surfaces as a fresh red violation.
+    fs.writeFileSync(
+      path.join(tmpDir, 'src/api/service2.ts'),
+      `import { render } from '../ui/component.js';\n\nexport function handleOther(): string {\n  return render();\n}\n`,
+      'utf8',
+    );
+
+    expect(await runCheck(tmpDir, { json: false })).toBe(1);
+    const baseline = readBaseline(tmpDir);
+    expect(baseline).toHaveLength(1);
+    expect(baseline[0]?.file).toBe('src/api/service.ts'); // original entry untouched
+  });
+
+  it('`align baseline prune` also transfers moves, in addition to removing fixed entries', async () => {
+    tmpDir = copyFixture('simple-app-violation');
+    await baselineAccept(tmpDir, undefined);
+    fs.renameSync(path.join(tmpDir, 'src/api/service.ts'), path.join(tmpDir, 'src/api/renamed.ts'));
+
+    await baselinePrune(tmpDir);
+    const after = readBaseline(tmpDir);
+    expect(after).toHaveLength(1);
+    expect(after[0]?.file).toBe('src/api/renamed.ts');
+    expect(await runCheck(tmpDir, { json: false })).toBe(0);
+  });
+});

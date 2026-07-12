@@ -113,4 +113,78 @@ describe('GateOrchestrator', () => {
     const greenRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     expect(greenRun.verdict).toBe('green');
   });
+
+  it('move-transfer (ADR 006): renaming a baselined violation\'s file stays green and reports the transfer', async () => {
+    const ruleset = defineProject({
+      components: { api: 'application/api/**', ui: 'application/ui/**' },
+      rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
+    });
+    let fromFile = 'application/api/a.ts';
+    const registry = new StaticPluginRegistry([
+      fakePlugin(() =>
+        graph(
+          [node(fromFile, 'api'), node('application/ui/b.ts', 'ui')],
+          [edge(fromFile, 'application/ui/b.ts', { specifier: '../ui/b', line: 3 })],
+        ),
+      ),
+    ]);
+    const baseline = new InMemoryBaselineStore();
+    const orchestrator = new GateOrchestrator(registry, ruleset, baseline);
+
+    const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+    const archGate = seedRun.gates.find((g) => g.gate === 'architecture');
+    baseline.accept(archGate?.violations ?? [], 'init-seed');
+    expect((await orchestrator.check({ rootDir: '/repo', excludes: [] })).verdict).toBe('green');
+
+    // Rename the offending file — same snippet/specifier, new structural fingerprint.
+    fromFile = 'application/api/renamed.ts';
+    const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+    expect(run.verdict).toBe('green');
+    const gate = run.gates.find((g) => g.gate === 'architecture');
+    expect(gate?.violations).toHaveLength(0);
+    expect(gate?.baselinedCount).toBe(1);
+    const advisory = run.advisories.find((a) => a.kind === 'baseline-moved');
+    expect(advisory?.message).toBe('1 entry transferred (file moves).');
+  });
+
+  it('does NOT swallow a genuinely new identical violation while the renamed original coexists', async () => {
+    const ruleset = defineProject({
+      components: { api: 'application/api/**', ui: 'application/ui/**' },
+      rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
+    });
+    const registry = new StaticPluginRegistry([
+      fakePlugin(() =>
+        graph(
+          [node('application/api/a.ts', 'api'), node('application/ui/b.ts', 'ui')],
+          [edge('application/api/a.ts', 'application/ui/b.ts', { specifier: '../ui/b', line: 3 })],
+        ),
+      ),
+    ]);
+    const baseline = new InMemoryBaselineStore();
+    const orchestrator = new GateOrchestrator(registry, ruleset, baseline);
+    const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+    baseline.accept(seedRun.gates.find((g) => g.gate === 'architecture')?.violations ?? [], 'init-seed');
+    expect((await orchestrator.check({ rootDir: '/repo', excludes: [] })).verdict).toBe('green');
+
+    // A second, unrelated file introduces the identical-snippet violation while the original
+    // file/violation is untouched — this must surface as new/red, not be swallowed as a "move".
+    const registry2 = new StaticPluginRegistry([
+      fakePlugin(() =>
+        graph(
+          [node('application/api/a.ts', 'api'), node('application/api/z.ts', 'api'), node('application/ui/b.ts', 'ui')],
+          [
+            edge('application/api/a.ts', 'application/ui/b.ts', { specifier: '../ui/b', line: 3 }),
+            edge('application/api/z.ts', 'application/ui/b.ts', { specifier: '../ui/b', line: 3 }),
+          ],
+        ),
+      ),
+    ]);
+    const orchestrator2 = new GateOrchestrator(registry2, ruleset, baseline);
+    const run = await orchestrator2.check({ rootDir: '/repo', excludes: [] });
+    expect(run.verdict).toBe('red');
+    const gate = run.gates.find((g) => g.gate === 'architecture');
+    expect(gate?.violations).toHaveLength(1);
+    expect(gate?.violations[0]?.file).toBe('application/api/z.ts');
+    expect(gate?.baselinedCount).toBe(1);
+  });
 });

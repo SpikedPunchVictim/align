@@ -65,6 +65,11 @@ export class GateOrchestrator {
       allViolations.push(...violations);
     }
 
+    // Move-transfer (ADR 006), run on every check — not just `baseline prune` — so a renamed
+    // file whose violation was already baselined doesn't turn CI red for one cycle. Mutates the
+    // store in place; the CLI/MCP surface persists the updated snapshot when transfers occurred.
+    const moves = this.baselineStore.reconcileMoves(allViolations);
+
     const newViolations = allViolations.filter((v) => !this.baselineStore.isBaselined(v.id));
     const baselinedCount = allViolations.length - newViolations.length;
     const rulesWithNoViolations = this.ruleset.rules.filter(
@@ -87,6 +92,12 @@ export class GateOrchestrator {
       advisories.push({
         kind: 'uncertainty',
         message: `${graph.uncertain.length} specifier(s) across ${new Set(graph.uncertain.map((u) => u.file)).size} file(s) could not be resolved with certainty and were excluded from the graph.`,
+      });
+    }
+    if (moves.length > 0) {
+      advisories.push({
+        kind: 'baseline-moved',
+        message: `${moves.length} ${moves.length === 1 ? 'entry' : 'entries'} transferred (file moves).`,
       });
     }
 

@@ -45,6 +45,26 @@ describe('align init', () => {
     expect(claudeMd.split('<!-- align:start -->')).toHaveLength(2);
   });
 
+  it('appends to a pre-existing CLAUDE.md without clobbering the human-authored content (ADR 009)', async () => {
+    tmpDir = makeSinglePackageRepo();
+    const humanContent = '# My Project\n\nSome hand-written project instructions.\n\n## Conventions\n\n- Use tabs.\n';
+    fs.writeFileSync(path.join(tmpDir, 'CLAUDE.md'), humanContent, 'utf8');
+
+    await runInit(tmpDir, { acceptExisting: false, nonInteractive: true });
+    const afterFirstInit = fs.readFileSync(path.join(tmpDir, 'CLAUDE.md'), 'utf8');
+    expect(afterFirstInit).toContain(humanContent.trim());
+    expect(afterFirstInit).toContain('<!-- align:start -->');
+    expect(afterFirstInit).toContain('<!-- align:end -->');
+
+    // Re-running init (e.g. against an already-init'd repo) must be idempotent: the human content
+    // survives unchanged, and the align block is replaced in place — never duplicated.
+    await runInit(tmpDir, { acceptExisting: false, nonInteractive: true });
+    const afterSecondInit = fs.readFileSync(path.join(tmpDir, 'CLAUDE.md'), 'utf8');
+    expect(afterSecondInit.split('<!-- align:start -->')).toHaveLength(2);
+    expect(afterSecondInit).toContain(humanContent.trim());
+    expect(afterSecondInit).toContain('- Use tabs.');
+  });
+
   it('exits red non-interactively when violations exist and --accept-existing is absent', async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-init-test-'));
     fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });

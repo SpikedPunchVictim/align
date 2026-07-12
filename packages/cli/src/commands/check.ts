@@ -1,7 +1,7 @@
 import { buildMcpCheckPayload, renderViolationMessage, type CheckRun } from '@align/core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
-import { readBaseline } from '../align-dir.js';
+import { readBaseline, writeBaseline } from '../align-dir.js';
 
 export interface CheckOptions {
   readonly json: boolean;
@@ -14,9 +14,15 @@ export interface CheckOptions {
  */
 export async function runCheck(rootDir: string, options: CheckOptions): Promise<number> {
   const { ruleset, excludes } = await loadConfig(rootDir);
-  const { orchestrator } = createOrchestrator(ruleset, readBaseline(rootDir));
+  const { orchestrator, baselineStore } = createOrchestrator(ruleset, readBaseline(rootDir));
 
   const run = await orchestrator.check({ rootDir, excludes });
+
+  // Move-transfer (ADR 006) mutated the in-memory store during `check` — persist so a rename
+  // doesn't need a separate `align baseline prune` run to stop being reported every time.
+  if (run.advisories.some((a) => a.kind === 'baseline-moved')) {
+    writeBaseline(rootDir, baselineStore.snapshot());
+  }
 
   if (options.json) {
     const payload = buildMcpCheckPayload(run);
