@@ -1,5 +1,12 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`buildViolationMermaid > renders a custom.host violation as a single node labeled with the predicate name and its message 1`] = `
+"\`\`\`mermaid
+graph LR
+  a["src/api/routes.ts<br/>predicate: route-thinness<br/>route handler is not thin"]
+\`\`\`"
+`;
+
 exports[`buildViolationMermaid > renders a layers violation the same way, using layer names 1`] = `
 "\`\`\`mermaid
 graph LR

@@ -5,6 +5,13 @@ import type { DependencyGraph, DependencyGraphEdge, EdgeKind } from '../types/gr
 import type { CycleEdge, Violation } from '../types/violation.js';
 import { computeFingerprint } from '../baseline/fingerprint.js';
 import { extractCycleChainNodes, tarjanScc } from './tarjan.js';
+import { evaluateCustomHost, type HostPredicateRegistry } from './host-rules.js';
+
+/** No predicates registered — the default for callers that don't pass a registry (most tests, and
+ * any evaluation path that only exercises portable `arch.*` kinds). A `custom.host` rule
+ * evaluated against this empty registry throws `UnknownHostRuleError`, same as an unregistered
+ * name against a real registry — there is no silent-zero-violations path (ADR 008 amendment). */
+const NO_HOST_PREDICATES: HostPredicateRegistry = new Map();
 
 /**
  * Pure function: (rule, graph, components) -> violations. No I/O, no mutation, fully testable
@@ -198,11 +205,18 @@ export const evaluateMetric: RuleEvaluator<ArchMetricRule> = (rule, graph) => {
 /**
  * Exhaustive dispatcher: a new `RuleIR` discriminant without a case here is a compile error
  * (never-check, CODING_BEST_PRACTICES.md §17.2), not a silent no-op.
+ *
+ * `hostPredicates` defaults to the empty registry — every `arch.*` evaluator ignores it entirely
+ * (they never took it before registration existed); only `custom.host` reads it. A predicate that
+ * throws propagates out of this function uncaught (`HostPredicateExecutionError`) exactly like a
+ * malformed rule would — the orchestrator's evaluation-loop guard is what turns that into gate
+ * `error` (`orchestrator.ts`), not this function, which stays a pure dispatcher.
  */
 export function evaluateRule(
   rule: RuleIR,
   graph: DependencyGraph,
   components: Readonly<Record<ComponentName, ComponentDefinitionIR>>,
+  hostPredicates: HostPredicateRegistry = NO_HOST_PREDICATES,
 ): readonly Violation[] {
   switch (rule.kind) {
     case 'arch.no-dependency':
@@ -214,9 +228,7 @@ export function evaluateRule(
     case 'arch.metric':
       return evaluateMetric(rule, graph, components);
     case 'custom.host':
-      // v1 has no host-defined rule execution mechanism (ADR 002's escape hatch is a schema
-      // slot for a future need, not an exercised v1 capability) — zero violations, not an error.
-      return [];
+      return evaluateCustomHost(rule, graph, hostPredicates);
     default: {
       const exhaustive: never = rule;
       throw new Error(`unhandled rule kind: ${JSON.stringify(exhaustive)}`);

@@ -60,6 +60,22 @@ function layersViolation(): Violation {
   };
 }
 
+function customViolation(): Violation {
+  return {
+    id: computeFingerprint(['custom', 'r1']),
+    ruleId: toRuleId('custom.host:route-thinness'),
+    category: 'architecture',
+    severity: 'error',
+    file: toRepoRelativePath('src/api/routes.ts'),
+    range: { startLine: 3, endLine: 3 },
+    snippet: `export function handler() {}`,
+    fixHint: { code: 'manual-review' },
+    kind: 'custom',
+    hostRuleName: 'route-thinness',
+    detail: 'route handler is not thin',
+  };
+}
+
 describe('buildViolationMermaid', () => {
   it('renders a no-cycles chain with the suggested break edge visually marked', () => {
     const chain: CycleEdge[] = [
@@ -92,6 +108,15 @@ describe('buildViolationMermaid', () => {
     const mermaid = buildViolationMermaid(layersViolation());
     expect(mermaid).toContain('api<br/>src/api/service.ts');
     expect(mermaid).toContain('ui<br/>src/ui/component.ts');
+    expect(mermaid).toMatchSnapshot();
+  });
+
+  it('renders a custom.host violation as a single node labeled with the predicate name and its message', () => {
+    const mermaid = buildViolationMermaid(customViolation());
+    expect(mermaid).toContain('graph LR');
+    expect(mermaid).toContain('src/api/routes.ts');
+    expect(mermaid).toContain('route-thinness');
+    expect(mermaid).toContain('route handler is not thin');
     expect(mermaid).toMatchSnapshot();
   });
 });

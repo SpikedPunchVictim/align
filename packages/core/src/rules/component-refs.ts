@@ -29,8 +29,9 @@ export class UnknownComponentRefError extends Error {
 
 /** Every `ComponentRef` a rule embeds, in a fixed, deterministic order — one generator per IR
  * kind, exhaustively switched (a new `RuleIR` kind missing a case here is a compile error, same
- * discipline as `evaluateRule`'s dispatcher). `custom.host` carries no `ComponentRef` (v1 has no
- * host-defined rule execution, `rules/evaluators.ts`). */
+ * discipline as `evaluateRule`'s dispatcher). `custom.host` carries no `ComponentRef` — it
+ * references a host predicate by name (`hostRuleName`), validated by `rules/host-rules.ts`'s
+ * `validateHostRules`, not by this component-reference guard. */
 function* componentRefsOf(rule: RuleIR): Generator<string> {
   switch (rule.kind) {
     case 'arch.no-dependency':

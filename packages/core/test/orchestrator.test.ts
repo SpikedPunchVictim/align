@@ -3,6 +3,7 @@ import { GateOrchestrator } from '../src/orchestrator.js';
 import { InMemoryBaselineStore } from '../src/baseline/store.js';
 import { StaticPluginRegistry, type LanguagePlugin } from '../src/plugin/registry.js';
 import { defineProject } from '../src/dsl/index.js';
+import type { HostPredicate } from '../src/rules/host-rules.js';
 import { edge, graph, node } from './helpers.js';
 import type { ScanInput } from '../src/scanner.js';
 
@@ -231,6 +232,96 @@ describe('GateOrchestrator', () => {
     expect(gate?.baselinedCount).toBe(1);
     const advisory = run.advisories.find((a) => a.kind === 'baseline-moved');
     expect(advisory?.message).toBe('1 entry transferred (file moves).');
+  });
+
+  describe('custom.host registration surface (docs/proposals/rule-expansion-evaluation.md §B.0)', () => {
+    it('a registered predicate is validated (not error) and executes — fires red, is baseline-able, and a fix flips the run fresh green (registration -> execution e2e)', async () => {
+      const ruleset = defineProject({
+        components: { api: 'application/api/**' },
+        rules: (c) => [c.custom.host('route-thinness').because('Route handlers stay thin.')],
+      });
+      let flagFile = true;
+      const predicate: HostPredicate = (ctx) =>
+        flagFile ? ctx.files.filter((f) => f.endsWith('routes.ts')).map((f) => ({ file: f, message: 'route handler is not thin' })) : [];
+      const registry = new StaticPluginRegistry([
+        fakePlugin(() => graph([node('application/api/routes.ts', 'api')], [])),
+      ]);
+      const baseline = new InMemoryBaselineStore();
+      const orchestrator = new GateOrchestrator(registry, ruleset, baseline, new Map([['route-thinness', predicate]]));
+
+      const redRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      expect(redRun.verdict).toBe('red');
+      const redGate = redRun.gates.find((g) => g.gate === 'architecture');
+      expect(redGate?.violations).toHaveLength(1);
+      const v = redGate?.violations[0];
+      expect(v?.kind).toBe('custom');
+      if (v?.kind === 'custom') {
+        expect(v.hostRuleName).toBe('route-thinness');
+        expect(v.because).toBe('Route handlers stay thin.');
+      }
+
+      // Baseline-able: accepting it turns the run green while still counting it (tolerated debt).
+      baseline.accept(redGate?.violations ?? [], 'manual');
+      const baselinedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      expect(baselinedRun.verdict).toBe('green');
+      const baselinedGate = baselinedRun.gates.find((g) => g.gate === 'architecture');
+      expect(baselinedGate?.baselinedCount).toBe(1);
+      expect(baselinedGate?.violations).toHaveLength(0);
+
+      // Fix: the predicate now finds nothing (as if the route handler were slimmed down) — a
+      // completely fresh check (ADR 005, no restart required) reports green with zero baselined,
+      // exactly like `arch.*` rules do after a real code fix.
+      flagFile = false;
+      const fixedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      expect(fixedRun.verdict).toBe('green');
+      const fixedGate = fixedRun.gates.find((g) => g.gate === 'architecture');
+      expect(fixedGate?.violations).toHaveLength(0);
+      expect(fixedGate?.baselinedCount).toBe(0);
+    });
+
+    it('a custom.host rule referencing a name absent from a non-empty registry still errors (unregistered stays unregistered)', async () => {
+      const ruleset = defineProject({
+        components: { api: 'application/api/**' },
+        rules: (c) => [c.custom.host('route-thinness')],
+      });
+      const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
+      // A registry with a DIFFERENT predicate registered — proves this isn't "any non-empty
+      // registry passes," only the exact registered name does.
+      const orchestrator = new GateOrchestrator(
+        registry,
+        ruleset,
+        new InMemoryBaselineStore(),
+        new Map([['some-other-predicate', (): [] => []]]),
+      );
+      const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      expect(run.verdict).toBe('error');
+      const archGate = run.gates.find((g) => g.gate === 'architecture');
+      expect(archGate?.status).toBe('error');
+      expect(archGate?.errorMessage).toContain("'route-thinness'");
+    });
+
+    it('a predicate that throws surfaces as gate error, never a silent pass or an unattributed crash (ADR 008 amendment)', async () => {
+      const ruleset = defineProject({
+        components: { api: 'application/api/**' },
+        rules: (c) => [c.custom.host('route-thinness')],
+      });
+      const buggyPredicate: HostPredicate = () => {
+        throw new Error('predicate has a bug');
+      };
+      const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
+      const orchestrator = new GateOrchestrator(
+        registry,
+        ruleset,
+        new InMemoryBaselineStore(),
+        new Map([['route-thinness', buggyPredicate]]),
+      );
+      const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      expect(run.verdict).toBe('error');
+      const archGate = run.gates.find((g) => g.gate === 'architecture');
+      expect(archGate?.status).toBe('error');
+      expect(archGate?.errorMessage).toContain('predicate has a bug');
+      expect(archGate?.errorMessage).toContain("'route-thinness'");
+    });
   });
 
   it('does NOT swallow a genuinely new identical violation while the renamed original coexists', async () => {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateLayers, evaluateMetric, evaluateNoCycles, evaluateNoDependency } from '../src/rules/evaluators.js';
-import type { ArchLayersRule, ArchMetricRule, ArchNoCyclesRule, ArchNoDependencyRule } from '../src/types/ir.js';
+import { evaluateLayers, evaluateMetric, evaluateNoCycles, evaluateNoDependency, evaluateRule } from '../src/rules/evaluators.js';
+import { UnknownHostRuleError } from '../src/rules/host-rules.js';
+import type { HostPredicate } from '../src/rules/host-rules.js';
+import type { ArchLayersRule, ArchMetricRule, ArchNoCyclesRule, ArchNoDependencyRule, CustomHostRule } from '../src/types/ir.js';
 import { edge, graph, node } from './helpers.js';
 
 describe('evaluateNoDependency', () => {
@@ -220,5 +222,38 @@ describe('evaluateMetric', () => {
     };
     const violations = evaluateMetric(rule, g, {});
     expect(violations[0]?.because).toBe('Route/service files should decompose before they become build-worker.ts-shaped.');
+  });
+});
+
+describe('evaluateRule — custom.host dispatch', () => {
+  const rule: CustomHostRule = {
+    kind: 'custom.host',
+    id: 'custom.host:route-thinness',
+    hostRuleName: 'route-thinness',
+    portable: false,
+    provenance: {},
+  };
+
+  it('dispatches to the registered predicate and returns kind: "custom" violations', () => {
+    const g = graph([node('api/routes.ts', 'api')], []);
+    const predicate: HostPredicate = () => [{ file: 'api/routes.ts', message: 'route handler is not thin' }];
+    const violations = evaluateRule(rule, g, {}, new Map([['route-thinness', predicate]]));
+    expect(violations).toHaveLength(1);
+    expect(violations[0]?.kind).toBe('custom');
+  });
+
+  it('throws UnknownHostRuleError when evaluated with the default (empty) registry — no silent-zero-violations path', () => {
+    const g = graph([], []);
+    expect(() => evaluateRule(rule, g, {})).toThrow(UnknownHostRuleError);
+  });
+
+  it('portable arch.* evaluators are unaffected by an unrelated hostPredicates registry', () => {
+    const g = graph(
+      [node('api/a.ts', 'api'), node('ui/b.ts', 'ui')],
+      [edge('api/a.ts', 'ui/b.ts', { specifier: '../ui/b', line: 5 })],
+    );
+    const noDep: ArchNoDependencyRule = { kind: 'arch.no-dependency', id: 'r1', from: 'api', to: 'ui', provenance: {} };
+    const violations = evaluateRule(noDep, g, {}, new Map([['unrelated', (): [] => []]]));
+    expect(violations).toHaveLength(1);
   });
 });

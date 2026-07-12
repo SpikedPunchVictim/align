@@ -10,6 +10,7 @@ import type {
   ArchNoCyclesRule,
   ArchNoDependencyRule,
   ComponentDefinitionIR,
+  CustomHostRule,
   FileSelector,
   RuleIR,
   RuleProvenance,
@@ -116,11 +117,42 @@ interface ArchFactory {
   noCycles(scope?: ComponentToken | 'repo', options?: NoCyclesOptions): RuleBuilder;
 }
 
+interface CustomFactory {
+  /** Produces a `custom.host` IR rule (ADR 002's escape hatch, docs/proposals/rule-expansion-
+   * evaluation.md §B.0) referencing a predicate registered by the same name in align.config.ts's
+   * sibling `hostRules` export (`{ [hostRuleName]: HostPredicate }`, `@align/core`'s
+   * `HostPredicateRegistry`) — not passed through `defineProject` itself, since `RulesetIR` is
+   * portable JSON (ADR 002) and predicates are functions. `defineProject` only builds the
+   * reference (`hostRuleName`, `portable: false`); `validateHostRules` (the orchestrator's guard
+   * step) is what confirms the name actually resolves to a registered predicate at check time —
+   * the same "reference must resolve or the gate errors" doctrine every other selector in this
+   * file already follows (ADR 008 amendment). */
+  host(hostRuleName: string): RuleBuilder;
+}
+
 export type ComponentContext<T extends ComponentsInput> = {
   readonly [K in keyof T]: ComponentToken;
 } & {
   readonly arch: ArchFactory;
+  readonly custom: CustomFactory;
 };
+
+function makeCustomFactory(): CustomFactory {
+  return {
+    host(hostRuleName: string): RuleBuilder {
+      return ruleBuilder((provenance) => {
+        const rule: CustomHostRule = {
+          kind: 'custom.host',
+          id: toRuleId(`custom.host:${hostRuleName}`),
+          hostRuleName,
+          portable: false,
+          provenance,
+        };
+        return [rule];
+      });
+    },
+  };
+}
 
 function makeArchFactory(allComponents: readonly ComponentToken[]): ArchFactory {
   return {
@@ -233,6 +265,7 @@ export function defineProject<T extends ComponentsInput>(config: DefineProjectCo
   const context = {
     ...tokens,
     arch: makeArchFactory(Object.values(tokens)),
+    custom: makeCustomFactory(),
   } as ComponentContext<T>;
 
   const builders = config.rules?.(context) ?? [];

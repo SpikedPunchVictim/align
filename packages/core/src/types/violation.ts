@@ -80,6 +80,15 @@ export type Violation =
       readonly component: ComponentName;
       readonly value: number;
       readonly threshold: number;
+    })
+  // `custom.host` (registration surface, docs/proposals/rule-expansion-evaluation.md §B.0):
+  // `detail` is the registered predicate's own `HostViolation.message` — the only kind whose
+  // violation text comes from outside align's own evaluators, so it's kept as a distinct field
+  // rather than folded into `because` (which stays reserved for the rule author's `.because()`).
+  | (ViolationBase & {
+      readonly kind: 'custom';
+      readonly hostRuleName: string;
+      readonly detail: string;
     });
   // Reserved variant (arrives with its rule kind — reserve pending evidence, docs/ir-schema.md):
   // 'naming' { actual, pattern }
@@ -117,6 +126,11 @@ export function renderViolationMessage(v: Violation): string {
       return (
         `${v.file} (component '${v.component}') is ${v.value} lines, exceeding rule '${v.ruleId}'s ` +
         `max-${v.metric} limit of ${v.threshold} lines.` + (v.because !== undefined ? ` ${v.because}` : '')
+      );
+    case 'custom':
+      return (
+        `${v.file}: ${v.detail} (rule '${v.ruleId}', host predicate '${v.hostRuleName}').` +
+        (v.because !== undefined ? ` ${v.because}` : '')
       );
     default: {
       const exhaustive: never = v;

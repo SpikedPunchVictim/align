@@ -51,6 +51,12 @@ function flag(
  * content-addressed `id` and full `RuleProvenance` (ADR 011). Pure — no I/O, no LLM. Every
  * selector must resolve to an existing component; the first unresolvable one flags the whole
  * fragment rather than partially grounding it.
+ *
+ * `registeredHostPredicates` defaults to empty — a doc/MCP-proposed `custom.host` fragment is only
+ * ever groundable when its `hostRuleName` names a predicate the caller's `align.config.ts` already
+ * registers (docs/proposals/rule-expansion-evaluation.md §B.0); callers thread this from the same
+ * `hostRules` export the CLI composition root extracts for `GateOrchestrator` (`config.ts`), so
+ * "groundable" and "checkable" always agree.
  */
 export function groundFragment(
   fragment: RuleFragment,
@@ -59,6 +65,7 @@ export function groundFragment(
   sourceLineRange: SourceRange,
   sourceQuote: string,
   components: Readonly<Record<ComponentName, ComponentDefinitionIR>>,
+  registeredHostPredicates: ReadonlySet<string> = new Set(),
 ): GroundResult {
   const provenance = buildProvenance(sourceFile, sourceLineRange, sourceQuote, fragment.because);
 
@@ -113,22 +120,32 @@ export function groundFragment(
       return { ok: true, rule };
     }
     case 'custom.host': {
-      // Never groundable in v1: no host predicate registry exists, and `evaluateRule` returns
-      // zero violations for the kind — writing this rule would make the dry-run report "adds 0
-      // new violations" vacuously and `align check` count it as passing while enforcing nothing
-      // (the same silent-rule-drop class as an unknown ComponentRef; see
-      // rules/host-rules.ts, which closes the check-time half). Flagged, never silently written
-      // (ADR 011).
-      return flag(
-        section,
-        sourceFile,
-        sourceLineRange,
-        sourceQuote,
-        `host predicate '${fragment.hostRuleName}' is not registered — v1 has no host-defined ` +
-          `rule mechanism, so a custom.host rule cannot be evaluated and would silently report ` +
-          `green; keep this constraint as prose until host predicates ship`,
-        'unregistered-host-rule',
-      );
+      // Groundable only when the name is actually registered (`hostRules` in align.config.ts) —
+      // otherwise this would make the dry-run report "adds 0 new violations" vacuously and
+      // `align check` would hard-error on it anyway (rules/host-rules.ts's `validateHostRules`
+      // closes the check-time half; this closes the propose/build-time half). Flagged, never
+      // silently written (ADR 011).
+      if (!registeredHostPredicates.has(fragment.hostRuleName)) {
+        return flag(
+          section,
+          sourceFile,
+          sourceLineRange,
+          sourceQuote,
+          `host predicate '${fragment.hostRuleName}' is not registered in align.config.ts's ` +
+            `'hostRules' export, so a custom.host rule naming it cannot be evaluated and would ` +
+            `silently report green; register the predicate first, or keep this constraint as ` +
+            `prose until it does`,
+          'unregistered-host-rule',
+        );
+      }
+      const rule = ruleIRSchema.parse({
+        kind: 'custom.host',
+        id: toRuleId(`custom.host:${fragment.hostRuleName}`),
+        hostRuleName: fragment.hostRuleName,
+        portable: false,
+        provenance,
+      });
+      return { ok: true, rule };
     }
     case 'arch.metric': {
       const target = groundComponentRef(fragment.target, components);

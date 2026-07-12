@@ -124,4 +124,43 @@ describe('defineProject', () => {
     });
     expect(ir).toMatchSnapshot();
   });
+
+  it('custom.host compiles to a portable:false custom.host rule referencing the given hostRuleName (ADR 002 §B.0)', () => {
+    const ir = defineProject({
+      components: { api: 'application/api/**' },
+      rules: (c) => [c.custom.host('route-thinness')],
+    });
+    expect(ir.rules).toHaveLength(1);
+    expect(ir.rules[0]).toMatchObject({
+      kind: 'custom.host',
+      id: 'custom.host:route-thinness',
+      hostRuleName: 'route-thinness',
+      portable: false,
+    });
+  });
+
+  it('custom.host supports .because() like every rule', () => {
+    const ir = defineProject({
+      components: { api: 'application/api/**' },
+      rules: (c) => [c.custom.host('route-thinness').because('Route handlers stay thin.')],
+    });
+    expect(ir.rules[0]?.provenance.because).toBe('Route handlers stay thin.');
+  });
+
+  it('custom.host disambiguates a real id collision, same as every other rule kind', () => {
+    const ir = defineProject({
+      components: { api: 'application/api/**' },
+      rules: (c) => [c.custom.host('route-thinness'), c.custom.host('route-thinness')],
+    });
+    expect(ir.rules[0]?.id).toBe('custom.host:route-thinness');
+    expect(ir.rules[1]?.id).toBe('custom.host:route-thinness-2');
+  });
+
+  it('golden snapshot: custom.host compiles to a stable IR shape', () => {
+    const ir = defineProject({
+      components: { api: 'application/api/**' },
+      rules: (c) => [c.custom.host('route-thinness').because('Route handlers stay thin.')],
+    });
+    expect(ir).toMatchSnapshot();
+  });
 });

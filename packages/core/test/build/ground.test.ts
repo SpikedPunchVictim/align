@@ -59,7 +59,7 @@ describe('groundFragment', () => {
     expect(result.flagged.reason).toBe('ungroundable-selector');
   });
 
-  it('flags a custom.host fragment as unregistered-host-rule rather than writing an unevaluatable rule (v1 has no host predicate registry)', () => {
+  it('flags a custom.host fragment as unregistered-host-rule rather than writing an unevaluatable rule, when the name is not registered', () => {
     const result = groundFragment(
       { kind: 'custom.host', hostRuleName: 'route-thinness' },
       'route-handlers',
@@ -67,12 +67,38 @@ describe('groundFragment', () => {
       range,
       'Route handlers stay thin.',
       components,
+      // no third arg — defaults to an empty registered-predicates set
     );
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('unreachable');
     expect(result.flagged.reason).toBe('unregistered-host-rule');
     expect(result.flagged.detail).toContain("'route-thinness'");
     expect(result.flagged.detail).toContain('not registered');
+  });
+
+  it('grounds a custom.host fragment into a real custom.host rule when the predicate IS registered', () => {
+    const result = groundFragment(
+      { kind: 'custom.host', hostRuleName: 'route-thinness', because: 'Route handlers stay thin.' },
+      'route-handlers',
+      docPath,
+      range,
+      'Route handlers stay thin.',
+      components,
+      new Set(['route-thinness']),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    expect(result.rule).toMatchObject({
+      kind: 'custom.host',
+      id: 'custom.host:route-thinness',
+      hostRuleName: 'route-thinness',
+      portable: false,
+    });
+    expect(result.rule.provenance.because).toBe(
+      `Route handlers stay thin. Enforced by ${docPath}:10: 'Route handlers stay thin.'`,
+    );
+    expect(result.rule.provenance.sourceFile).toBe(docPath);
+    expect(result.rule.provenance.sourceQuote).toBe('Route handlers stay thin.');
   });
 
   it('defaults no-cycles scope to repo when unspecified', () => {

@@ -37,6 +37,7 @@ export function proposeRulesFromDoc(
   docText: string,
   docPath: RepoRelativePath,
   components: Readonly<Record<ComponentName, ComponentDefinitionIR>>,
+  registeredHostPredicates: ReadonlySet<string> = new Set(),
 ): BuildProposal {
   const { lines, sections } = parseMarkdownDoc(docText);
   const flagged: FlaggedProposal[] = [];
@@ -50,12 +51,12 @@ export function proposeRulesFromDoc(
     flagged.push(...tier1.errors, ...tier2.errors);
 
     for (const f of tier1.fragments) {
-      const result = groundFragment(f.fragment, section.anchor, docPath, f.sourceLineRange, f.sourceQuote, components);
+      const result = groundFragment(f.fragment, section.anchor, docPath, f.sourceLineRange, f.sourceQuote, components, registeredHostPredicates);
       if (result.ok) candidates.push({ sectionAnchor: section.anchor, rule: result.rule });
       else flagged.push(result.flagged);
     }
     for (const b of tier2.bullets) {
-      const result = groundFragment(b.fragment, section.anchor, docPath, b.sourceLineRange, b.sourceQuote, components);
+      const result = groundFragment(b.fragment, section.anchor, docPath, b.sourceLineRange, b.sourceQuote, components, registeredHostPredicates);
       if (result.ok) candidates.push({ sectionAnchor: section.anchor, rule: result.rule });
       else flagged.push(result.flagged);
     }

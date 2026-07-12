@@ -7,8 +7,13 @@ import { buildUncertaintyAdvisories } from './gates/advisories.js';
 import type { PluginRegistry } from './plugin/registry.js';
 import { evaluateRule } from './rules/evaluators.js';
 import { validateRuleComponentRefs } from './rules/component-refs.js';
-import { validateHostRules } from './rules/host-rules.js';
+import { validateHostRules, type HostPredicateRegistry } from './rules/host-rules.js';
 import { validateClassifiedComponents } from './components/registry.js';
+
+/** No predicates registered — the default for callers that don't inject one (most existing tests
+ * exercise portable `arch.*` kinds only; a real deployment always gets a real registry from the
+ * CLI composition root, `packages/cli/src/composition-root.ts`). */
+const NO_HOST_PREDICATES: HostPredicateRegistry = new Map();
 
 export interface CheckOptions {
   readonly rootDir: string; // absolute filesystem path
@@ -24,6 +29,11 @@ export class GateOrchestrator {
     private readonly registry: PluginRegistry,
     private readonly ruleset: RulesetIR,
     private readonly baselineStore: BaselineStore,
+    /** Injected, never constructed here (core stays framework-free) — the CLI composition root
+     * extracts this from `align.config.ts`'s `hostRules` export (`config.ts`, `composition-root.ts`).
+     * Defaults to empty so every pre-existing caller (tests, anything not using `custom.host`)
+     * keeps working unchanged. */
+    private readonly hostPredicates: HostPredicateRegistry = NO_HOST_PREDICATES,
   ) {}
 
   async check(options: CheckOptions): Promise<CheckRun> {
@@ -76,37 +86,40 @@ export class GateOrchestrator {
     // 2. Every ComponentRef a rule embeds (hand-authored or `.align/generated-rules.json`-merged,
     //    ADR 011) must name a component present in the registry — otherwise `evaluateRule`
     //    simply never matches the stale name and the rule silently drops out.
-    // 3. Every `custom.host` rule must name a registered host predicate — `evaluateRule` returns
-    //    zero violations for the kind (v1 has no host-rule execution mechanism), so an
-    //    unregistered predicate is an unevaluatable rule reporting green. v1 registers none
-    //    (empty set below — the parameter is the growth path for a future predicate registry).
+    // 3. Every `custom.host` rule must name a registered host predicate — an unregistered
+    //    predicate is an unevaluatable rule reporting green. `this.hostPredicates`' key set is
+    //    the real registered-name set once the CLI composition root injects one; a repo with no
+    //    `hostRules` export gets the empty default, same as before registration existed.
     try {
       validateClassifiedComponents(this.ruleset.components, new Set(graph.nodes.map((n) => n.component)));
       validateRuleComponentRefs(this.ruleset.rules, this.ruleset.components);
-      validateHostRules(this.ruleset.rules, new Set<string>());
+      validateHostRules(this.ruleset.rules, new Set(this.hostPredicates.keys()));
     } catch (err) {
-      const architectureGate: GateResult = {
-        gate: 'architecture',
-        status: 'error',
-        violations: [],
-        baselinedCount: 0,
-        errorMessage: err instanceof Error ? err.message : String(err),
-        durationMs: performance.now() - archStart,
-        cacheHits: 0,
-        dependsOn: ['parse'],
-      };
       return {
         verdict: 'error',
-        gates: [parseGate, architectureGate],
+        gates: [parseGate, errorGate(err, archStart)],
         advisories: [...buildUncertaintyAdvisories(graph.uncertain)],
         scannedAt,
       };
     }
 
+    // A registered predicate that throws (`HostPredicateExecutionError`) surfaces here — the
+    // reference-validity invariant's sibling (ADR 008 amendment): a buggy predicate must never be
+    // a silent pass, so it's caught at the same granularity as the guard-step failures above,
+    // never allowed to abort the process with an unattributed stack trace.
     const allViolations: Violation[] = [];
-    for (const rule of this.ruleset.rules) {
-      const violations = evaluateRule(rule, graph, this.ruleset.components);
-      allViolations.push(...violations);
+    try {
+      for (const rule of this.ruleset.rules) {
+        const violations = evaluateRule(rule, graph, this.ruleset.components, this.hostPredicates);
+        allViolations.push(...violations);
+      }
+    } catch (err) {
+      return {
+        verdict: 'error',
+        gates: [parseGate, errorGate(err, archStart)],
+        advisories: [...buildUncertaintyAdvisories(graph.uncertain)],
+        scannedAt,
+      };
     }
 
     // Move-transfer (ADR 006), run on every check — not just `baseline prune` — so a renamed
@@ -171,6 +184,22 @@ export class GateOrchestrator {
       scannedAt: Math.min(...graphs.map((g) => g.scannedAt)),
     };
   }
+}
+
+/** Shared by every `architecture` gate `error` path (guard-step failures, predicate exceptions) —
+ * ADR 008: `error` is categorically distinct from `red`, always halts and escalates, never enters
+ * an LLM-facing payload as prose (only `errorMessage`, a plain string). */
+function errorGate(err: unknown, archStart: number): GateResult {
+  return {
+    gate: 'architecture',
+    status: 'error',
+    violations: [],
+    baselinedCount: 0,
+    errorMessage: err instanceof Error ? err.message : String(err),
+    durationMs: performance.now() - archStart,
+    cacheHits: 0,
+    dependsOn: ['parse'],
+  };
 }
 
 function skippedGate(gate: GateResult['gate'], dependsOn: readonly GateResult['gate'][]): GateResult {

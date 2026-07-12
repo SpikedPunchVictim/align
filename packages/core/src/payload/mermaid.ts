@@ -12,6 +12,9 @@ import type { CycleEdge, Violation } from '../types/violation.js';
  *   concrete files, labeled with the forbidden specifier.
  * - `metric`: a single node (there is no offending edge — the violation is file-level, not
  *   import-direction-level) labeled with the component, file, and measured-vs-max lines.
+ * - `custom`: a single node (a host predicate's violation is whatever shape the predicate chose —
+ *   there's no structural edge/chain align itself derived) labeled with the file and the
+ *   predicate's own message.
  */
 export function buildViolationMermaid(violation: Violation): string {
   switch (violation.kind) {
@@ -25,6 +28,8 @@ export function buildViolationMermaid(violation: Violation): string {
       return fence(edgeDiagram(violation.fromLayer, violation.fromFile, violation.toLayer, violation.toFile, violation.specifier));
     case 'metric':
       return fence(metricDiagram(violation.component, violation.file, violation.value, violation.threshold));
+    case 'custom':
+      return fence(customDiagram(violation.file, violation.hostRuleName, violation.detail));
     default: {
       const exhaustive: never = violation;
       throw new Error(`unhandled violation kind: ${JSON.stringify(exhaustive)}`);
@@ -76,6 +81,10 @@ function edgeDiagram(fromLabel: string, fromFile: string, toLabel: string, toFil
 
 function metricDiagram(component: string, file: string, value: number, threshold: number): string {
   return ['graph LR', `  a["${escapeLabel(component)}<br/>${escapeLabel(file)}<br/>${value} lines (max ${threshold})"]`].join('\n');
+}
+
+function customDiagram(file: string, hostRuleName: string, detail: string): string {
+  return ['graph LR', `  a["${escapeLabel(file)}<br/>predicate: ${escapeLabel(hostRuleName)}<br/>${escapeLabel(detail)}"]`].join('\n');
 }
 
 function escapeLabel(s: string): string {
