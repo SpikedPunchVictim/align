@@ -1,0 +1,81 @@
+import { describe, expect, it } from 'vitest';
+import { UnknownComponentRefError, validateRuleComponentRefs } from '../../src/rules/component-refs.js';
+import type { ArchLayersRule, ArchNoCyclesRule, ArchNoDependencyRule, ComponentDefinitionIR, CustomHostRule, RuleIR } from '../../src/types/ir.js';
+import type { ComponentName } from '../../src/types/branded.js';
+
+function components(...names: string[]): Readonly<Record<ComponentName, ComponentDefinitionIR>> {
+  const out: Record<string, ComponentDefinitionIR> = {};
+  for (const name of names) {
+    out[name] = { name, selector: { kind: 'glob', patterns: [`${name}/**`] }, allowEmpty: false };
+  }
+  return out as Readonly<Record<ComponentName, ComponentDefinitionIR>>;
+}
+
+describe('validateRuleComponentRefs', () => {
+  it('does not throw when every ComponentRef resolves to a known component', () => {
+    const rules: RuleIR[] = [
+      { kind: 'arch.no-dependency', id: 'r1', from: 'api', to: 'ui', provenance: {} } satisfies ArchNoDependencyRule,
+      { kind: 'arch.no-cycles', id: 'r2', scope: 'api', includeTypeOnly: false, provenance: {} } satisfies ArchNoCyclesRule,
+      { kind: 'arch.no-cycles', id: 'r3', scope: 'repo', includeTypeOnly: false, provenance: {} } satisfies ArchNoCyclesRule,
+      {
+        kind: 'arch.layers',
+        id: 'r4',
+        layers: [{ layer: 'api', canDependOn: ['ui'] }],
+        provenance: {},
+      } satisfies ArchLayersRule,
+      { kind: 'custom.host', id: 'r5', hostRuleName: 'whatever', portable: false, provenance: {} } satisfies CustomHostRule,
+    ];
+    expect(() => validateRuleComponentRefs(rules, components('api', 'ui'))).not.toThrow();
+  });
+
+  it('throws UnknownComponentRefError naming the rule id and the missing component for arch.no-dependency `from`', () => {
+    const rules: RuleIR[] = [{ kind: 'arch.no-dependency', id: 'ghost-rule', from: 'ghost', to: 'ui', provenance: {} } satisfies ArchNoDependencyRule];
+    expect(() => validateRuleComponentRefs(rules, components('ui'))).toThrow(UnknownComponentRefError);
+    try {
+      validateRuleComponentRefs(rules, components('ui'));
+      expect.fail('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(UnknownComponentRefError);
+      const e = err as UnknownComponentRefError;
+      expect(e.ruleId).toBe('ghost-rule');
+      expect(e.componentName).toBe('ghost');
+      expect(e.message).toContain('ghost-rule');
+      expect(e.message).toContain('ghost');
+      expect(e.message).toContain('align build');
+    }
+  });
+
+  it('throws for arch.no-dependency `to`', () => {
+    const rules: RuleIR[] = [{ kind: 'arch.no-dependency', id: 'r', from: 'api', to: 'ghost', provenance: {} } satisfies ArchNoDependencyRule];
+    expect(() => validateRuleComponentRefs(rules, components('api'))).toThrow(UnknownComponentRefError);
+  });
+
+  it('throws for arch.no-cycles `scope` when not `repo`', () => {
+    const rules: RuleIR[] = [{ kind: 'arch.no-cycles', id: 'r', scope: 'ghost', includeTypeOnly: false, provenance: {} } satisfies ArchNoCyclesRule];
+    expect(() => validateRuleComponentRefs(rules, components('api'))).toThrow(UnknownComponentRefError);
+  });
+
+  it('does not throw for arch.no-cycles `scope: "repo"` regardless of the registry', () => {
+    const rules: RuleIR[] = [{ kind: 'arch.no-cycles', id: 'r', scope: 'repo', includeTypeOnly: false, provenance: {} } satisfies ArchNoCyclesRule];
+    expect(() => validateRuleComponentRefs(rules, components())).not.toThrow();
+  });
+
+  it('throws for arch.layers `layer`', () => {
+    const rules: RuleIR[] = [
+      { kind: 'arch.layers', id: 'r', layers: [{ layer: 'ghost', canDependOn: [] }], provenance: {} } satisfies ArchLayersRule,
+    ];
+    expect(() => validateRuleComponentRefs(rules, components('api'))).toThrow(UnknownComponentRefError);
+  });
+
+  it('throws for arch.layers `canDependOn` entries', () => {
+    const rules: RuleIR[] = [
+      { kind: 'arch.layers', id: 'r', layers: [{ layer: 'api', canDependOn: ['ghost'] }], provenance: {} } satisfies ArchLayersRule,
+    ];
+    expect(() => validateRuleComponentRefs(rules, components('api'))).toThrow(UnknownComponentRefError);
+  });
+
+  it('custom.host rules carry no ComponentRef and never throw', () => {
+    const rules: RuleIR[] = [{ kind: 'custom.host', id: 'r', hostRuleName: 'x', portable: false, provenance: {} } satisfies CustomHostRule];
+    expect(() => validateRuleComponentRefs(rules, components())).not.toThrow();
+  });
+});

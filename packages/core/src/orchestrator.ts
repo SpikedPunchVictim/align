@@ -6,6 +6,7 @@ import type { Advisory, CheckRun, GateResult } from './gates/types.js';
 import { buildUncertaintyAdvisories } from './gates/advisories.js';
 import type { PluginRegistry } from './plugin/registry.js';
 import { evaluateRule } from './rules/evaluators.js';
+import { validateRuleComponentRefs } from './rules/component-refs.js';
 
 export interface CheckOptions {
   readonly rootDir: string; // absolute filesystem path
@@ -60,6 +61,34 @@ export class GateOrchestrator {
     };
 
     const archStart = performance.now();
+
+    // Every ComponentRef a rule embeds (hand-authored or `.align/generated-rules.json`-merged,
+    // ADR 011) must name a component still present in the registry — otherwise `evaluateRule`
+    // simply never matches the stale name and the rule evaluates vacuously green with no signal
+    // (the false-green class this check exists to close, ARCHITECTURE.md's severity-zero
+    // invariant). This is an `error`, not `red` or a silent drop (ADR 008): the architecture gate
+    // itself couldn't produce a trustworthy verdict, same category as a scanner crash below.
+    try {
+      validateRuleComponentRefs(this.ruleset.rules, this.ruleset.components);
+    } catch (err) {
+      const architectureGate: GateResult = {
+        gate: 'architecture',
+        status: 'error',
+        violations: [],
+        baselinedCount: 0,
+        errorMessage: err instanceof Error ? err.message : String(err),
+        durationMs: performance.now() - archStart,
+        cacheHits: 0,
+        dependsOn: ['parse'],
+      };
+      return {
+        verdict: 'error',
+        gates: [parseGate, architectureGate],
+        advisories: [...buildUncertaintyAdvisories(graph.uncertain)],
+        scannedAt,
+      };
+    }
+
     const allViolations: Violation[] = [];
     for (const rule of this.ruleset.rules) {
       const violations = evaluateRule(rule, graph, this.ruleset.components);
