@@ -40,8 +40,9 @@ function flag(
   sourceLineRange: SourceRange,
   sourceQuote: string,
   detail: string,
+  reason: FlaggedProposal['reason'] = 'ungroundable-selector',
 ): GroundResult {
-  return { ok: false, flagged: { section, sourceFile, sourceLineRange, sourceQuote, reason: 'ungroundable-selector', detail } };
+  return { ok: false, flagged: { section, sourceFile, sourceLineRange, sourceQuote, reason, detail } };
 }
 
 /**
@@ -112,14 +113,22 @@ export function groundFragment(
       return { ok: true, rule };
     }
     case 'custom.host': {
-      const rule = ruleIRSchema.parse({
-        kind: 'custom.host',
-        id: toRuleId(`custom.host:${fragment.hostRuleName}`),
-        hostRuleName: fragment.hostRuleName,
-        portable: false,
-        provenance,
-      });
-      return { ok: true, rule };
+      // Never groundable in v1: no host predicate registry exists, and `evaluateRule` returns
+      // zero violations for the kind — writing this rule would make the dry-run report "adds 0
+      // new violations" vacuously and `align check` count it as passing while enforcing nothing
+      // (the same silent-rule-drop class as an unknown ComponentRef; see
+      // rules/host-rules.ts, which closes the check-time half). Flagged, never silently written
+      // (ADR 011).
+      return flag(
+        section,
+        sourceFile,
+        sourceLineRange,
+        sourceQuote,
+        `host predicate '${fragment.hostRuleName}' is not registered — v1 has no host-defined ` +
+          `rule mechanism, so a custom.host rule cannot be evaluated and would silently report ` +
+          `green; keep this constraint as prose until host predicates ship`,
+        'unregistered-host-rule',
+      );
     }
     case 'arch.metric': {
       const target = groundComponentRef(fragment.target, components);

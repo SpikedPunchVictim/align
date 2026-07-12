@@ -177,6 +177,33 @@ describe('align mcp — align_propose_rules (ADR 011 two-pass clarification)', (
     expect(payload.flaggedUngroundable.some((f) => f.reason === 'ungroundable-selector')).toBe(true);
   });
 
+  it('flags a custom.host proposal as unregistered-host-rule instead of accepting it vacuously', async () => {
+    // Regression for the live align_propose_rules session that accepted a custom.host proposal
+    // whose hostRuleName matched no predicate anywhere (v1 defines none) — grounding validated
+    // components but not host predicates, so the dry-run reported "adds 0 new violations"
+    // vacuously and, once written, check would have counted the rule as passing forever.
+    const client = await connectedClient(path.join(fixturesDir, 'build-app-mcp'));
+    const result = await client.callTool({
+      name: 'align_propose_rules',
+      arguments: {
+        doc_path: 'docs/ARCHITECTURE-RULES.md',
+        proposals: [
+          {
+            section: 'module-size',
+            fragment: { kind: 'custom.host', hostRuleName: 'route-thinness' },
+            sourceLineRange: { startLine: 13, endLine: 13 },
+            sourceQuote: 'route handlers stay thin',
+          },
+        ],
+      },
+    });
+    const payload = JSON.parse(textOf(result)) as { accepted: { id: string }[]; flaggedUngroundable: { reason: string; detail: string }[] };
+    expect(payload.accepted.some((r) => r.id.includes('route-thinness'))).toBe(false);
+    const flagged = payload.flaggedUngroundable.find((f) => f.reason === 'unregistered-host-rule');
+    expect(flagged).toBeDefined();
+    expect(flagged?.detail).toContain("'route-thinness'");
+  });
+
   it('{ apply: true } writes generated-rules.json, rules.lock.json, and the audit report', async () => {
     const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-mcp-build-test-'));
     fs.cpSync(path.join(fixturesDir, 'build-app-mcp'), rootDir, { recursive: true });

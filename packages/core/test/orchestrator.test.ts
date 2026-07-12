@@ -114,6 +114,30 @@ describe('GateOrchestrator', () => {
     expect(archGate?.errorMessage).toContain('ghost');
   });
 
+  it('reports architecture gate error (never green) when a custom.host rule names an unregistered predicate (false-green guard)', async () => {
+    const ruleset = defineProject({
+      components: { api: 'application/api/**' },
+    });
+    // `evaluateRule` returns zero violations for `custom.host` (v1 has no host-rule execution
+    // mechanism), so without this guard the rule would count as passing while enforcing nothing.
+    // Only reachable via generated-rules merge or a hand-edited RulesetIR — the DSL has no
+    // custom.host verb — same injection shape as the stale ComponentRef test above.
+    const hostRuleset = {
+      ...ruleset,
+      rules: [...ruleset.rules, { kind: 'custom.host', id: 'custom.host:route-thinness', hostRuleName: 'route-thinness', portable: false, provenance: {} }],
+    } as typeof ruleset;
+    const registry = new StaticPluginRegistry([
+      fakePlugin(() => graph([node('application/api/a.ts', 'api')], [])),
+    ]);
+    const orchestrator = new GateOrchestrator(registry, hostRuleset, new InMemoryBaselineStore());
+    const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+    expect(run.verdict).toBe('error');
+    const archGate = run.gates.find((g) => g.gate === 'architecture');
+    expect(archGate?.status).toBe('error');
+    expect(archGate?.errorMessage).toContain('custom.host:route-thinness');
+    expect(archGate?.errorMessage).toContain("'route-thinness'");
+  });
+
   it('reports architecture gate error (never green) when a declared component has zero classified files (ADR 003, false-green guard)', async () => {
     const ruleset = defineProject({
       components: { api: 'application/api/**', ui: 'application/ui/**' },

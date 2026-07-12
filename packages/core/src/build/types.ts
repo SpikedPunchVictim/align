@@ -8,7 +8,8 @@ export type FlaggedReason =
   | 'ungroundable-selector' // a component name in the fragment doesn't exist in the registry
   | 'unparsed-bullet' // a `- **Rule**:` line didn't match the tier-2 grammar
   | 'invalid-fragment' // a tier-1 ```align block failed JSON parse or zod validation
-  | 'conflicting-rule-id'; // two proposals share a semantic id but disagree on content
+  | 'conflicting-rule-id' // two proposals share a semantic id but disagree on content
+  | 'unregistered-host-rule'; // a custom.host fragment names a host predicate v1 cannot evaluate
 
 export interface FlaggedProposal {
   readonly section: string; // section anchor

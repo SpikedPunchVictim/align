@@ -247,6 +247,53 @@ describe('align check — stale generated-rules.json false-green guard (RULESET_
     expect(human.text).toContain('hand:app->ghost');
     expect(human.text).toContain('ghost');
   });
+
+  it('(e) a generated custom.host rule naming an unregistered predicate errors — never a vacuous pass', async () => {
+    tmpDir = copyFixture('simple-app');
+    // The shape the live align_propose_rules session produced before grounding flagged it:
+    // a custom.host rule written to generated-rules.json whose predicate exists nowhere
+    // (v1 has no host predicate mechanism at all) — `evaluateRule` returns [] for the kind,
+    // so pre-fix this counted as a passing rule.
+    writeGeneratedRules(tmpDir, [
+      { kind: 'custom.host', id: 'custom.host:route-thinness', hostRuleName: 'route-thinness', portable: false, provenance: {} },
+    ]);
+
+    const { code, payload } = await readJson(() => runCheck(tmpDir, { json: true }));
+    expect(code).not.toBe(0);
+    expect(payload.verdict).toBe('error');
+    const archGate = payload.gates.find((g) => g.gate === 'architecture');
+    expect(archGate?.status).toBe('error');
+
+    const human = await readHumanOutput(() => runCheck(tmpDir, { json: false }));
+    expect(human.text).toContain('custom.host:route-thinness');
+    expect(human.text).toContain("'route-thinness'");
+    expect(human.text).toContain('verdict: error');
+  });
+
+  it('(f) a hand-written custom.host rule (raw RulesetIR in align.config.ts) errors the same way', async () => {
+    tmpDir = copyFixture('simple-app');
+    // The DSL has no custom.host verb, so a raw RulesetIR export is the only hand-written route.
+    fs.writeFileSync(
+      path.join(tmpDir, 'align.config.ts'),
+      `import type { RulesetIR } from '@align/core';\n\n` +
+        `const ruleset: RulesetIR = {\n` +
+        `  irVersion: '1',\n` +
+        `  components: { app: { name: 'app', selector: { kind: 'glob', patterns: ['src/**'] }, allowEmpty: false } },\n` +
+        `  rules: [{ kind: 'custom.host', id: 'custom.host:hand-rolled', hostRuleName: 'hand-rolled', portable: false, provenance: {} }],\n` +
+        `};\n\nexport default ruleset;\n`,
+      'utf8',
+    );
+
+    const { code, payload } = await readJson(() => runCheck(tmpDir, { json: true }));
+    expect(code).not.toBe(0);
+    expect(payload.verdict).toBe('error');
+    const archGate = payload.gates.find((g) => g.gate === 'architecture');
+    expect(archGate?.status).toBe('error');
+
+    const human = await readHumanOutput(() => runCheck(tmpDir, { json: false }));
+    expect(human.text).toContain('custom.host:hand-rolled');
+    expect(human.text).toContain("'hand-rolled'");
+  });
 });
 
 describe('align check — empty-component false-green guard (ADR 003 empty-selector-fails-by-default)', () => {

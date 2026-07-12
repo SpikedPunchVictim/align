@@ -59,6 +59,22 @@ describe('groundFragment', () => {
     expect(result.flagged.reason).toBe('ungroundable-selector');
   });
 
+  it('flags a custom.host fragment as unregistered-host-rule rather than writing an unevaluatable rule (v1 has no host predicate registry)', () => {
+    const result = groundFragment(
+      { kind: 'custom.host', hostRuleName: 'route-thinness' },
+      'route-handlers',
+      docPath,
+      range,
+      'Route handlers stay thin.',
+      components,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.flagged.reason).toBe('unregistered-host-rule');
+    expect(result.flagged.detail).toContain("'route-thinness'");
+    expect(result.flagged.detail).toContain('not registered');
+  });
+
   it('defaults no-cycles scope to repo when unspecified', () => {
     const result = groundFragment({ kind: 'arch.no-cycles' }, 'cycles', docPath, range, 'No cycles.', components);
     expect(result.ok).toBe(true);

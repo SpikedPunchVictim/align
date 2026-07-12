@@ -7,6 +7,7 @@ import { buildUncertaintyAdvisories } from './gates/advisories.js';
 import type { PluginRegistry } from './plugin/registry.js';
 import { evaluateRule } from './rules/evaluators.js';
 import { validateRuleComponentRefs } from './rules/component-refs.js';
+import { validateHostRules } from './rules/host-rules.js';
 import { validateClassifiedComponents } from './components/registry.js';
 
 export interface CheckOptions {
@@ -75,9 +76,14 @@ export class GateOrchestrator {
     // 2. Every ComponentRef a rule embeds (hand-authored or `.align/generated-rules.json`-merged,
     //    ADR 011) must name a component present in the registry — otherwise `evaluateRule`
     //    simply never matches the stale name and the rule silently drops out.
+    // 3. Every `custom.host` rule must name a registered host predicate — `evaluateRule` returns
+    //    zero violations for the kind (v1 has no host-rule execution mechanism), so an
+    //    unregistered predicate is an unevaluatable rule reporting green. v1 registers none
+    //    (empty set below — the parameter is the growth path for a future predicate registry).
     try {
       validateClassifiedComponents(this.ruleset.components, new Set(graph.nodes.map((n) => n.component)));
       validateRuleComponentRefs(this.ruleset.rules, this.ruleset.components);
+      validateHostRules(this.ruleset.rules, new Set<string>());
     } catch (err) {
       const architectureGate: GateResult = {
         gate: 'architecture',
