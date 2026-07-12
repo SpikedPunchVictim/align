@@ -3,6 +3,7 @@ import type { RulesetIR } from './types/ir.js';
 import type { Violation } from './types/violation.js';
 import type { BaselineStore } from './baseline/store.js';
 import type { Advisory, CheckRun, GateResult } from './gates/types.js';
+import { buildUncertaintyAdvisories } from './gates/advisories.js';
 import type { PluginRegistry } from './plugin/registry.js';
 import { evaluateRule } from './rules/evaluators.js';
 
@@ -87,13 +88,7 @@ export class GateOrchestrator {
       dependsOn: ['parse'],
     };
 
-    const advisories: Advisory[] = [];
-    if (graph.uncertain.length > 0) {
-      advisories.push({
-        kind: 'uncertainty',
-        message: `${graph.uncertain.length} specifier(s) across ${new Set(graph.uncertain.map((u) => u.file)).size} file(s) could not be resolved with certainty and were excluded from the graph.`,
-      });
-    }
+    const advisories: Advisory[] = [...buildUncertaintyAdvisories(graph.uncertain)];
     if (moves.length > 0) {
       advisories.push({
         kind: 'baseline-moved',

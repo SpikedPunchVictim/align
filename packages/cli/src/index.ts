@@ -4,6 +4,7 @@ import { runCheck } from './commands/check.js';
 import { runInit } from './commands/init.js';
 import { baselineAccept, baselinePrune, baselineShow } from './commands/baseline.js';
 import { buildExplainPayload } from './commands/explain.js';
+import { runDoctor } from './commands/doctor.js';
 import { startMcpServer } from './mcp/server.js';
 
 const program = new Command();
@@ -63,6 +64,16 @@ program
       return;
     }
     console.log(JSON.stringify(payload, null, 2));
+  });
+
+program
+  .command('doctor')
+  .description(
+    'Read-only advisory survey: dead tsconfig path aliases, uncertainty breakdown, unmapped ' +
+      'files, workspace-orphaned packages, empty components. Never fails — exit code is always 0.',
+  )
+  .action(async () => {
+    process.exitCode = await runDoctor(process.cwd());
   });
 
 program
