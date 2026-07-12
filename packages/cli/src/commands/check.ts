@@ -31,21 +31,27 @@ export async function runCheck(rootDir: string, options: CheckOptions): Promise<
   }
 
   let effectiveRun = run;
-  let frozenRulesOk = true;
   if (options.frozenRules === true) {
     const frozen = verifyFrozenRules(rootDir);
-    frozenRulesOk = frozen.ok;
-    effectiveRun = { ...run, advisories: [...run.advisories, ...frozen.advisories] };
+    effectiveRun = {
+      ...run,
+      // A false 'green' verdict is a severity-zero bug class (ARCHITECTURE.md's stated
+      // invariant) — drift/divergence must flip the VERDICT ITSELF, not just the exit code, so
+      // `--json` consumers (agents, CI) reading `verdict` alone never get a lying "green" while
+      // `advisories` quietly explains why they shouldn't have trusted it.
+      verdict: !frozen.ok && run.verdict === 'green' ? 'red' : run.verdict,
+      advisories: [...run.advisories, ...frozen.advisories],
+    };
   }
 
   if (options.json) {
     const payload = buildMcpCheckPayload(effectiveRun);
     process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
-    return effectiveRun.verdict === 'green' && frozenRulesOk ? 0 : 1;
+    return effectiveRun.verdict === 'green' ? 0 : 1;
   }
 
   printHuman(effectiveRun);
-  return effectiveRun.verdict === 'green' && frozenRulesOk ? 0 : 1;
+  return effectiveRun.verdict === 'green' ? 0 : 1;
 }
 
 function printHuman(run: CheckRun): void {

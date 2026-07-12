@@ -224,6 +224,24 @@ describe('align build --verify / align check --frozen-rules', () => {
     );
     expect(await runCheck(tmpDir, { json: false, frozenRules: true })).toBe(1);
     expect(await runCheck(tmpDir, { json: false })).toBe(0); // plain check is unaffected by drift
+
+    // The `verdict` field itself must flip to 'red' during drift, not just the exit code — a
+    // false 'green' in the machine payload is exactly the false-green class the project treats as
+    // severity-zero (ARCHITECTURE.md), and an agent reading --json alone must not be misled.
+    const logs: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string) => {
+      logs.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      await runCheck(tmpDir, { json: true, frozenRules: true });
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+    const payload = JSON.parse(logs.join('')) as { verdict: string; advisories: { kind: string }[] };
+    expect(payload.verdict).toBe('red');
+    expect(payload.advisories.some((a) => a.kind === 'doc-drift')).toBe(true);
   });
 });
 
