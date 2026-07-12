@@ -163,4 +163,61 @@ describe('defineProject', () => {
     });
     expect(ir).toMatchSnapshot();
   });
+
+  describe('c.security.manifest (ADR 013)', () => {
+    it('sourceHygiene compiles to a single security.manifest.source-hygiene rule with a stable id', () => {
+      const ir = defineProject({
+        components: { api: 'application/api/**' },
+        rules: (c) => [c.security.manifest.sourceHygiene()],
+      });
+      expect(ir.rules).toHaveLength(1);
+      expect(ir.rules[0]).toMatchObject({
+        kind: 'security.manifest.source-hygiene',
+        id: 'security.manifest.source-hygiene',
+      });
+    });
+
+    it('newDependencyGate compiles to a single security.manifest.new-dependency rule with a stable id', () => {
+      const ir = defineProject({
+        components: { api: 'application/api/**' },
+        rules: (c) => [c.security.manifest.newDependencyGate()],
+      });
+      expect(ir.rules).toHaveLength(1);
+      expect(ir.rules[0]).toMatchObject({
+        kind: 'security.manifest.new-dependency',
+        id: 'security.manifest.new-dependency',
+      });
+    });
+
+    it('both verbs support .because() like every rule', () => {
+      const ir = defineProject({
+        components: { api: 'application/api/**' },
+        rules: (c) => [
+          c.security.manifest.sourceHygiene().because('Non-registry deps need human sign-off.'),
+          c.security.manifest.newDependencyGate().because('New deps require explicit review.'),
+        ],
+      });
+      expect(ir.rules[0]?.provenance.because).toBe('Non-registry deps need human sign-off.');
+      expect(ir.rules[1]?.provenance.because).toBe('New deps require explicit review.');
+    });
+
+    it('a component named `security` is a compile-time error (reserved factory name, ADR 002/013) — runtime smoke: the factory is real and does not collide with a component token', () => {
+      const ir = defineProject({
+        components: { api: 'application/api/**' },
+        rules: (c) => [c.security.manifest.sourceHygiene()],
+      });
+      expect(ir.components['api']).toBeDefined();
+    });
+
+    it('golden snapshot: security.manifest rules compile to a stable IR shape', () => {
+      const ir = defineProject({
+        components: { api: 'application/api/**' },
+        rules: (c) => [
+          c.security.manifest.sourceHygiene(),
+          c.security.manifest.newDependencyGate(),
+        ],
+      });
+      expect(ir).toMatchSnapshot();
+    });
+  });
 });

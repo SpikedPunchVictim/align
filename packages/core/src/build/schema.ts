@@ -61,12 +61,28 @@ const metricFragmentSchema = z.object({
   because: z.string().optional(),
 });
 
+// `security.manifest.*` (ADR 013, promoted 2026-07-12 on spike/MANIFEST_PROBE_REPORT.md probe
+// evidence) — mirrors the DSL's `.sourceHygiene()`/`.newDependencyGate()` (dsl/index.ts). Neither
+// verb takes a target/selector, so the fragment carries only `because`, same shape as
+// `customHostFragmentSchema` minus `hostRuleName`.
+const securityManifestSourceHygieneFragmentSchema = z.object({
+  kind: z.literal('security.manifest.source-hygiene'),
+  because: z.string().optional(),
+});
+
+const securityManifestNewDependencyFragmentSchema = z.object({
+  kind: z.literal('security.manifest.new-dependency'),
+  because: z.string().optional(),
+});
+
 export const ruleFragmentSchema = z.discriminatedUnion('kind', [
   noDependencyFragmentSchema,
   noCyclesFragmentSchema,
   layersFragmentSchema,
   customHostFragmentSchema,
   metricFragmentSchema,
+  securityManifestSourceHygieneFragmentSchema,
+  securityManifestNewDependencyFragmentSchema,
 ]);
 
 export type RuleFragment = z.infer<typeof ruleFragmentSchema>;

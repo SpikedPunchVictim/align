@@ -15,6 +15,8 @@ import type {
   RuleIR,
   RuleProvenance,
   RulesetIR,
+  SecurityManifestNewDependencyRule,
+  SecurityManifestSourceHygieneRule,
 } from '../types/ir.js';
 import { rulesetIRSchema } from '../types/ir.js';
 
@@ -135,6 +137,7 @@ export type ComponentContext<T extends ComponentsInput> = {
 } & {
   readonly arch: ArchFactory;
   readonly custom: CustomFactory;
+  readonly security: SecurityFactory;
 };
 
 function makeCustomFactory(): CustomFactory {
@@ -150,6 +153,57 @@ function makeCustomFactory(): CustomFactory {
         };
         return [rule];
       });
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// `c.security.manifest` — the `security.manifest.*` rule kinds (ADR 013, promoted 2026-07-12 on
+// spike/MANIFEST_PROBE_REPORT.md probe evidence). First-class kinds, not `custom.host` escape
+// hatches: portable IR, tier-2 doc-authoring support (`build/tier2.ts`), full `.because()`
+// treatment via the same `ruleBuilder()` every other verb in this file uses. Both verbs take no
+// arguments — the manifest scan domain (root + workspace `package.json` + `pnpm-lock.yaml`) has no
+// notion of align's file-classified components, so there is nothing to parameterize (mirrors
+// `custom.host`'s no-`ComponentRef` shape, `rules/component-refs.ts`).
+// ---------------------------------------------------------------------------------------------
+
+interface SecurityManifestFactory {
+  /** Any dependency specifier resolving to a git/http(s)/file/link source (not registry, not
+   * `workspace:`) is a violation — `security.manifest.source-hygiene`. */
+  sourceHygiene(): RuleBuilder;
+  /** Every current runtime/dev dependency is fingerprinted (name + declaring manifest); baseline
+   * consent (`align init` / `baseline accept`) seeds what's there today, so only a genuinely new
+   * dependency added later shows red — `security.manifest.new-dependency`. */
+  newDependencyGate(): RuleBuilder;
+}
+
+interface SecurityFactory {
+  readonly manifest: SecurityManifestFactory;
+}
+
+function makeSecurityFactory(): SecurityFactory {
+  return {
+    manifest: {
+      sourceHygiene(): RuleBuilder {
+        return ruleBuilder((provenance) => {
+          const rule: SecurityManifestSourceHygieneRule = {
+            kind: 'security.manifest.source-hygiene',
+            id: toRuleId('security.manifest.source-hygiene'),
+            provenance,
+          };
+          return [rule];
+        });
+      },
+      newDependencyGate(): RuleBuilder {
+        return ruleBuilder((provenance) => {
+          const rule: SecurityManifestNewDependencyRule = {
+            kind: 'security.manifest.new-dependency',
+            id: toRuleId('security.manifest.new-dependency'),
+            provenance,
+          };
+          return [rule];
+        });
+      },
     },
   };
 }
@@ -266,6 +320,7 @@ export function defineProject<T extends ComponentsInput>(config: DefineProjectCo
     ...tokens,
     arch: makeArchFactory(Object.values(tokens)),
     custom: makeCustomFactory(),
+    security: makeSecurityFactory(),
   } as ComponentContext<T>;
 
   const builders = config.rules?.(context) ?? [];

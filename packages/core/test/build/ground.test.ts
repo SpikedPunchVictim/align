@@ -137,6 +137,36 @@ describe('groundFragment', () => {
     expect(result.flagged.reason).toBe('ungroundable-selector');
   });
 
+  it('grounds a security.manifest.source-hygiene fragment (ADR 013, no ComponentRef to resolve)', () => {
+    const result = groundFragment(
+      { kind: 'security.manifest.source-hygiene' },
+      'security',
+      docPath,
+      range,
+      'Dependencies must be sourced from the registry.',
+      components,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    expect(result.rule).toMatchObject({ kind: 'security.manifest.source-hygiene', id: 'security.manifest.source-hygiene' });
+    expect(result.rule.provenance.sourceFile).toBe(docPath);
+  });
+
+  it('grounds a security.manifest.new-dependency fragment (ADR 013, no ComponentRef to resolve)', () => {
+    const result = groundFragment(
+      { kind: 'security.manifest.new-dependency', because: 'New deps require review.' },
+      'security',
+      docPath,
+      range,
+      'New dependencies require baseline approval.',
+      components,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    expect(result.rule).toMatchObject({ kind: 'security.manifest.new-dependency', id: 'security.manifest.new-dependency' });
+    expect(result.rule.provenance.because).toContain('New deps require review.');
+  });
+
   it('prepends an author-supplied because to the auto-populated Enforced-by text', () => {
     const result = groundFragment(
       { kind: 'arch.no-dependency', from: 'core', to: 'cli', because: 'Keeps core headless.' },

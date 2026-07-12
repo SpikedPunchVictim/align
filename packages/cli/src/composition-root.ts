@@ -10,7 +10,7 @@ import {
   type HostPredicateRegistry,
   type RulesetIR,
 } from '@align/core';
-import { TypeScriptPlugin } from '@align/plugin-typescript';
+import { NodeManifestScanner, TypeScriptPlugin } from '@align/plugin-typescript';
 
 /** `hostPredicates` defaults to empty so every existing caller keeps working unchanged; a real
  * `align.config.ts` with a `hostRules` export flows its extracted registry (`config.ts`'s
@@ -26,6 +26,7 @@ export function createOrchestrator(
 } {
   const registry = new StaticPluginRegistry([new TypeScriptPlugin()]);
   const baselineStore = new InMemoryBaselineStore(baselineEntries);
-  const orchestrator = new GateOrchestrator(registry, ruleset, baselineStore, hostPredicates);
+  const manifestScanner = new NodeManifestScanner();
+  const orchestrator = new GateOrchestrator(registry, ruleset, baselineStore, hostPredicates, manifestScanner);
   return { orchestrator, baselineStore };
 }

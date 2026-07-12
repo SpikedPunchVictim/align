@@ -368,6 +368,9 @@ function ruleSelectors(rule: DryRunResult['proposal']['rules'][number]): Record<
       return { hostRuleName: rule.hostRuleName };
     case 'arch.metric':
       return { target: rule.target, metric: rule.metric, max: rule.max };
+    case 'security.manifest.source-hygiene':
+    case 'security.manifest.new-dependency':
+      return {}; // no selectors — repo-wide, no ComponentRef (ADR 013)
     default:
       return {};
   }

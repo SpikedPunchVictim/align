@@ -53,5 +53,6 @@ function collectComponentNames(rule: { kind: string; [k: string]: unknown }): st
     return [...new Set(layers.flatMap((l) => [l.layer, ...l.canDependOn]))];
   }
   if (rule.kind === 'arch.metric') return [String(rule['target'])];
+  // `security.manifest.*` (ADR 013): no `ComponentRef` — falls through to the default `[]`.
   return [];
 }

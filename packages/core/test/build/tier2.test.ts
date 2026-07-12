@@ -69,6 +69,30 @@ describe('parseBulletSentence', () => {
   it('returns undefined for an unsupported multi-target no-dependency sentence', () => {
     expect(parseBulletSentence('`core` must not depend on `cli` or `pluginTypescript`')).toBeUndefined();
   });
+
+  it('parses a source-hygiene sentence (security.manifest.source-hygiene, ADR 013)', () => {
+    expect(parseBulletSentence('Dependencies must be sourced from the registry.')).toEqual({
+      kind: 'security.manifest.source-hygiene',
+    });
+  });
+
+  it('parses a shorter source-hygiene phrasing', () => {
+    expect(parseBulletSentence('Dependency must be registry.')).toEqual({
+      kind: 'security.manifest.source-hygiene',
+    });
+  });
+
+  it('parses a new-dependency-gate sentence (security.manifest.new-dependency, ADR 013)', () => {
+    expect(parseBulletSentence('New dependencies require baseline approval.')).toEqual({
+      kind: 'security.manifest.new-dependency',
+    });
+  });
+
+  it('parses a new-dependency-gate sentence with "needs ... acceptance"', () => {
+    expect(parseBulletSentence('New dependency needs baseline acceptance')).toEqual({
+      kind: 'security.manifest.new-dependency',
+    });
+  });
 });
 
 describe('extractStructuredBullets', () => {

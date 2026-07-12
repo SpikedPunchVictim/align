@@ -1,5 +1,35 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`defineProject > c.security.manifest (ADR 013) > golden snapshot: security.manifest rules compile to a stable IR shape 1`] = `
+{
+  "components": {
+    "api": {
+      "allowEmpty": false,
+      "name": "api",
+      "selector": {
+        "kind": "glob",
+        "patterns": [
+          "application/api/**",
+        ],
+      },
+    },
+  },
+  "irVersion": "1",
+  "rules": [
+    {
+      "id": "security.manifest.source-hygiene",
+      "kind": "security.manifest.source-hygiene",
+      "provenance": {},
+    },
+    {
+      "id": "security.manifest.new-dependency",
+      "kind": "security.manifest.new-dependency",
+      "provenance": {},
+    },
+  ],
+}
+`;
+
 exports[`defineProject > golden snapshot: a realistic layered project compiles to a stable IR shape 1`] = `
 {
   "components": {

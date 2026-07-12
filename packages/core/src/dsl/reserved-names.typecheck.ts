@@ -10,5 +10,9 @@ import { defineProject } from './index.js';
 // @ts-expect-error — 'arch' collides with the reserved `c.arch` factory name (ADR 002).
 defineProject({ components: { arch: 'packages/oops/**' } });
 
+// @ts-expect-error — 'security' collides with the reserved `c.security` factory name (ADR 013:
+// `c.security.manifest.*` is now a real factory, not just a reserved name).
+defineProject({ components: { security: 'packages/oops/**' } });
+
 // A non-colliding key must NOT error.
 defineProject({ components: { api: 'packages/api/**' } });

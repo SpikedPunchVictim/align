@@ -36,7 +36,7 @@ describe('align mcp — align_check', () => {
       advisories: unknown[];
     };
     expect(payload.verdict).toBe('red');
-    expect(payload.gates.map((g) => g.gate)).toEqual(['parse', 'architecture']);
+    expect(payload.gates.map((g) => g.gate)).toEqual(['parse', 'architecture', 'security']);
     expect(payload.violations).toHaveLength(1);
     // Structured-fields-only (ADR 007): no `message` prose field on the machine payload.
     expect(payload.violations[0]).not.toHaveProperty('message');

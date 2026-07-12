@@ -6,6 +6,8 @@ import { defineProject } from '../src/dsl/index.js';
 import type { HostPredicate } from '../src/rules/host-rules.js';
 import { edge, graph, node } from './helpers.js';
 import type { ScanInput } from '../src/scanner.js';
+import { toRepoRelativePath } from '../src/types/branded.js';
+import type { ManifestInventory, ManifestScanner } from '../src/types/manifest.js';
 
 function fakePlugin(build: (input: ScanInput) => ReturnType<typeof graph>): LanguagePlugin {
   return {
@@ -13,6 +15,10 @@ function fakePlugin(build: (input: ScanInput) => ReturnType<typeof graph>): Lang
     fileMatch: ['**/*.ts'],
     scanner: { scan: async (input: ScanInput) => build(input) },
   };
+}
+
+function fakeManifestScanner(inventory: ManifestInventory): ManifestScanner {
+  return { scan: () => inventory };
 }
 
 describe('GateOrchestrator', () => {
@@ -27,7 +33,7 @@ describe('GateOrchestrator', () => {
     const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
     const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     expect(run.verdict).toBe('green');
-    expect(run.gates.map((g) => g.gate)).toEqual(['parse', 'architecture']);
+    expect(run.gates.map((g) => g.gate)).toEqual(['parse', 'architecture', 'security']);
   });
 
   it('is red when a forbidden edge is present', async () => {
@@ -363,5 +369,147 @@ describe('GateOrchestrator', () => {
     expect(gate?.violations).toHaveLength(1);
     expect(gate?.violations[0]?.file).toBe('application/api/z.ts');
     expect(gate?.baselinedCount).toBe(1);
+  });
+
+  describe('security gate (ADR 013)', () => {
+    it('is green with 0 manifests when no manifest scanner is injected (default, back-compat for every pre-existing caller)', async () => {
+      const ruleset = defineProject({ components: { api: 'application/api/**' } });
+      const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+      const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      expect(run.gates.map((g) => g.gate)).toEqual(['parse', 'architecture', 'security']);
+      const securityGate = run.gates.find((g) => g.gate === 'security');
+      expect(securityGate?.status).toBe('green');
+      expect(securityGate?.dependsOn).toEqual([]);
+    });
+
+    it('is red when a security.manifest.source-hygiene rule finds a non-registry specifier', async () => {
+      const ruleset = defineProject({
+        components: { api: 'application/api/**' },
+        rules: (c) => [c.security.manifest.sourceHygiene()],
+      });
+      const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
+      const manifestScanner = fakeManifestScanner({
+        manifests: [
+          {
+            file: toRepoRelativePath('package.json'),
+            raw: '{}',
+            dependencies: [{ name: 'xlsx', specifier: 'https://cdn.sheetjs.com/xlsx-0.20.2/xlsx-0.20.2.tgz', field: 'dependencies' }],
+          },
+        ],
+        lockfilePresent: true,
+      });
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore(), new Map(), manifestScanner);
+      const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      expect(run.verdict).toBe('red');
+      const securityGate = run.gates.find((g) => g.gate === 'security');
+      expect(securityGate?.status).toBe('red');
+      expect(securityGate?.violations).toHaveLength(1);
+      expect(securityGate?.violations[0]?.category).toBe('security');
+    });
+
+    it('baseline consent (ADR 006): accepting the current dependency set turns a fresh security.manifest.new-dependency rule green, and a newly added dep is red until accepted', async () => {
+      const ruleset = defineProject({
+        components: { api: 'application/api/**' },
+        rules: (c) => [c.security.manifest.newDependencyGate()],
+      });
+      const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
+      let deps: { name: string; specifier: string; field: 'dependencies' | 'devDependencies' }[] = [
+        { name: 'zod', specifier: '^3.23.8', field: 'dependencies' },
+      ];
+      const manifestScanner: ManifestScanner = {
+        scan: () => ({ manifests: [{ file: toRepoRelativePath('package.json'), raw: '{}', dependencies: deps }], lockfilePresent: true }),
+      };
+      const baseline = new InMemoryBaselineStore();
+      const orchestrator = new GateOrchestrator(registry, ruleset, baseline, new Map(), manifestScanner);
+
+      const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      const seedGate = seedRun.gates.find((g) => g.gate === 'security');
+      expect(seedGate?.status).toBe('red');
+      baseline.accept(seedGate?.violations ?? [], 'init-seed');
+
+      const greenRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      expect(greenRun.gates.find((g) => g.gate === 'security')?.status).toBe('green');
+      expect(greenRun.verdict).toBe('green');
+
+      // A genuinely new dependency is added — same manifest, one more name.
+      deps = [...deps, { name: '@anthropic-ai/sdk', specifier: '^0.30.0', field: 'dependencies' }];
+      const redRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      const redGate = redRun.gates.find((g) => g.gate === 'security');
+      expect(redGate?.status).toBe('red');
+      expect(redGate?.violations).toHaveLength(1);
+      expect(redGate?.violations[0]).toMatchObject({ kind: 'manifest-new-dependency', depName: '@anthropic-ai/sdk' });
+      expect(redGate?.baselinedCount).toBe(1);
+    });
+
+    it('always runs even when the TypeScript scan throws (ADR 008 always-run carve-out — dependsOn: [])', async () => {
+      const ruleset = defineProject({
+        components: { api: 'application/api/**' },
+        rules: (c) => [c.security.manifest.sourceHygiene()],
+      });
+      const registry = new StaticPluginRegistry([
+        fakePlugin(() => {
+          throw new Error('scanner crashed');
+        }),
+      ]);
+      const manifestScanner = fakeManifestScanner({
+        manifests: [
+          { file: toRepoRelativePath('package.json'), raw: '{}', dependencies: [{ name: 'xlsx', specifier: 'https://cdn.sheetjs.com/xlsx.tgz', field: 'dependencies' }] },
+        ],
+        lockfilePresent: true,
+      });
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore(), new Map(), manifestScanner);
+      const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      expect(run.verdict).toBe('error'); // parse gate still errors — verdict reflects the worst gate
+      const securityGate = run.gates.find((g) => g.gate === 'security');
+      expect(securityGate?.status).toBe('red'); // the security gate itself ran fine and found a real violation
+      expect(securityGate?.violations).toHaveLength(1);
+    });
+
+    it('reports gate error (never a silent zero) when the manifest scanner itself throws', async () => {
+      const ruleset = defineProject({
+        components: { api: 'application/api/**' },
+        rules: (c) => [c.security.manifest.sourceHygiene()],
+      });
+      const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
+      const brokenScanner: ManifestScanner = {
+        scan: () => {
+          throw new Error('manifest scan blew up');
+        },
+      };
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore(), new Map(), brokenScanner);
+      const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      const securityGate = run.gates.find((g) => g.gate === 'security');
+      expect(securityGate?.status).toBe('error');
+      expect(securityGate?.errorMessage).toContain('manifest scan blew up');
+      expect(run.verdict).toBe('error');
+    });
+
+    it('architecture and security violations are correctly partitioned by category (ruleCategoryOf, ADR 013)', async () => {
+      const ruleset = defineProject({
+        components: { api: 'application/api/**', ui: 'application/ui/**' },
+        rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui), c.security.manifest.sourceHygiene()],
+      });
+      const registry = new StaticPluginRegistry([
+        fakePlugin(() =>
+          graph(
+            [node('application/api/a.ts', 'api'), node('application/ui/b.ts', 'ui')],
+            [edge('application/api/a.ts', 'application/ui/b.ts', { specifier: '../ui/b', line: 3 })],
+          ),
+        ),
+      ]);
+      const manifestScanner = fakeManifestScanner({
+        manifests: [{ file: toRepoRelativePath('package.json'), raw: '{}', dependencies: [{ name: 'xlsx', specifier: 'https://cdn.sheetjs.com/xlsx.tgz', field: 'dependencies' }] }],
+        lockfilePresent: true,
+      });
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore(), new Map(), manifestScanner);
+      const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      const archGate = run.gates.find((g) => g.gate === 'architecture');
+      const securityGate = run.gates.find((g) => g.gate === 'security');
+      expect(archGate?.violations).toHaveLength(1);
+      expect(archGate?.violations[0]?.kind).toBe('no-dependency');
+      expect(securityGate?.violations).toHaveLength(1);
+      expect(securityGate?.violations[0]?.kind).toBe('manifest-source-hygiene');
+    });
   });
 });

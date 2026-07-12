@@ -160,6 +160,26 @@ export function groundFragment(
       });
       return { ok: true, rule };
     }
+    // `security.manifest.*` (ADR 013): no `ComponentRef` to ground — the manifest scan domain has
+    // no notion of align's file-classified components, so grounding always succeeds (same no-op
+    // shape as `custom.host`'s host-predicate-name path, minus the registration check since
+    // neither verb here references anything by name).
+    case 'security.manifest.source-hygiene': {
+      const rule = ruleIRSchema.parse({
+        kind: 'security.manifest.source-hygiene',
+        id: toRuleId('security.manifest.source-hygiene'),
+        provenance,
+      });
+      return { ok: true, rule };
+    }
+    case 'security.manifest.new-dependency': {
+      const rule = ruleIRSchema.parse({
+        kind: 'security.manifest.new-dependency',
+        id: toRuleId('security.manifest.new-dependency'),
+        provenance,
+      });
+      return { ok: true, rule };
+    }
     default: {
       const exhaustive: never = fragment;
       throw new Error(`unhandled fragment kind: ${JSON.stringify(exhaustive)}`);

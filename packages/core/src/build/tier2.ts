@@ -22,6 +22,11 @@ const LAYERS_RE = /^(.+?)\s+(?:may|can)\s+only\s+depend\s+on\s+(.+?)\.?$/i;
 // (dsl/index.ts) — only the `loc` metric has a tier-2 grammar; fan-in/fan-out/instability stay
 // reserved pending their own evidence and gain their own bullet grammar when promoted.
 const MAX_LOC_RE = /^files\s+in\s+(.+?)\s+must\s+stay\s+under\s+(\d+)\s+lines?\.?$/i;
+// `security.manifest.*` (ADR 013, promoted 2026-07-12 on probe evidence). Bare-sentence forms,
+// same shape as `NO_CYCLES_BARE_RE` — neither rule takes a component target, so there is nothing
+// to capture.
+const SOURCE_HYGIENE_RE = /^dependenc(?:y|ies)\s+(?:sources?\s+)?must\s+be\s+(?:sourced\s+from\s+)?(?:the\s+)?registry(?:[- ]only)?\.?$/i;
+const NEW_DEPENDENCY_GATE_RE = /^new\s+dependenc(?:y|ies)\s+(?:requires?|needs?)\s+baseline\s+(?:approval|acceptance)\.?$/i;
 
 /** Splits a target-list clause ("`core`, `cli` and `pluginTypescript`") into raw tokens.
  * Backtick/quote stripping happens at grounding time (`ground.ts`), not here — tier 2 stays a
@@ -85,6 +90,13 @@ export function parseBulletSentence(sentence: string): RuleFragment | undefined 
     // `NO_DEPENDENCY_RE`/`LAYERS_RE` above.
     if (target === undefined || targetTokens.length > 1 || !Number.isFinite(max)) return undefined;
     return { kind: 'arch.metric', target, metric: 'loc', max };
+  }
+
+  if (SOURCE_HYGIENE_RE.test(sentence)) {
+    return { kind: 'security.manifest.source-hygiene' };
+  }
+  if (NEW_DEPENDENCY_GATE_RE.test(sentence)) {
+    return { kind: 'security.manifest.new-dependency' };
   }
 
   return undefined;
