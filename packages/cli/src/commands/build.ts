@@ -19,6 +19,7 @@ import {
   type ComponentName,
   type FlaggedProposal,
   type GeneratedRulesFile,
+  type HostPredicateRegistry,
   type ImpactDelta,
   type RepoRelativePath,
   type RuleDiff,
@@ -76,6 +77,7 @@ async function computeBuildResult(
   proposal: BuildProposal,
   baseRuleset: { readonly rules: readonly RuleIR[]; readonly components: Readonly<Record<ComponentName, ComponentDefinitionIR>> },
   excludes: readonly string[],
+  hostRules: HostPredicateRegistry,
 ): Promise<DryRunResult> {
   const existingGenerated = readGeneratedRules(rootDir)?.rules ?? [];
   const diff = diffGeneratedRules(existingGenerated, proposal.rules);
@@ -85,8 +87,8 @@ async function computeBuildResult(
 
   const plugin = new TypeScriptPlugin();
   const graph = await plugin.scanner.scan({ rootDir, components: baseRuleset.components, excludes });
-  const currentViolations = currentEffectiveRules.flatMap((r) => evaluateRule(r, graph, baseRuleset.components));
-  const proposedViolations = proposedEffectiveRules.flatMap((r) => evaluateRule(r, graph, baseRuleset.components));
+  const currentViolations = currentEffectiveRules.flatMap((r) => evaluateRule(r, graph, baseRuleset.components, hostRules));
+  const proposedViolations = proposedEffectiveRules.flatMap((r) => evaluateRule(r, graph, baseRuleset.components, hostRules));
 
   const impact = computeImpactDelta(currentViolations, proposedViolations, readBaseline(rootDir));
 
@@ -108,10 +110,10 @@ export async function dryRunBuild(rootDir: string, docRelPath: string): Promise<
   const docPath = toRepoRelativePath(docRelPath);
   const docContentHash = sha256Hex(docText);
 
-  const { ruleset: baseRuleset, excludes } = await loadConfig(rootDir, { includeGenerated: false });
-  const proposal = proposeRulesFromDoc(docText, docPath, baseRuleset.components);
+  const { ruleset: baseRuleset, excludes, hostRules } = await loadConfig(rootDir, { includeGenerated: false });
+  const proposal = proposeRulesFromDoc(docText, docPath, baseRuleset.components, new Set(hostRules.keys()));
 
-  return computeBuildResult(rootDir, docRelPath, docContentHash, proposal, baseRuleset, excludes);
+  return computeBuildResult(rootDir, docRelPath, docContentHash, proposal, baseRuleset, excludes, hostRules);
 }
 
 export interface ClientSubmission {
@@ -144,15 +146,24 @@ export async function proposeFromClientSubmission(
   const docPath = toRepoRelativePath(docRelPath);
   const docContentHash = sha256Hex(docText);
 
-  const { ruleset: baseRuleset, excludes } = await loadConfig(rootDir, { includeGenerated: false });
-  const base = proposeRulesFromDoc(docText, docPath, baseRuleset.components);
+  const { ruleset: baseRuleset, excludes, hostRules } = await loadConfig(rootDir, { includeGenerated: false });
+  const registeredHostPredicates = new Set(hostRules.keys());
+  const base = proposeRulesFromDoc(docText, docPath, baseRuleset.components, registeredHostPredicates);
 
   const flagged: FlaggedProposal[] = [...base.flagged];
   const ruleIdsBySection = new Map<string, string[]>(base.sections.map((s) => [s.anchor, [...s.ruleIds]]));
   const byId = new Map<string, RuleIR>(base.rules.map((r) => [r.id, r]));
 
   for (const sub of submissions) {
-    const result = groundFragment(sub.fragment, sub.section, docPath, sub.sourceLineRange, sub.sourceQuote, baseRuleset.components);
+    const result = groundFragment(
+      sub.fragment,
+      sub.section,
+      docPath,
+      sub.sourceLineRange,
+      sub.sourceQuote,
+      baseRuleset.components,
+      registeredHostPredicates,
+    );
     if (!result.ok) {
       flagged.push(result.flagged);
       continue;
@@ -173,7 +184,7 @@ export async function proposeFromClientSubmission(
     proseSections: base.proseSections,
   };
 
-  return computeBuildResult(rootDir, docRelPath, docContentHash, proposal, baseRuleset, excludes);
+  return computeBuildResult(rootDir, docRelPath, docContentHash, proposal, baseRuleset, excludes, hostRules);
 }
 
 export interface ApplyResult {

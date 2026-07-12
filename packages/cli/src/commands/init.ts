@@ -42,8 +42,8 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   writeAgentInstructions(rootDir);
   console.log('Wrote/updated CLAUDE.md agent-instructions block.');
 
-  const { ruleset, excludes } = await loadConfig(rootDir);
-  const { orchestrator } = createOrchestrator(ruleset, []);
+  const { ruleset, excludes, hostRules } = await loadConfig(rootDir);
+  const { orchestrator } = createOrchestrator(ruleset, [], hostRules);
   const run = await orchestrator.check({ rootDir, excludes });
   const violations = run.gates.flatMap((g) => g.violations);
 

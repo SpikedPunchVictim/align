@@ -179,9 +179,38 @@ describe('align mcp — align_propose_rules (ADR 011 two-pass clarification)', (
 
   it('flags a custom.host proposal as unregistered-host-rule instead of accepting it vacuously', async () => {
     // Regression for the live align_propose_rules session that accepted a custom.host proposal
-    // whose hostRuleName matched no predicate anywhere (v1 defines none) — grounding validated
-    // components but not host predicates, so the dry-run reported "adds 0 new violations"
-    // vacuously and, once written, check would have counted the rule as passing forever.
+    // whose hostRuleName matched no predicate anywhere — grounding validated components but not
+    // host predicates, so the dry-run reported "adds 0 new violations" vacuously and, once
+    // written, check would have counted the rule as passing forever. This fixture's
+    // align.config.ts DOES register 'route-thinness' (see the sibling test below) — this test
+    // uses a genuinely different, never-registered name to prove "unregistered still errors"
+    // survived adding the registration surface.
+    const client = await connectedClient(path.join(fixturesDir, 'build-app-mcp'));
+    const result = await client.callTool({
+      name: 'align_propose_rules',
+      arguments: {
+        doc_path: 'docs/ARCHITECTURE-RULES.md',
+        proposals: [
+          {
+            section: 'module-size',
+            fragment: { kind: 'custom.host', hostRuleName: 'totally-unregistered-predicate' },
+            sourceLineRange: { startLine: 13, endLine: 13 },
+            sourceQuote: 'route handlers stay thin',
+          },
+        ],
+      },
+    });
+    const payload = JSON.parse(textOf(result)) as { accepted: { id: string }[]; flaggedUngroundable: { reason: string; detail: string }[] };
+    expect(payload.accepted.some((r) => r.id.includes('totally-unregistered-predicate'))).toBe(false);
+    const flagged = payload.flaggedUngroundable.find((f) => f.reason === 'unregistered-host-rule');
+    expect(flagged).toBeDefined();
+    expect(flagged?.detail).toContain("'totally-unregistered-predicate'");
+  });
+
+  it('grounds a custom.host proposal into a real rule when align.config.ts registers the predicate (registration surface, §B.0)', async () => {
+    // This fixture's align.config.ts exports `hostRules: { 'route-thinness': ... }` — proposing
+    // the SAME shape as the test above, but with the name it actually registers, must now ground
+    // successfully instead of being flagged.
     const client = await connectedClient(path.join(fixturesDir, 'build-app-mcp'));
     const result = await client.callTool({
       name: 'align_propose_rules',
@@ -197,11 +226,11 @@ describe('align mcp — align_propose_rules (ADR 011 two-pass clarification)', (
         ],
       },
     });
-    const payload = JSON.parse(textOf(result)) as { accepted: { id: string }[]; flaggedUngroundable: { reason: string; detail: string }[] };
-    expect(payload.accepted.some((r) => r.id.includes('route-thinness'))).toBe(false);
-    const flagged = payload.flaggedUngroundable.find((f) => f.reason === 'unregistered-host-rule');
-    expect(flagged).toBeDefined();
-    expect(flagged?.detail).toContain("'route-thinness'");
+    const payload = JSON.parse(textOf(result)) as { accepted: { id: string; kind: string }[]; flaggedUngroundable: { reason: string }[] };
+    expect(payload.flaggedUngroundable.some((f) => f.reason === 'unregistered-host-rule')).toBe(false);
+    const accepted = payload.accepted.find((r) => r.id.includes('route-thinness'));
+    expect(accepted).toBeDefined();
+    expect(accepted?.kind).toBe('custom.host');
   });
 
   it('{ apply: true } writes generated-rules.json, rules.lock.json, and the audit report', async () => {

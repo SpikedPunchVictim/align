@@ -30,8 +30,8 @@ export interface CheckOptions {
  * shell's perspective both are "not safe to proceed").
  */
 export async function runCheck(rootDir: string, options: CheckOptions): Promise<number> {
-  const { ruleset, excludes } = await loadConfig(rootDir);
-  const { orchestrator, baselineStore } = createOrchestrator(ruleset, readBaseline(rootDir));
+  const { ruleset, excludes, hostRules } = await loadConfig(rootDir);
+  const { orchestrator, baselineStore } = createOrchestrator(ruleset, readBaseline(rootDir), hostRules);
 
   const run = await orchestrator.check({ rootDir, excludes });
 

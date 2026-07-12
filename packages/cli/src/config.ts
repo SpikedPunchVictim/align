@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { mergeGeneratedRules, type RulesetIR } from '@align/core';
+import { mergeGeneratedRules, type HostPredicate, type HostPredicateRegistry, type RulesetIR } from '@align/core';
 import { readGeneratedRules } from './align-dir.js';
 
 export interface LoadedConfig {
@@ -10,6 +10,17 @@ export interface LoadedConfig {
   // named `excludes` export in align.config.ts instead of widening defineProject's documented
   // return type. Deviation noted in the Stage 1 final report.
   readonly excludes: readonly string[];
+  // Same shape of deviation, for the same reason (ADR 002): `RulesetIR` is portable JSON, and
+  // predicate functions can't survive that boundary. `hostRules` is a sibling named export
+  // (`{ [hostRuleName]: HostPredicate }`), never passed through `defineProject`/zod — this is the
+  // one place align.config.ts's function-valued export becomes the typed registry core's
+  // `GateOrchestrator` and `groundFragment` actually consume (docs/proposals/rule-expansion-
+  // evaluation.md §B.0).
+  readonly hostRules: HostPredicateRegistry;
+}
+
+function toHostPredicateRegistry(hostRules: Record<string, HostPredicate> | undefined): HostPredicateRegistry {
+  return new Map(Object.entries(hostRules ?? {}));
 }
 
 export interface LoadConfigOptions {
@@ -42,16 +53,19 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
   const mod = (await import(pathToFileURL(configPath).href)) as {
     default?: RulesetIR;
     excludes?: readonly string[];
+    hostRules?: Record<string, HostPredicate>;
   };
   if (mod.default === undefined) {
     throw new Error(`${CONFIG_FILENAME} must have a default export (the result of defineProject(...)).`);
   }
+  const excludes = mod.excludes ?? [];
+  const hostRules = toHostPredicateRegistry(mod.hostRules);
 
-  if (!includeGenerated) return { ruleset: mod.default, excludes: mod.excludes ?? [] };
+  if (!includeGenerated) return { ruleset: mod.default, excludes, hostRules };
 
   const generated = readGeneratedRules(rootDir);
-  if (generated === undefined) return { ruleset: mod.default, excludes: mod.excludes ?? [] };
+  if (generated === undefined) return { ruleset: mod.default, excludes, hostRules };
 
   const mergedRules = mergeGeneratedRules(mod.default.rules, generated.rules);
-  return { ruleset: { ...mod.default, rules: [...mergedRules] }, excludes: mod.excludes ?? [] };
+  return { ruleset: { ...mod.default, rules: [...mergedRules] }, excludes, hostRules };
 }

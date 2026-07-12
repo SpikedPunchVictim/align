@@ -4,10 +4,10 @@ import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, writeBaseline } from '../align-dir.js';
 
 async function currentViolations(rootDir: string) {
-  const { ruleset, excludes } = await loadConfig(rootDir);
+  const { ruleset, excludes, hostRules } = await loadConfig(rootDir);
   // An empty baseline store surfaces every violation as "red" regardless of what's actually
   // baselined on disk — exactly the full current violation set `prune`/`accept` need.
-  const { orchestrator } = createOrchestrator(ruleset, []);
+  const { orchestrator } = createOrchestrator(ruleset, [], hostRules);
   const run = await orchestrator.check({ rootDir, excludes });
   return run.gates.flatMap((g) => g.violations);
 }
@@ -23,9 +23,9 @@ export async function baselineAccept(rootDir: string, ruleId?: string): Promise<
 }
 
 export async function baselinePrune(rootDir: string): Promise<number> {
-  const { ruleset, excludes } = await loadConfig(rootDir);
+  const { ruleset, excludes, hostRules } = await loadConfig(rootDir);
   const store = new InMemoryBaselineStore(readBaseline(rootDir));
-  const { orchestrator } = createOrchestrator(ruleset, []);
+  const { orchestrator } = createOrchestrator(ruleset, [], hostRules);
   const run = await orchestrator.check({ rootDir, excludes });
   const allViolations = run.gates.flatMap((g) => g.violations);
   const result = store.prune(

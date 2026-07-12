@@ -6,7 +6,7 @@ import { loadConfig } from '../config.js';
 const EXAMPLES_PER_COMPONENT = 3;
 
 export async function buildExplainPayload(rootDir: string, ruleId: string): Promise<McpExplainRulePayload | undefined> {
-  const { ruleset, excludes } = await loadConfig(rootDir);
+  const { ruleset, excludes, hostRules } = await loadConfig(rootDir);
   const rule = ruleset.rules.find((r) => r.id === ruleId);
   if (rule === undefined) return undefined;
 
@@ -29,7 +29,7 @@ export async function buildExplainPayload(rootDir: string, ruleId: string): Prom
   // Mermaid is explain-only (ADR 007: pull-on-demand, never in align_check/align_violations).
   // Diagram ONE representative violation instance, if the rule currently has any — a rule with
   // no live violations has no "offending path" to visualize.
-  const violations = evaluateRule(rule, graph, ruleset.components);
+  const violations = evaluateRule(rule, graph, ruleset.components, hostRules);
   const firstViolation = violations[0];
   const mermaid = firstViolation === undefined ? undefined : buildViolationMermaid(firstViolation);
 

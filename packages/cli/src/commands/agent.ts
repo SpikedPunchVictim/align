@@ -7,7 +7,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { toRepoRelativePath, type RepoRelativePath } from '@align/core';
+import { toRepoRelativePath, type HostPredicateRegistry, type RepoRelativePath } from '@align/core';
 import { TypeScriptPlugin } from '@align/plugin-typescript';
 import {
   AnthropicFixProvider,
@@ -34,14 +34,20 @@ export interface AgentRunCliOptions {
   readonly dryRun: boolean;
 }
 
-function buildEffects(rootDir: string, ruleset: Awaited<ReturnType<typeof loadConfig>>['ruleset'], excludes: readonly string[], options: AgentRunCliOptions): AgentEffects {
+function buildEffects(
+  rootDir: string,
+  ruleset: Awaited<ReturnType<typeof loadConfig>>['ruleset'],
+  excludes: readonly string[],
+  hostRules: HostPredicateRegistry,
+  options: AgentRunCliOptions,
+): AgentEffects {
   const plugin = new TypeScriptPlugin();
   return {
     fixProvider: new MemoizingFixProvider(
       options.model !== undefined ? new AnthropicFixProvider({ model: options.model }) : new AnthropicFixProvider(),
     ),
     runCheck: async () => {
-      const { orchestrator } = createOrchestrator(ruleset, readBaseline(rootDir));
+      const { orchestrator } = createOrchestrator(ruleset, readBaseline(rootDir), hostRules);
       return orchestrator.check({ rootDir, excludes });
     },
     scanGraph: () => plugin.scanner.scan({ rootDir, components: ruleset.components, excludes }),
@@ -114,8 +120,8 @@ function exitCodeFor(result: AgentRunResult): number {
 }
 
 export async function runAgentCommand(rootDir: string, options: AgentRunCliOptions): Promise<number> {
-  const { ruleset, excludes } = await loadConfig(rootDir);
-  const effects = buildEffects(rootDir, ruleset, excludes, options);
+  const { ruleset, excludes, hostRules } = await loadConfig(rootDir);
+  const effects = buildEffects(rootDir, ruleset, excludes, hostRules, options);
 
   const baseBranch = await effects.git.currentBranch();
   const runOptions: AgentRunOptions = {

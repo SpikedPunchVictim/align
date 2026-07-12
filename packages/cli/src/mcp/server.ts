@@ -23,8 +23,8 @@ import { DEFAULT_DOC_PATH, proposeFromClientSubmission, writeBuildArtifacts, typ
  * (ADR 006) the run performed, so a renamed file's baselined violation doesn't need a separate
  * `align baseline prune` to stop being re-reported on the next call. */
 async function freshCheck(rootDir: string): Promise<CheckRun> {
-  const { ruleset, excludes } = await loadConfig(rootDir);
-  const { orchestrator, baselineStore } = createOrchestrator(ruleset, readBaseline(rootDir));
+  const { ruleset, excludes, hostRules } = await loadConfig(rootDir);
+  const { orchestrator, baselineStore } = createOrchestrator(ruleset, readBaseline(rootDir), hostRules);
   const run = await orchestrator.check({ rootDir, excludes });
   if (run.advisories.some((a) => a.kind === 'baseline-moved')) {
     writeBaseline(rootDir, baselineStore.snapshot());
@@ -146,8 +146,8 @@ export function createMcpServer(rootDir: string): McpServer {
           return { isError: true, content: [{ type: 'text', text: `Doc not found: ${docRelPath}` }] };
         }
         const docText = fs.readFileSync(absDocPath, 'utf8');
-        const { ruleset } = await loadConfig(rootDir, { includeGenerated: false });
-        const proposal = proposeRulesFromDoc(docText, toRepoRelativePath(docRelPath), ruleset.components);
+        const { ruleset, hostRules } = await loadConfig(rootDir, { includeGenerated: false });
+        const proposal = proposeRulesFromDoc(docText, toRepoRelativePath(docRelPath), ruleset.components, new Set(hostRules.keys()));
         return {
           content: [
             {
