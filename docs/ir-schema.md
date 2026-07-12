@@ -1,18 +1,24 @@
 # align IR Schema — `irVersion: "1"`
 
 Scope: this document specifies the v1 rule kinds only (`components`, `arch.no-dependency`,
-`arch.no-cycles`, `arch.layers`, `custom.host`, `arch.metric`), plus the provenance metadata block
-every rule carries regardless of kind. Growth-path rule kinds (`arch.naming`, `lint.tool`,
-`format.tool`, `types.tool`, `tests.tool`, `security.secrets`, `security.tool`, the `ts.*` namespace)
-are **reserved discriminants only** — listed by name at the end, not specified, per `ARCHITECTURE.md`
-§4 and `IMPLEMENTATION_PLAN.md`. `arch.naming` and `arch.metric` were both demoted to reserve at
-sign-off review: neither was exercised by the spike (both repos were evaluated only against
-`no-dependency`/`no-cycles`). **`arch.metric` (max-LOC only) was promoted back to v1 on 2026-07-12**,
-user-approved, on evidence from the kluster ruleset exercise — two 2,100+-line files structurally
-invisible to all 19 dependency/cycle rules (`test-apps/kluster/RULESET_REPORT.md` §6.2,
-`IMPLEMENTATION_PLAN.md`'s Promotion log). The promotion is scoped to the `loc` metric only —
-`fan-in`/`fan-out`/`instability` remain reserved discriminants pending their own evidence, and
-`arch.naming` remains in reserve unchanged.
+`arch.no-cycles`, `arch.layers`, `custom.host`, `arch.metric`, `security.manifest.source-hygiene`,
+`security.manifest.new-dependency`), plus the provenance metadata block every rule carries
+regardless of kind. Growth-path rule kinds (`arch.naming`, `lint.tool`, `format.tool`, `types.tool`,
+`tests.tool`, `security.tool`, the `ts.*` namespace) are **reserved discriminants only** — listed by
+name at the end, not specified, per `ARCHITECTURE.md` §4 and `IMPLEMENTATION_PLAN.md`. `arch.naming`
+and `arch.metric` were both demoted to reserve at sign-off review: neither was exercised by the
+spike (both repos were evaluated only against `no-dependency`/`no-cycles`). **`arch.metric` (max-LOC
+only) was promoted back to v1 on 2026-07-12**, user-approved, on evidence from the kluster ruleset
+exercise — two 2,100+-line files structurally invisible to all 19 dependency/cycle rules
+(`test-apps/kluster/RULESET_REPORT.md` §6.2, `IMPLEMENTATION_PLAN.md`'s Promotion log). The
+promotion is scoped to the `loc` metric only — `fan-in`/`fan-out`/`instability` remain reserved
+discriminants pending their own evidence, and `arch.naming` remains in reserve unchanged.
+**`security.manifest.source-hygiene` and `security.manifest.new-dependency` were promoted 2026-07-12**,
+user-approved, on evidence from `spike/MANIFEST_PROBE_REPORT.md`'s manifest-security probe — see
+ADR 013 and the two kinds' own sections below. `security.secrets` was reserved-only prior to this
+promotion and remains reserved (a different, unrelated rule shape — content scanning for leaked
+credentials, not manifest/lockfile inspection); it is now listed separately from `security.tool` in
+the reserved section below to avoid implying either is specified by this promotion.
 
 Runtime validation of this shape is zod (ADR 002); the JSON Schema below is the portable, tool-agnostic
 description of the same contract — the substrate for the cache hash, the `align_explain_rule` payload, and
@@ -111,7 +117,9 @@ the baseline contract (locked decision #1, `IMPLEMENTATION_PLAN.md`).
         { "$ref": "#/$defs/archNoCycles" },
         { "$ref": "#/$defs/archLayers" },
         { "$ref": "#/$defs/customHost" },
-        { "$ref": "#/$defs/archMetric" }
+        { "$ref": "#/$defs/archMetric" },
+        { "$ref": "#/$defs/securityManifestSourceHygiene" },
+        { "$ref": "#/$defs/securityManifestNewDependency" }
       ]
     },
     "archNoDependency": {
@@ -193,10 +201,35 @@ the baseline contract (locked decision #1, `IMPLEMENTATION_PLAN.md`).
         "max": { "type": "integer", "minimum": 1 },
         "provenance": { "$ref": "#/$defs/ruleProvenance" }
       }
+    },
+    "securityManifestSourceHygiene": {
+      "type": "object",
+      "required": ["kind", "id", "provenance"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "security.manifest.source-hygiene" },
+        "id": { "$ref": "#/$defs/ruleId" },
+        "provenance": { "$ref": "#/$defs/ruleProvenance" }
+      }
+    },
+    "securityManifestNewDependency": {
+      "type": "object",
+      "required": ["kind", "id", "provenance"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "security.manifest.new-dependency" },
+        "id": { "$ref": "#/$defs/ruleId" },
+        "provenance": { "$ref": "#/$defs/ruleProvenance" }
+      }
     }
   }
 }
 ```
+
+Both `security.manifest.*` kinds are repo-wide — no `target`/`from`/`to` field, no `ComponentRef` at
+all (same no-selector shape as `customHost` minus `hostRuleName`) — because the manifest scan domain
+(root + workspace `package.json` + `pnpm-lock.yaml`, ADR 013) has no notion of align's
+file-classified components.
 
 ## Prose per kind
 
@@ -287,6 +320,45 @@ required `Violation.snippet` field is the file's first line (`DependencyGraphNod
 scan time for the same reason `DependencyGraphEdge.snippet` exists — see `docs/core-interfaces.md`'s
 deviation note). `fixHint` is `{ code: 'split-file', file }`.
 
+### `security.manifest.source-hygiene`
+
+**Promoted 2026-07-12** (user-approved, ADR 013) on evidence from `spike/MANIFEST_PROBE_REPORT.md`
+Rule 1: 3/3 hand-verified real, zero false positives, caught on n8n (the probe's own stress test) —
+SheetJS's `xlsx` pinned to its own CDN tarball (`https://cdn.sheetjs.com/...`, stopped publishing to
+npm past 0.18) and `wa-sqlite` pinned to an unreleased git commit (`github:rhashimoto/wa-sqlite#...`).
+Flags any dependency specifier resolving to a `git`/`git+`/`github:`/`gitlab:`/`bitbucket:`/`http(s):`
+/`file:`/`link:` source — never a registry version range, `workspace:` protocol reference, or an
+`npm:` alias (an alias still resolves through the registry under a different name). **Evaluation**:
+for every dependency across every scanned manifest (root + workspace members) whose effective
+specifier (lockfile-resolved when `pnpm-lock.yaml` is present, so a `catalog:`-managed dependency's
+real specifier is visible — otherwise the raw `package.json` value) matches one of those prefixes,
+emit one `Violation` (kind `manifest-source-hygiene`, category `security`) naming the declaring
+manifest (`file`), the dependency name, its specifier, and a `sourceType` classification
+(`git`/`http`/`file`/`link`). `fixHint` is `{ code: 'manual-review' }` — there is no structural fix
+align can propose for a non-registry source; a human decides whether it's an accepted deviation
+(as both n8n cases are) or a real signal to remove. **Fingerprint is name-level** (declaring
+manifest path + dependency name only — never the specifier value or a line number), so a git-ref
+bump or a manifest reformatting doesn't reset baseline consent for an already-reviewed dependency.
+
+### `security.manifest.new-dependency`
+
+**Promoted 2026-07-12** (user-approved, ADR 013) on evidence from `spike/MANIFEST_PROBE_REPORT.md`
+Rule 7 — the probe's strongest result: a real historical catch on align's own history
+(`@anthropic-ai/sdk` entering the tree when `packages/agent` was built), plus mechanism-proof
+simulations on kluster and n8n, zero false positives across all three. **Re-expressed through
+align's existing baseline-consent machinery (ADR 006) rather than a git-history diff**: the
+evaluator is stateless and has no notion of "since when" — every current runtime (`dependencies`) and
+dev (`devDependencies`) dependency, name-level, per declaring manifest, is fingerprinted and emitted
+as a candidate `Violation` on every run. Baseline consent (`align init` / `baseline accept`) is what
+turns "every dependency in the repo today" into "nothing" on adoption; a dependency added after that
+point has a fingerprint the baseline has never seen, so it — and only it — shows red.
+`optionalDependencies`/`peerDependencies` are excluded (runtime + dev only; an optional dependency's
+absence/presence is a different risk shape, out of scope for this promotion). **Name-level only,
+deliberately**: version-level gating (flagging every version bump, not just new names) was
+considered and rejected — it would fire on every routine dependency-update PR (Renovate/Dependabot),
+which the probe's own noise-assessment doctrine treats as an unacceptable false-positive rate;
+documented as a follow-up, not built. `fixHint` is `{ code: 'manual-review' }`.
+
 ### Provenance block (all kinds)
 
 `because` is the DSL's hoisted `.because(text)` call. `sourceFile`/`sourceLineRange`/`sourceQuote` are
@@ -299,7 +371,16 @@ duplicated elsewhere in the IR.
 `arch.naming` (demoted at sign-off review — not spike-exercised; promoted when a real repo demands it) ·
 `arch.metric`'s `fan-in`/`fan-out`/`instability` metrics (the `loc` metric was promoted 2026-07-12 — see
 `arch.metric` above; these three still carry the same promotion-on-evidence burden) · `lint.tool` ·
-`format.tool` · `types.tool` · `tests.tool` · `security.secrets` · `security.tool` · the `ts.*` namespace
+`format.tool` · `types.tool` · `tests.tool` · `security.tool` · the `ts.*` namespace
 (flagged non-portable, `portable: false`, per ADR 002). Full design for each lives in
 `IMPLEMENTATION_PLAN.md`; they are not part of `irVersion: "1"`'s v1 rule-kind surface and adding one is
 an `irVersion` bump or an additive union member, not a retrofit of the shapes above.
+
+**Also still reserved, distinct from the two `security.manifest.*` kinds promoted above (ADR 013):**
+`security.secrets` (built-in secrets scanner — AWS keys, private keys, high-entropy tokens; a content-
+scanning shape, not a manifest/lockfile-inspection one) and `security.manifest`'s own install-script
+exposure sibling (`spike/MANIFEST_PROBE_REPORT.md` Rule 2 — install-dependent, held back pending the
+content-pattern classifier rework the probe's own findings demand; see ADR 013's follow-up ladder).
+Version-pinning policy and registry-URL allowlisting were evaluated by the same probe and **rejected on
+evidence** (zero findings across 5,594 real specifiers; 100% redundant with `source-hygiene`,
+respectively) — not reserved, not planned.

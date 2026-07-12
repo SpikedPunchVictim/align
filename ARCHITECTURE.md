@@ -123,18 +123,20 @@ package that imports both and wires them together (§5).
 
 | Mechanism | v1 | Later-stage | Design Reserve |
 |---|---|---|---|
-| Core Violation/RuleIR/zod contract, orchestrator, gate model (`parse` + `architecture` only) | ✅ | | |
+| Core Violation/RuleIR/zod contract, orchestrator, gate model (`parse`, `architecture`, `security`) | ✅ | | |
 | DSL (`defineProject`/`ComponentContext`, negation-free vocabulary, `.because()`, layer macros) | ✅ | | |
 | Components registry (path-prefix primary, package-name complement, `ComponentRef`) | ✅ | | |
 | TS/JS scanner: scan-and-discard, pnpm realpath, workspace-name fallback, type-only edges, nearest-tsconfig, package-entry→source mapping | ✅ | | |
 | `arch.no-dependency` / `no-cycles` / `layers` engine, per-edge cycle detail | ✅ | | |
 | `arch.metric` (max-LOC only) — promoted 2026-07-12 on kluster ruleset evidence | ✅ | | |
+| `security` gate: `security.manifest.source-hygiene` + `security.manifest.new-dependency` — promoted 2026-07-12 on `spike/MANIFEST_PROBE_REPORT.md` probe evidence (ADR 013); manifest scan domain lives in `plugin-typescript`, `dependsOn: []` always-run | ✅ | | |
 | Baseline store (+move detection, `--rule`) | ✅ | | |
 | MCP server (`align_check/status/violations/explain_rule`), CLI (`init/check/baseline`) | ✅ | | |
 | Token-economy payload rules (structured-only, priority sort, dedup, caps/pagination) | ✅ | | |
 | `align init` CLAUDE.md/AGENTS.md instructions block | ✅ | | |
-| Gate `error` semantics + `dependsOn` metadata (contract only — v1 has one dependency: architecture needs parse) | ✅ | | |
-| Tool-wrapping gates: format/lint/types/security/tests | | Stage 1/3 | |
+| Gate `error` semantics + `dependsOn` metadata (v1 dependencies: architecture needs parse; security is `dependsOn: []`) | ✅ | | |
+| Tool-wrapping gates: format/lint/types/tests, `security.secrets`, `security.tool` | | Stage 1/3 | |
+| Install-script-exposure manifest rule (`spike/MANIFEST_PROBE_REPORT.md` Rule 2) | | Stage 1/3 — after a content-pattern classifier rework (ADR 013 follow-up ladder) | |
 | `align_fix_hints`/`align_autofix` MCP tools | | Stage 3/4 | |
 | Edit-block apply pipeline / `FixProposal` (exact + `nearLine` match) | | Stage 4 (contract fixed now, ADR 010) | |
 | `align build` doc→ruleset pipeline, lockfile, provenance | | Stage 4 (contract fixed now, ADR 011) | |
@@ -160,7 +162,8 @@ Full detail for every later-stage/reserve row lives in `IMPLEMENTATION_PLAN.md` 
 packages/
 ├── core/               # @align/core — DSL + IR (zod) + engine + baseline + PluginRegistry interfaces.
 │                       #   Zero framework dependencies (zod only, per locked decision).
-├── plugin-typescript/  # @align/plugin-typescript — TS compiler API scanner, tsconfig/workspace resolution.
+├── plugin-typescript/  # @align/plugin-typescript — TS compiler API scanner, tsconfig/workspace resolution,
+│                       #   + the manifest scan domain (package.json/pnpm-lock.yaml, ADR 013).
 └── cli/                # @align/cli — composition root: commander CLI + `align mcp` (stdio MCP server).
 ```
 
@@ -187,22 +190,40 @@ the extra package from day one.
 reverse); `cli → {core, plugin-typescript}`. Core never imports downstream — enforced by align's own
 `arch.no-dependency` rules against its own repo starting Stage 2, per the plan's dogfooding commitment.
 
-**Composition root**: `@align/cli` is the only package that imports a concrete `LanguagePlugin` and
-registers it. The orchestrator (in core) is constructed with a `PluginRegistry`; core never imports
-`plugin-typescript` directly:
+**Composition root**: `@align/cli` is the only package that imports a concrete `LanguagePlugin` (or
+`ManifestScanner`) and registers it. The orchestrator (in core) is constructed with a
+`PluginRegistry` and, as of ADR 013, a `ManifestScanner`; core never imports `plugin-typescript`
+directly:
 
 ```ts
-// @align/core — interface only
+// @align/core — interfaces only
 interface PluginRegistry {
   getPluginForFile(file: RepoRelativePath): LanguagePlugin | undefined;
   getAllPlugins(): readonly LanguagePlugin[];
 }
+interface ManifestScanner {
+  scan(options: ManifestScanOptions): Promise<ManifestInventory> | ManifestInventory;
+}
 
 // @align/cli — composition root
-import { TypeScriptPlugin } from '@align/plugin-typescript';
+import { NodeManifestScanner, TypeScriptPlugin } from '@align/plugin-typescript';
 const registry: PluginRegistry = new StaticPluginRegistry([new TypeScriptPlugin()]);
-const orchestrator = new GateOrchestrator(registry, /* rulesetIR, baselineStore */);
+const manifestScanner: ManifestScanner = new NodeManifestScanner();
+const orchestrator = new GateOrchestrator(registry, /* rulesetIR, baselineStore, hostPredicates */ undefined, manifestScanner);
 ```
+
+**Manifest scan domain placement (ADR 013)**: `plugin-typescript`, not core, and not a new
+`plugin-manifest` package. The probe that motivated this (`spike/MANIFEST_PROBE_REPORT.md`) flagged
+this as a genuine open question — manifest/lockfile text is a different input class from
+`plugin-typescript`'s TS-compiler-API source scanning. It stays inside `plugin-typescript` rather
+than becoming a fourth package because it is Node/pnpm-ecosystem-specific (same "zero framework
+dependencies" argument that keeps `plugin-typescript` itself separate from core, ADR 001/004's
+boundary) and because it reuses `workspace.ts`'s existing `loadWorkspacePackages` — splitting it out
+would either duplicate that inventory logic or force a cross-package dependency for one shared
+helper, the same "packaging equivalent of premature abstraction" judgment call this section already
+makes for `@align/dsl` above. Core only owns the `ManifestScanner` injection interface and the pure
+manifest-based evaluators (`rules/manifest-evaluators.ts`) — same shape as the `Scanner`/
+`LanguagePlugin` split one paragraph up.
 
 **Scoped to what v1 actually needs, given there is one language**: `StaticPluginRegistry` in v1 is a
 one-element list with no file-match conflict resolution, no priority ordering between plugins, and no

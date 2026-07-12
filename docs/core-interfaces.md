@@ -1,8 +1,9 @@
 # `@align/core` — Interface Signatures
 
-This document specifies the full TypeScript surface of `@align/core` for v1 (ADR 001/008 scope: `parse` +
-`architecture` gates only), plus two contracts that activate at later stages (`ValidatedEdit`/`FixProposal`,
-ADR 010) but must be anticipated now because the `Violation` model has to carry the data they need. Follows
+This document specifies the full TypeScript surface of `@align/core` for v1 (ADR 001/008 scope: `parse`,
+`architecture`, and — as of ADR 013 — `security` gates), plus two contracts that activate at later stages
+(`ValidatedEdit`/`FixProposal`, ADR 010) but must be anticipated now because the `Violation` model has to
+carry the data they need. Follows
 `CODING_BEST_PRACTICES.md` §9–13: discriminated unions over optional-soup, `readonly` by default, branded
 types where confusion is expensive, parse-don't-validate at every boundary (zod, ADR 002).
 
@@ -113,6 +114,23 @@ type Violation =
       readonly kind: 'custom';
       readonly hostRuleName: string;
       readonly detail: string;
+    })
+  // 'manifest-source-hygiene' / 'manifest-new-dependency' — security.manifest.* (ADR 013, promoted
+  // 2026-07-12 on spike/MANIFEST_PROBE_REPORT.md probe evidence). `file` (ViolationBase) is the
+  // declaring package.json; `depName`/`specifier` are structured fields, never folded into prose
+  // (ADR 007). `fixHint` is always `{ code: 'manual-review' }` — no structural fix align can
+  // propose for a manifest-level finding.
+  | (ViolationBase & {
+      readonly kind: 'manifest-source-hygiene';
+      readonly depName: string;
+      readonly specifier: string;                    // lockfile-resolved when available
+      readonly sourceType: 'git' | 'http' | 'file' | 'link';
+    })
+  | (ViolationBase & {
+      readonly kind: 'manifest-new-dependency';
+      readonly depName: string;
+      readonly specifier: string;
+      readonly depField: 'dependencies' | 'devDependencies'; // name-level, runtime+dev only
     });
   // Reserved variant (arrives with its rule kind — reserve pending evidence, docs/ir-schema.md):
   // 'naming' { actual, pattern }
@@ -172,11 +190,25 @@ type RuleIR =
       readonly kind: 'arch.metric'; readonly id: RuleId;
       readonly target: ComponentRef; readonly metric: 'loc'; readonly max: number;
       readonly provenance: RuleProvenance;
+    }
+  | {
+      // Promoted 2026-07-12 (user-approved, spike/MANIFEST_PROBE_REPORT.md probe evidence, ADR
+      // 013). No ComponentRef at all — repo-wide, the manifest scan domain has no notion of
+      // align's file-classified components.
+      readonly kind: 'security.manifest.source-hygiene'; readonly id: RuleId;
+      readonly provenance: RuleProvenance;
+    }
+  | {
+      // Promoted 2026-07-12 (user-approved, ADR 013). Also no ComponentRef.
+      readonly kind: 'security.manifest.new-dependency'; readonly id: RuleId;
+      readonly provenance: RuleProvenance;
     };
   // Reserved discriminants (name only, not implemented in v1 — docs/ir-schema.md):
   // 'arch.naming' (demoted at sign-off review — not spike-exercised)
   // 'lint.tool' | 'format.tool' | 'types.tool' | 'tests.tool' | 'security.secrets' | 'security.tool' | 'ts.*'
   // arch.metric's fan-in / fan-out / instability metrics (loc was promoted; these still need evidence)
+  // security.manifest's install-script-exposure sibling (spike/MANIFEST_PROBE_REPORT.md Rule 2 —
+  // held back pending a content-pattern classifier rework, see ADR 013's follow-up ladder)
 
 interface RulesetIR {
   readonly irVersion: '1';
@@ -260,6 +292,68 @@ type RuleEvaluator<TRule extends RuleIR = RuleIR> = (
 ) => readonly Violation[];
 ```
 
+## Manifest scan domain (ADR 013)
+
+A disjoint scan domain from `DependencyGraph`/`Scanner` above — package.json/pnpm-lock.yaml text,
+not parsed TypeScript. `@align/core` defines only the shape and the injection seam; the concrete
+pnpm/Node-ecosystem reader (`NodeManifestScanner`) lives in `@align/plugin-typescript` (ADR 013's
+placement decision — core stays language/ecosystem-agnostic per ADR 001/004's boundary), wired in at
+the CLI composition root exactly like `LanguagePlugin`/`TypeScriptPlugin`.
+
+```ts
+type ManifestDepField = 'dependencies' | 'devDependencies' | 'optionalDependencies';
+
+interface ManifestDependency {
+  readonly name: string;
+  readonly specifier: string;        // lockfile-resolved when a pnpm-lock.yaml is present
+  readonly field: ManifestDepField;
+  readonly line?: number;            // best-effort raw-text line, for Violation.range/snippet
+}
+
+interface ManifestRecord {
+  readonly file: RepoRelativePath;   // repo-relative package.json path (root or workspace member)
+  readonly raw: string;              // exact source text — the Violation.snippet extraction source
+  readonly dependencies: readonly ManifestDependency[];
+}
+
+interface ManifestInventory {
+  readonly manifests: readonly ManifestRecord[];
+  readonly lockfilePresent: boolean;
+}
+
+interface ManifestScanOptions {
+  readonly rootDir: string;
+  readonly excludes: readonly string[];
+}
+
+interface ManifestScanner {
+  scan(options: ManifestScanOptions): Promise<ManifestInventory> | ManifestInventory;
+}
+
+// Pure dispatcher over the disjoint SecurityManifestRule union (security.manifest.* only) — the
+// sibling of the graph-based RuleEvaluator above. GateOrchestrator's `security` gate is the only
+// real caller; `ruleCategoryOf(rule: RuleIR): Category` partitions RulesetIR.rules between this
+// and the graph-based evaluateRule before either ever runs.
+type SecurityManifestRule = Extract<RuleIR, { kind: `security.manifest.${string}` }>;
+function evaluateManifestRule(rule: SecurityManifestRule, inventory: ManifestInventory): readonly Violation[];
+```
+
+**Fingerprint discipline (ADR 006/013)**: both `security.manifest.*` evaluators key their
+`Violation.id` on `(declaring manifest path, dependency name)` only — never the specifier value or
+a line number — so a git-ref bump, a version bump, or a manifest reformatting never resets baseline
+consent for an already-reviewed/already-accepted dependency. This is the same "line numbers break
+under reformatting" doctrine `baseline/fingerprint.ts` documents for every other rule kind, applied
+to the one new axis manifest rules introduce (specifier-value churn).
+
+**`evaluateRule` (the graph-based dispatcher above) returns `[]` for both `security.manifest.*`
+kinds**, by design — they are real `RuleIR` members (so DSL/tier-2/`align build` can author and
+round-trip them like any other kind) but have no `DependencyGraph`-shaped evaluation; only
+`evaluateManifestRule` against real `ManifestInventory` data produces their actual violations.
+Known consequence: `align build`/`align explain`'s generic graph-based impact-delta preview
+under-reports manifest-rule violations (always 0) — `align check`'s `security` gate remains the
+authoritative evaluation path. Threading `ManifestInventory` through those preview call sites is a
+documented follow-up (ADR 013), not built in this promotion.
+
 ## Host predicate registration surface (custom.host, §B.0, ADR 002 amendment)
 
 `custom.host`'s evaluator (`evaluateCustomHost`) is the one `RuleEvaluator` that also takes an
@@ -334,6 +428,15 @@ interface CheckRun {
   readonly scannedAt: number;
 }
 ```
+
+**`security` gate (promoted 2026-07-12, ADR 013)**: `CheckRun.gates` now has three entries in
+practice (`parse`, `architecture`, `security`) — the security gate is `dependsOn: []` (ADR 008's
+always-run carve-out, same as `format`/`lint`/`security.secrets` in the design doc), computed
+independently of and before the TypeScript source scan, so a `parse` failure never masks it and it
+never masks `parse`/`architecture`. `GateOrchestrator`'s constructor takes a fifth, optional
+argument — `manifestScanner: ManifestScanner = <no-op returning an empty inventory>` — mirroring
+the `hostPredicates` injection seam above; the CLI composition root always supplies
+`@align/plugin-typescript`'s `NodeManifestScanner`.
 
 ## Baseline store
 
