@@ -1,0 +1,11 @@
+{
+  "name": "manifest-security-fixture",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.4"
+  }
+}

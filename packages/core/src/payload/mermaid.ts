@@ -15,6 +15,9 @@ import type { CycleEdge, Violation } from '../types/violation.js';
  * - `custom`: a single node (a host predicate's violation is whatever shape the predicate chose —
  *   there's no structural edge/chain align itself derived) labeled with the file and the
  *   predicate's own message.
+ * - `manifest-source-hygiene` / `manifest-new-dependency`: a single node (ADR 013 — the manifest
+ *   scan domain has no import-graph edges to draw) labeled with the declaring manifest, the
+ *   dependency name, and its specifier.
  */
 export function buildViolationMermaid(violation: Violation): string {
   switch (violation.kind) {
@@ -30,6 +33,10 @@ export function buildViolationMermaid(violation: Violation): string {
       return fence(metricDiagram(violation.component, violation.file, violation.value, violation.threshold));
     case 'custom':
       return fence(customDiagram(violation.file, violation.hostRuleName, violation.detail));
+    case 'manifest-source-hygiene':
+      return fence(manifestDiagram(violation.file, violation.depName, violation.specifier));
+    case 'manifest-new-dependency':
+      return fence(manifestDiagram(violation.file, violation.depName, violation.specifier));
     default: {
       const exhaustive: never = violation;
       throw new Error(`unhandled violation kind: ${JSON.stringify(exhaustive)}`);
@@ -85,6 +92,10 @@ function metricDiagram(component: string, file: string, value: number, threshold
 
 function customDiagram(file: string, hostRuleName: string, detail: string): string {
   return ['graph LR', `  a["${escapeLabel(file)}<br/>predicate: ${escapeLabel(hostRuleName)}<br/>${escapeLabel(detail)}"]`].join('\n');
+}
+
+function manifestDiagram(file: string, depName: string, specifier: string): string {
+  return ['graph LR', `  a["${escapeLabel(file)}<br/>${escapeLabel(depName)}: ${escapeLabel(specifier)}"]`].join('\n');
 }
 
 function escapeLabel(s: string): string {

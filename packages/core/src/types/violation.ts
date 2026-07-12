@@ -89,6 +89,22 @@ export type Violation =
       readonly kind: 'custom';
       readonly hostRuleName: string;
       readonly detail: string;
+    })
+  // `security.manifest.*` (ADR 013, promoted 2026-07-12 on probe evidence). `file` (ViolationBase)
+  // is the declaring package.json; `depName`/`specifier` are structured, never folded into prose
+  // (ADR 007 rule 2/6) — this is exactly the "specifier string, not a sentence" discipline the
+  // probe's own payload-shape recommendation names.
+  | (ViolationBase & {
+      readonly kind: 'manifest-source-hygiene';
+      readonly depName: string;
+      readonly specifier: string; // literal, lockfile-resolved when available
+      readonly sourceType: 'git' | 'http' | 'file' | 'link';
+    })
+  | (ViolationBase & {
+      readonly kind: 'manifest-new-dependency';
+      readonly depName: string;
+      readonly specifier: string;
+      readonly depField: 'dependencies' | 'devDependencies'; // name-level, runtime+dev only (ADR 013)
     });
   // Reserved variant (arrives with its rule kind — reserve pending evidence, docs/ir-schema.md):
   // 'naming' { actual, pattern }
@@ -130,6 +146,18 @@ export function renderViolationMessage(v: Violation): string {
     case 'custom':
       return (
         `${v.file}: ${v.detail} (rule '${v.ruleId}', host predicate '${v.hostRuleName}').` +
+        (v.because !== undefined ? ` ${v.because}` : '')
+      );
+    case 'manifest-source-hygiene':
+      return (
+        `${v.file} declares '${v.depName}' via a non-registry (${v.sourceType}) specifier ` +
+        `'${v.specifier}', which rule '${v.ruleId}' flags for human sign-off.` +
+        (v.because !== undefined ? ` ${v.because}` : '')
+      );
+    case 'manifest-new-dependency':
+      return (
+        `${v.file} declares dependency '${v.depName}' (${v.depField}) via '${v.specifier}', not yet ` +
+        `accepted into the baseline, which rule '${v.ruleId}' flags.` +
         (v.because !== undefined ? ` ${v.because}` : '')
       );
     default: {

@@ -4,3 +4,4 @@ export * from './scanner.js';
 export * from './tsconfig-resolver.js';
 export * from './workspace.js';
 export * from './doctor.js';
+export * from './manifest.js';

@@ -27,7 +27,10 @@ export type RuleEvaluator<TRule extends RuleIR = RuleIR> = (
 
 // `exactOptionalPropertyTypes` (CODING_BEST_PRACTICES.md §9) forbids assigning `undefined` to an
 // optional field explicitly — spread this in rather than writing `because: rule.provenance.because`.
-function becauseField(because: string | undefined): { readonly because: string } | Record<string, never> {
+// Exported: `rules/manifest-evaluators.ts`'s manifest-domain evaluators share this exact helper
+// rather than duplicating it (CODING_BEST_PRACTICES.md's rule-of-three) — both evaluator families
+// build the same `ViolationBase` shape from the same `RuleProvenance`.
+export function becauseField(because: string | undefined): { readonly because: string } | Record<string, never> {
   return because === undefined ? {} : { because };
 }
 
@@ -211,6 +214,19 @@ export const evaluateMetric: RuleEvaluator<ArchMetricRule> = (rule, graph) => {
  * throws propagates out of this function uncaught (`HostPredicateExecutionError`) exactly like a
  * malformed rule would — the orchestrator's evaluation-loop guard is what turns that into gate
  * `error` (`orchestrator.ts`), not this function, which stays a pure dispatcher.
+ *
+ * `security.manifest.*` kinds (ADR 013) return `[]` here, deliberately: this dispatcher only ever
+ * receives a `DependencyGraph` (TS-source scan output), and manifest rules evaluate against a
+ * disjoint scan domain (`ManifestInventory`) that this function never has access to. They are real
+ * `RuleIR` members (needed so the DSL/tier-2/build pipeline can author and round-trip them), but
+ * their actual evaluation always goes through `evaluateManifestRule`
+ * (`rules/manifest-evaluators.ts`) against real manifest data — `GateOrchestrator`'s `security` gate
+ * calls it directly and never routes these kinds through this function (`ruleCategoryOf` partitions
+ * `RulesetIR.rules` before either dispatcher runs, `rules/rule-category.ts`). Returning `[]` here
+ * (rather than throwing) keeps `align build`/`align explain`'s generic graph-based preview paths
+ * working without a manifest scan available to them — see ADR 013's follow-up ladder for the known
+ * gap this leaves (their impact-delta preview under-reports manifest-rule violations; `align check`
+ * remains authoritative).
  */
 export function evaluateRule(
   rule: RuleIR,
@@ -229,6 +245,9 @@ export function evaluateRule(
       return evaluateMetric(rule, graph, components);
     case 'custom.host':
       return evaluateCustomHost(rule, graph, hostPredicates);
+    case 'security.manifest.source-hygiene':
+    case 'security.manifest.new-dependency':
+      return [];
     default: {
       const exhaustive: never = rule;
       throw new Error(`unhandled rule kind: ${JSON.stringify(exhaustive)}`);

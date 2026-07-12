@@ -52,6 +52,12 @@ function* componentRefsOf(rule: RuleIR): Generator<string> {
       return;
     case 'custom.host':
       return;
+    // `security.manifest.*` (ADR 013) carries no `ComponentRef` — the manifest scan domain has no
+    // notion of align's file-classified components (same no-op shape as `custom.host`, which
+    // references a host predicate by name instead).
+    case 'security.manifest.source-hygiene':
+    case 'security.manifest.new-dependency':
+      return;
     default: {
       const exhaustive: never = rule;
       throw new Error(`unhandled rule kind: ${JSON.stringify(exhaustive)}`);

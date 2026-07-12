@@ -90,12 +90,31 @@ const archMetricSchema = z.object({
   provenance: ruleProvenanceSchema,
 });
 
+// `security.manifest.*` (ADR 013, promoted 2026-07-12 on spike/MANIFEST_PROBE_REPORT.md probe
+// evidence — probe Rules 1 and 7). Both are repo-wide (no `ComponentRef`, same shape as
+// `custom.host` — see `rules/component-refs.ts`'s `componentRefsOf`), because the manifest scan
+// domain (root + workspace package.json + pnpm-lock.yaml) has no notion of align's
+// file-classified components at all.
+const securityManifestSourceHygieneSchema = z.object({
+  kind: z.literal('security.manifest.source-hygiene'),
+  id: ruleId,
+  provenance: ruleProvenanceSchema,
+});
+
+const securityManifestNewDependencySchema = z.object({
+  kind: z.literal('security.manifest.new-dependency'),
+  id: ruleId,
+  provenance: ruleProvenanceSchema,
+});
+
 export const ruleIRSchema = z.discriminatedUnion('kind', [
   archNoDependencySchema,
   archNoCyclesSchema,
   archLayersSchema,
   customHostSchema,
   archMetricSchema,
+  securityManifestSourceHygieneSchema,
+  securityManifestNewDependencySchema,
 ]);
 
 export const rulesetIRSchema = z.object({
@@ -114,3 +133,5 @@ export type ArchNoCyclesRule = z.infer<typeof archNoCyclesSchema>;
 export type ArchLayersRule = z.infer<typeof archLayersSchema>;
 export type CustomHostRule = z.infer<typeof customHostSchema>;
 export type ArchMetricRule = z.infer<typeof archMetricSchema>;
+export type SecurityManifestSourceHygieneRule = z.infer<typeof securityManifestSourceHygieneSchema>;
+export type SecurityManifestNewDependencyRule = z.infer<typeof securityManifestNewDependencySchema>;
