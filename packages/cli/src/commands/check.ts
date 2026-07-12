@@ -2,15 +2,21 @@ import { buildMcpCheckPayload, renderViolationMessage, type CheckRun } from '@al
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, writeBaseline } from '../align-dir.js';
+import { verifyFrozenRules } from './build.js';
 
 export interface CheckOptions {
   readonly json: boolean;
+  /** `align check --frozen-rules` (ADR 011): also red if a doc-built ruleset has drifted from its
+   * lockfile (doc edited but not rebuilt) or `.align/generated-rules.json` was hand-edited since
+   * the last `align build --apply`. A no-op when `align build` has never run. */
+  readonly frozenRules?: boolean;
 }
 
 /**
  * `align check` — FRESH scan every run (ADR 005: rescan-on-check, no caching of any kind).
- * Exit 0 only on a fully green verdict; 1 on red or error (ADR 008: error is environmental and
- * halts/escalates, but from a shell's perspective both are "not safe to proceed").
+ * Exit 0 only on a fully green verdict (and, with `--frozen-rules`, no doc/generated-rules
+ * drift); 1 on red or error (ADR 008: error is environmental and halts/escalates, but from a
+ * shell's perspective both are "not safe to proceed").
  */
 export async function runCheck(rootDir: string, options: CheckOptions): Promise<number> {
   const { ruleset, excludes } = await loadConfig(rootDir);
@@ -24,14 +30,22 @@ export async function runCheck(rootDir: string, options: CheckOptions): Promise<
     writeBaseline(rootDir, baselineStore.snapshot());
   }
 
-  if (options.json) {
-    const payload = buildMcpCheckPayload(run);
-    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
-    return run.verdict === 'green' ? 0 : 1;
+  let effectiveRun = run;
+  let frozenRulesOk = true;
+  if (options.frozenRules === true) {
+    const frozen = verifyFrozenRules(rootDir);
+    frozenRulesOk = frozen.ok;
+    effectiveRun = { ...run, advisories: [...run.advisories, ...frozen.advisories] };
   }
 
-  printHuman(run);
-  return run.verdict === 'green' ? 0 : 1;
+  if (options.json) {
+    const payload = buildMcpCheckPayload(effectiveRun);
+    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    return effectiveRun.verdict === 'green' && frozenRulesOk ? 0 : 1;
+  }
+
+  printHuman(effectiveRun);
+  return effectiveRun.verdict === 'green' && frozenRulesOk ? 0 : 1;
 }
 
 function printHuman(run: CheckRun): void {
