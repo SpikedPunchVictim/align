@@ -133,7 +133,7 @@ interface GateResult {
 
 **Tests**: unit — fingerprint stability, baseline move-detection, DSL→IR golden snapshots, Tarjan (self-loops, multi-node SCCs), realpath classification, workspace-name fallback, empty-selector-fails, reserved-component-name type guards (expect-type); integration — fixtures (clean / probe-violation / cycle / pnpm-workspace / orphaned-package); MCP contract tests via in-process SDK client (shapes, caps, pagination, priority sort); CLI smoke (exit codes, `--json` shape).
 
-**Status**: In Progress (Sonnet agent implementing against the ADRs)
+**Status**: ✅ Complete — verified 2026-07-11. 4 incremental commits; **78 tests passing** (core 51, plugin-ts 10, cli 17 incl. 6 MCP contract tests), all packages typecheck clean; dogfood `pnpm check` **green** on align itself; kluster copy green in 2.5 s (uncertainty matches spike exactly: 32/23); n8n init seeded **exactly 207 cycles** → green in 13.3 s; 3-violation MCP payload ≈ 465 tokens (budget ≤1K). Five documented deviations from core-interfaces.md, four accepted; **open item for Stage 2: baseline move detection not implemented** (v1 fingerprints include file identity → renames orphan baseline entries; ADR 006's move-transfer design should be implemented or the ADR amended).
 
 ## Stage 2: External validation + explain polish
 
