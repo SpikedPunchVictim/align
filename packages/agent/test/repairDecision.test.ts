@@ -23,7 +23,7 @@ describe('decideNextRepairAction', () => {
     const decision = decideNextRepairAction(history, 1, 3);
     expect(decision.action).toBe('escalate-oscillation');
     if (decision.action === 'escalate-oscillation') {
-      expect(decision.conflictingRuleIds).toEqual([toRuleId('rule-a')]);
+      expect(decision.conflictingRuleIds).toEqual([toRuleId('rule-a'), toRuleId('rule-b')]);
     }
   });
 });

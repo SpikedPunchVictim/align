@@ -144,7 +144,7 @@ export class AnthropicFixProvider implements FixProvider {
           {
             name: TOOL_NAME,
             description: 'Propose a search/replace edit-block fix for the given violations.',
-            input_schema: FIX_PROPOSAL_JSON_SCHEMA,
+            input_schema: FIX_PROPOSAL_JSON_SCHEMA as unknown as Anthropic.Tool.InputSchema,
           },
         ],
         tool_choice: { type: 'tool', name: TOOL_NAME },

@@ -6,6 +6,7 @@ import { baselineAccept, baselinePrune, baselineShow } from './commands/baseline
 import { buildExplainPayload } from './commands/explain.js';
 import { runDoctor } from './commands/doctor.js';
 import { runBuild, DEFAULT_DOC_PATH } from './commands/build.js';
+import { runAgentCommand } from './commands/agent.js';
 import { startMcpServer } from './mcp/server.js';
 
 const program = new Command();
@@ -101,6 +102,45 @@ program
     });
     process.exitCode = code;
   });
+
+const agent = program.command('agent').description('Built-in BYOK LLM fix loop (Stage 4, ADR 010). Requires ANTHROPIC_API_KEY.');
+
+agent
+  .command('run')
+  .description(
+    'DISCOVER -> GROUP -> PLAN+FIX -> APPLY -> VERIFY -> REPAIR -> ESCALATE -> DONE -> TERMINAL MERGE. ' +
+      'Refuses a dirty worktree; every apply is a commit on a fresh align/fixes-<date> branch; never ' +
+      'touches align.config.ts or .align/**.',
+  )
+  .option('--max-attempts <n>', 'max REPAIR attempts per file group', (v) => Number.parseInt(v, 10), 3)
+  .option('--pr', 'push the work branch and open a draft PR (default)', true)
+  .option('--auto-merge', 'fast-forward merge into the base branch and delete the work branch instead of opening a PR', false)
+  .option('--allow-untested', 'allow PLAN+FIX on files with zero detected test coverage (default: refuse)', false)
+  .option('--allow-symbol-removals', 'allow a fix that deletes an exported symbol to commit (default: escalate)', false)
+  .option('--model <id>', 'override the FixProvider model id (default: config/env ALIGN_AGENT_MODEL, else claude-sonnet-5)')
+  .option('--dry-run', 'DISCOVER+GROUP+PLAN only — print proposed edits without applying or committing', false)
+  .action(
+    async (opts: {
+      maxAttempts: number;
+      pr: boolean;
+      autoMerge: boolean;
+      allowUntested: boolean;
+      allowSymbolRemovals: boolean;
+      model?: string;
+      dryRun: boolean;
+    }) => {
+      const code = await runAgentCommand(process.cwd(), {
+        maxAttempts: opts.maxAttempts,
+        pr: opts.pr,
+        autoMerge: opts.autoMerge,
+        allowUntested: opts.allowUntested,
+        allowSymbolRemovals: opts.allowSymbolRemovals,
+        ...(opts.model !== undefined ? { model: opts.model } : {}),
+        dryRun: opts.dryRun,
+      });
+      process.exitCode = code;
+    },
+  );
 
 program
   .command('mcp')

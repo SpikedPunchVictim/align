@@ -40,7 +40,11 @@ export function detectOscillation(history: readonly AttemptFingerprint[]): Oscil
   for (let i = 0; i < history.length - 1; i++) {
     const earlier = history[i] as AttemptFingerprint;
     if (setsEqual(earlier.violationIds, latest.violationIds) && earlier.violationIds.size > 0) {
-      const conflictingRuleIds = [...new Set([...earlier.ruleIds, ...latest.ruleIds])];
+      // Name every rule id seen across the whole repeated span (index i..latest), not just the
+      // two matching endpoints — "fix A introduces B, fix B reintroduces A" means the rule ids
+      // that changed hands mid-cycle (B) are exactly what the escalation report must name
+      // alongside the rule that oscillated back (A).
+      const conflictingRuleIds = [...new Set(history.slice(i).flatMap((h) => [...h.ruleIds]))];
       return { oscillating: true, repeatedAtIndex: i, conflictingRuleIds };
     }
   }

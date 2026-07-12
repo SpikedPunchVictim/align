@@ -15,6 +15,7 @@ export const excludes = [
   'packages/core/test/fixtures',
   'packages/plugin-typescript/test/fixtures',
   'packages/cli/test/fixtures',
+  'packages/agent/test/fixtures',
 ];
 
 export default defineProject({
@@ -22,16 +23,21 @@ export default defineProject({
     core: 'packages/core/**',
     pluginTypescript: 'packages/plugin-typescript/**',
     cli: 'packages/cli/**',
+    agent: 'packages/agent/**',
   },
   rules: (c) => [
     c.arch.noCycles(),
     c.arch
       .layer(c.core)
-      .cannotDependOn(c.pluginTypescript, c.cli)
-      .because('@align/core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript and cli implement its interfaces, never the reverse (ARCHITECTURE.md §5).'),
+      .cannotDependOn(c.pluginTypescript, c.cli, c.agent)
+      .because('@align/core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5).'),
     c.arch
       .layer(c.cli)
-      .canOnlyDependOn(c.core, c.pluginTypescript)
-      .because('cli is the composition root — the only package that imports a concrete LanguagePlugin and registers it (ARCHITECTURE.md §5).'),
+      .canOnlyDependOn(c.core, c.pluginTypescript, c.agent)
+      .because('cli is the composition root — the only package that imports a concrete LanguagePlugin/FixProvider and wires it together (ARCHITECTURE.md §5).'),
+    c.arch
+      .layer(c.agent)
+      .canOnlyDependOn(c.core)
+      .because('@align/agent (Stage 4 BYOK fix loop, ADR 010) depends only on @align/core + @anthropic-ai/sdk — it never imports plugin-typescript or cli; the CLI composition root wires concrete effects (git, fs, the TS scanner) into it, not the reverse (IMPLEMENTATION_PLAN.md Stage 4).'),
   ],
 });

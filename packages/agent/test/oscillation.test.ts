@@ -22,7 +22,7 @@ describe('detectOscillation', () => {
     const result = detectOscillation(history);
     expect(result.oscillating).toBe(true);
     expect(result.repeatedAtIndex).toBe(0);
-    expect(result.conflictingRuleIds).toEqual([toRuleId('rule-a')]);
+    expect(result.conflictingRuleIds).toEqual([toRuleId('rule-a'), toRuleId('rule-b')]);
   });
 
   it('does not treat two empty sets as an oscillation (no violations is not a cycle)', () => {

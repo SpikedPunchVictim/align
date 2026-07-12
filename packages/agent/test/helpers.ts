@@ -1,4 +1,4 @@
-import { toComponentName, toRepoRelativePath, toRuleId, toViolationId, type DependencyGraph, type DependencyGraphEdge, type DependencyGraphNode, type EdgeKind, type Violation } from '@align/core';
+import { toComponentName, toRepoRelativePath, toRuleId, toViolationId, type CheckRun, type DependencyGraph, type DependencyGraphEdge, type DependencyGraphNode, type EdgeKind, type GateResult, type Violation } from '@align/core';
 
 export function node(file: string, component: string, exports: string[] = [], loc = 10): DependencyGraphNode {
   return { file: toRepoRelativePath(file), component: toComponentName(component), loc, exports };
@@ -43,4 +43,37 @@ export function violation(overrides: Partial<Violation> & { id: string; ruleId: 
     line: 1,
     ...overrides,
   } as Violation;
+}
+
+export function checkRun(violations: readonly Violation[], overrides: Partial<CheckRun> = {}): CheckRun {
+  const gate: GateResult = {
+    gate: 'architecture',
+    status: violations.length > 0 ? 'red' : 'green',
+    violations,
+    baselinedCount: 0,
+    durationMs: 1,
+    cacheHits: 0,
+    dependsOn: [],
+  };
+  return {
+    verdict: violations.length > 0 ? 'red' : 'green',
+    gates: [gate],
+    advisories: [],
+    scannedAt: 0,
+    ...overrides,
+  };
+}
+
+export function errorCheckRun(): CheckRun {
+  const gate: GateResult = {
+    gate: 'architecture',
+    status: 'error',
+    violations: [],
+    baselinedCount: 0,
+    errorMessage: 'eslint binary not found',
+    durationMs: 1,
+    cacheHits: 0,
+    dependsOn: [],
+  };
+  return { verdict: 'error', gates: [gate], advisories: [], scannedAt: 0 };
 }
