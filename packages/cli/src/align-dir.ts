@@ -4,13 +4,24 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { generatedRulesFileSchema, rulesLockSchema, type BaselineEntry, type GeneratedRulesFile, type RulesLock } from '@align/core';
+import {
+  exportedRulesetSchema,
+  generatedRulesFileSchema,
+  rulesLockSchema,
+  type BaselineEntry,
+  type ExportedRuleset,
+  type GeneratedRulesFile,
+  type RulesLock,
+} from '@align/core';
 
 export const ALIGN_DIR = '.align';
 const BASELINE_FILENAME = 'baseline.json';
 const GENERATED_RULES_FILENAME = 'generated-rules.json';
 const RULES_LOCK_FILENAME = 'rules.lock.json';
 const LAST_BUILD_REPORT_FILENAME = 'last-build-report.md';
+// Default location for `align export-ir`'s output / `align check --untrusted`'s input (ADR 014).
+// Overridable per-invocation via `align export-ir --out <path>` / `align check --ir <path>`.
+const RULESET_IR_FILENAME = 'ruleset-ir.json';
 
 export function alignDirPath(rootDir: string): string {
   return path.join(rootDir, ALIGN_DIR);
@@ -103,4 +114,39 @@ export function writeRulesLock(rootDir: string, lock: RulesLock): void {
 export function writeLastBuildReport(rootDir: string, markdown: string): void {
   ensureAlignDir(rootDir);
   fs.writeFileSync(lastBuildReportPath(rootDir), markdown, 'utf8');
+}
+
+/** ADR 014's untrusted-mode artifact. Defaults to `.align/ruleset-ir.json`; `align export-ir
+ * --out`/`align check --ir` both take an explicit override path (absolute or repo-root-relative)
+ * for repos that want to commit it somewhere else or keep more than one exported snapshot. */
+export function rulesetIrPath(rootDir: string, override?: string): string {
+  if (override !== undefined) return path.isAbsolute(override) ? override : path.join(rootDir, override);
+  return path.join(alignDirPath(rootDir), RULESET_IR_FILENAME);
+}
+
+/**
+ * Reads and zod-validates the exported ruleset (`.align/ruleset-ir.json` by default). Returns
+ * `undefined` only when the file doesn't exist — `align check --untrusted`'s caller turns that
+ * into a hard refuse-don't-fallback message (ADR 014), never a silent switch to executing
+ * align.config.ts. A file that exists but fails to parse as JSON or fails schema validation
+ * throws — a corrupted or hand-mangled artifact must never be treated as "absent" (that would
+ * silently drop rules, the same false-green class `readGeneratedRules` already guards against).
+ */
+export function readRulesetIr(rootDir: string, override?: string): ExportedRuleset | undefined {
+  const file = rulesetIrPath(rootDir, override);
+  if (!fs.existsSync(file)) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    throw new Error(`${file} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return exportedRulesetSchema.parse(parsed);
+}
+
+export function writeRulesetIr(rootDir: string, data: ExportedRuleset, override?: string): string {
+  const file = rulesetIrPath(rootDir, override);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+  return file;
 }

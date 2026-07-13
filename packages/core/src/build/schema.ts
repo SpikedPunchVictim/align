@@ -5,7 +5,7 @@
  * `.parse()`d once, at its boundary.
  */
 import { z } from 'zod';
-import { ruleIRSchema } from '../types/ir.js';
+import { ruleIRSchema, rulesetIRSchema } from '../types/ir.js';
 
 const componentRefText = z.string().min(1);
 
@@ -130,3 +130,25 @@ export const rulesLockSchema = z.object({
 });
 
 export type RulesLock = z.infer<typeof rulesLockSchema>;
+
+// ---------------------------------------------------------------------------------------------
+// `.align/ruleset-ir.json` (ADR 014) — the untrusted-mode data source. Written once in a trusted
+// context by `align export-ir` and read by `align check --untrusted`/`--ir-only`, which never
+// imports align.config.ts. `ruleset` is exactly a `RulesetIR` (ADR 002: components + rules, both
+// already portable JSON with zero function-valued fields — `defineProject` zod-parses it before
+// this schema ever sees it) — this wrapper adds only what an untrusted scan additionally needs
+// beyond the ruleset itself: the scan-time `excludes` list (plain string data, config.ts's
+// documented `excludes`-is-not-part-of-RulesetIR deviation, ADR 002) and export provenance.
+// Deliberately does NOT carry `hostRules` — predicate functions cannot survive a JSON boundary
+// (ADR 002 amendment) and are categorically unavailable under --untrusted regardless
+// (`assertNoCustomHostRules`, `rules/host-rules.ts`).
+// ---------------------------------------------------------------------------------------------
+
+export const exportedRulesetSchema = z.object({
+  irVersion: z.literal('1'),
+  exportedAt: z.number(),
+  excludes: z.array(z.string()),
+  ruleset: rulesetIRSchema,
+});
+
+export type ExportedRuleset = z.infer<typeof exportedRulesetSchema>;
