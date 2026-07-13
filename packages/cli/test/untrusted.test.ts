@@ -56,7 +56,7 @@ describe('align export-ir', () => {
     const exported = readRulesetIr(tmpDir);
     expect(exported).toBeDefined();
     expect(exported?.ruleset.components).toEqual({
-      app: { name: 'app', selector: { kind: 'glob', patterns: ['src/**'] }, allowEmpty: false },
+      app: { name: 'app', selector: { kind: 'glob', patterns: ['src/**'] }, empty: 'fail' },
     });
     expect(exported?.ruleset.rules).toHaveLength(1);
     expect(exported?.ruleset.rules[0]?.kind).toBe('arch.no-cycles');
@@ -209,7 +209,7 @@ describe('align check --untrusted — custom.host is unavailable', () => {
       excludes: [],
       ruleset: {
         irVersion: '1' as const,
-        components: { app: { name: 'app', selector: { kind: 'glob' as const, patterns: ['src/**'] }, allowEmpty: false } },
+        components: { app: { name: 'app', selector: { kind: 'glob' as const, patterns: ['src/**'] }, empty: 'fail' } },
         rules: [{ kind: 'custom.host' as const, id: 'custom.host:route-thinness', hostRuleName: 'route-thinness', portable: false as const, provenance: {} }],
       },
     };

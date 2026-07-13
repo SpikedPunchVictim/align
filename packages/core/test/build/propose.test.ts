@@ -5,9 +5,9 @@ import { toComponentName, toRepoRelativePath } from '../../src/types/branded.js'
 import type { ComponentDefinitionIR } from '../../src/types/ir.js';
 
 const components: Record<string, ComponentDefinitionIR> = {
-  core: { name: toComponentName('core'), selector: { kind: 'glob', patterns: ['packages/core/**'] }, allowEmpty: false },
-  cli: { name: toComponentName('cli'), selector: { kind: 'glob', patterns: ['packages/cli/**'] }, allowEmpty: false },
-  pluginTypescript: { name: toComponentName('pluginTypescript'), selector: { kind: 'glob', patterns: ['packages/plugin-typescript/**'] }, allowEmpty: false },
+  core: { name: toComponentName('core'), selector: { kind: 'glob', patterns: ['packages/core/**'] }, empty: 'fail' },
+  cli: { name: toComponentName('cli'), selector: { kind: 'glob', patterns: ['packages/cli/**'] }, empty: 'fail' },
+  pluginTypescript: { name: toComponentName('pluginTypescript'), selector: { kind: 'glob', patterns: ['packages/plugin-typescript/**'] }, empty: 'fail' },
 };
 
 const docPath = toRepoRelativePath('docs/ARCHITECTURE-RULES.md');
@@ -111,6 +111,18 @@ describe('proposeRulesFromDoc', () => {
     expect(diff.removed).toHaveLength(0);
     expect(diff.changed).toHaveLength(0);
     expect(diff.unchanged).toHaveLength(3); // fully empty diff — every rule is byte-identical
+  });
+
+  it("R5: a tier-2 bullet's trailing \"Because ...\" clause reaches the compiled rule's provenance.because, prepended to the auto-generated 'Enforced by' quote — same convergence as a tier-1 fragment's authored because", () => {
+    const withBecause = ['## Core Isolation', '', '- **Rule**: `core` must not depend on `cli`. Because core must stay a leaf dependency.', ''].join(
+      '\n',
+    );
+    const result = proposeRulesFromDoc(withBecause, docPath, components);
+    expect(result.flagged).toHaveLength(0);
+    const rule = result.rules.find((r) => r.id === 'arch.no-dependency:core->cli');
+    expect(rule?.provenance.because).toBe(
+      "core must stay a leaf dependency Enforced by docs/ARCHITECTURE-RULES.md:3: '- **Rule**: `core` must not depend on `cli`. Because core must stay a leaf dependency.'",
+    );
   });
 
   it('flags an ungroundable component rather than silently writing a rule', () => {

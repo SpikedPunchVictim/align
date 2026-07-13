@@ -11,7 +11,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.join(here, 'fixtures');
 
 function allComponent(): Record<string, ComponentDefinitionIR> {
-  return { [toComponentName('all')]: { name: 'all', selector: { kind: 'glob', patterns: ['**'] }, allowEmpty: false } };
+  return { [toComponentName('all')]: { name: 'all', selector: { kind: 'glob', patterns: ['**'] }, empty: 'fail' } };
 }
 
 describe('TypeScriptScanner — clean fixture', () => {
@@ -33,8 +33,8 @@ describe('TypeScriptScanner — probe-violation fixture', () => {
   it('records the seeded cross-boundary edge with exact file/line/specifier', async () => {
     const scanner = new TypeScriptScanner();
     const components: Record<string, ComponentDefinitionIR> = {
-      [toComponentName('api')]: { name: 'api', selector: { kind: 'glob', patterns: ['src/api/**'] }, allowEmpty: false },
-      [toComponentName('ui')]: { name: 'ui', selector: { kind: 'glob', patterns: ['src/ui/**'] }, allowEmpty: false },
+      [toComponentName('api')]: { name: 'api', selector: { kind: 'glob', patterns: ['src/api/**'] }, empty: 'fail' },
+      [toComponentName('ui')]: { name: 'ui', selector: { kind: 'glob', patterns: ['src/ui/**'] }, empty: 'fail' },
     };
     const graph = await scanner.scan({ rootDir: path.join(fixturesDir, 'probe-violation'), components, excludes: [] });
     const violatingEdge = graph.edges.find((e) => e.from === 'src/api/service.ts');
@@ -64,7 +64,7 @@ describe('TypeScriptScanner — orphaned-package fixture', () => {
   it('classifies files by path-prefix component even with no pnpm-workspace.yaml at all', async () => {
     const scanner = new TypeScriptScanner();
     const components: Record<string, ComponentDefinitionIR> = {
-      [toComponentName('orphan')]: { name: 'orphan', selector: { kind: 'glob', patterns: ['src/**'] }, allowEmpty: false },
+      [toComponentName('orphan')]: { name: 'orphan', selector: { kind: 'glob', patterns: ['src/**'] }, empty: 'fail' },
     };
     const graph = await scanner.scan({ rootDir: path.join(fixturesDir, 'orphaned-package'), components, excludes: [] });
     expect(graph.nodes).toHaveLength(1);
@@ -185,8 +185,8 @@ describe('TypeScriptScanner — rootDir under a symlinked ancestor (e.g. macOS /
       const graph = await scanner.scan({
         rootDir: dest, // deliberately the RAW (non-realpath'd) path, as every real caller passes it
         components: {
-          [toComponentName('api')]: { name: 'api', selector: { kind: 'glob', patterns: ['src/api/**'] }, allowEmpty: false },
-          [toComponentName('ui')]: { name: 'ui', selector: { kind: 'glob', patterns: ['src/ui/**'] }, allowEmpty: false },
+          [toComponentName('api')]: { name: 'api', selector: { kind: 'glob', patterns: ['src/api/**'] }, empty: 'fail' },
+          [toComponentName('ui')]: { name: 'ui', selector: { kind: 'glob', patterns: ['src/ui/**'] }, empty: 'fail' },
         },
         excludes: [],
       });

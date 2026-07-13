@@ -16,10 +16,24 @@ const fileSelectorSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('package'), packageNames: z.array(z.string()).min(1) }),
 ]);
 
+// Greenfield mode (IMPLEMENTATION_PLAN.md Design Reserve "Greenfield mode", ADR 003 amendment):
+// a component's empty-selector policy is a 3-state discriminant, not the old boolean `allowEmpty`.
+// - 'fail' (default): a component matching zero files is a load-time error (ADR 003's
+//   empty-selector-fails-by-default doctrine, unchanged).
+// - 'allow': empty tolerated permanently — the old `allowEmpty: true` behavior, now additionally
+//   surfaced as an `ungrounded-component` advisory (`components/registry.ts`'s
+//   `findUngroundedComponents`) instead of being silently indistinguishable from real compliance
+//   (ADR 008 amendment: the reference-validity invariant's sanctioned exception, made visible).
+// - 'until-populated': empty tolerated + surfaced the same way, but self-heals — once the
+//   component has >=1 classified file, the empty-check simply stops triggering (no separate
+//   "armed" state to track) and its rules evaluate normally. Documents greenfield intent
+//   ("this WILL be built") instead of a permanent, easy-to-forget opt-out.
+const emptyPolicySchema = z.enum(['fail', 'allow', 'until-populated']);
+
 const componentDefinitionSchema = z.object({
   name: componentName,
   selector: fileSelectorSchema,
-  allowEmpty: z.boolean(),
+  empty: emptyPolicySchema.default('fail'),
 });
 
 const componentRef = componentName;
@@ -124,6 +138,7 @@ export const rulesetIRSchema = z.object({
 });
 
 export type FileSelector = z.infer<typeof fileSelectorSchema>;
+export type EmptyPolicy = z.infer<typeof emptyPolicySchema>;
 export type ComponentDefinitionIR = z.infer<typeof componentDefinitionSchema>;
 export type RuleProvenance = z.infer<typeof ruleProvenanceSchema>;
 export type RuleIR = z.infer<typeof ruleIRSchema>;

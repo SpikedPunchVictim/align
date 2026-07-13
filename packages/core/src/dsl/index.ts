@@ -4,7 +4,7 @@
  * standalone `@spikedpunch/align-dsl` package is cheap and deferred until a second consumer needs it).
  */
 import { toComponentName, toRuleId, type RuleId } from '../types/branded.js';
-import type { ComponentDefinitionIR, FileSelector, RuleIR, RulesetIR } from '../types/ir.js';
+import type { ComponentDefinitionIR, EmptyPolicy, FileSelector, RuleIR, RulesetIR } from '../types/ir.js';
 import { rulesetIRSchema } from '../types/ir.js';
 import {
   makeArchFactory,
@@ -22,7 +22,32 @@ export * from './verb-manifest.js';
 // Component declaration shorthand
 // ---------------------------------------------------------------------------------------------
 
-export type ComponentDeclaration = string | { readonly pattern: string; readonly allowEmpty?: boolean };
+export type ComponentDeclaration =
+  | string
+  | {
+      readonly pattern: string;
+      /**
+       * @deprecated Use `empty: 'allow'` instead — kept for back-compat (align's own dogfood
+       * config history and external adopters, e.g. kluster's `sdd` component, already authored
+       * `allowEmpty: true`; it keeps working, unchanged, as an alias). `allowEmpty: true` resolves
+       * to `empty: 'allow'` when `empty` itself is not also set; `empty` wins if both are present.
+       */
+      readonly allowEmpty?: boolean;
+      /**
+       * Greenfield mode (IMPLEMENTATION_PLAN.md Design Reserve "Greenfield mode", ADR 003
+       * amendment) — the empty-selector policy, as a 3-state discriminant:
+       * - `'fail'` (default): a component matching zero files is a load-time error (unchanged
+       *   ADR 003 empty-selector-fails-by-default safety).
+       * - `'allow'`: empty tolerated permanently — same as `allowEmpty: true`, now additionally
+       *   surfaced as an `ungrounded-component` advisory in `align check` (R1) instead of an
+       *   indistinguishable plain `green`.
+       * - `'until-populated'`: empty tolerated + surfaced the same way, but self-heals — once the
+       *   component has >=1 classified file, the empty-check simply stops firing and its rules
+       *   evaluate normally (no manual flag flip). Use this for architecture-first authoring:
+       *   components declared before any code exists.
+       */
+      readonly empty?: EmptyPolicy;
+    };
 
 export type ComponentsInput = Record<string, ComponentDeclaration>;
 
@@ -34,9 +59,13 @@ function parseSelector(pattern: string): FileSelector {
 }
 
 function resolveComponentDefinition(name: string, decl: ComponentDeclaration): ComponentDefinitionIR {
-  const pattern = typeof decl === 'string' ? decl : decl.pattern;
-  const allowEmpty = typeof decl === 'string' ? false : (decl.allowEmpty ?? false);
-  return { name, selector: parseSelector(pattern), allowEmpty };
+  if (typeof decl === 'string') {
+    return { name, selector: parseSelector(decl), empty: 'fail' };
+  }
+  // `empty` wins if both are authored; `allowEmpty: true` alone resolves to `empty: 'allow'`
+  // (deprecated-alias back-compat — see the `ComponentDeclaration` doc comment above).
+  const empty: EmptyPolicy = decl.empty ?? (decl.allowEmpty === true ? 'allow' : 'fail');
+  return { name, selector: parseSelector(decl.pattern), empty };
 }
 
 // ---------------------------------------------------------------------------------------------

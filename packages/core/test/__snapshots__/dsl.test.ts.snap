@@ -4,7 +4,7 @@ exports[`defineProject > c.security.manifest (ADR 013) > golden snapshot: securi
 {
   "components": {
     "api": {
-      "allowEmpty": false,
+      "empty": "fail",
       "name": "api",
       "selector": {
         "kind": "glob",
@@ -34,7 +34,7 @@ exports[`defineProject > golden snapshot: a realistic layered project compiles t
 {
   "components": {
     "api": {
-      "allowEmpty": false,
+      "empty": "fail",
       "name": "api",
       "selector": {
         "kind": "glob",
@@ -44,7 +44,7 @@ exports[`defineProject > golden snapshot: a realistic layered project compiles t
       },
     },
     "core": {
-      "allowEmpty": false,
+      "empty": "fail",
       "name": "core",
       "selector": {
         "kind": "glob",
@@ -54,7 +54,7 @@ exports[`defineProject > golden snapshot: a realistic layered project compiles t
       },
     },
     "ui": {
-      "allowEmpty": false,
+      "empty": "fail",
       "name": "ui",
       "selector": {
         "kind": "glob",
@@ -122,7 +122,7 @@ exports[`defineProject > golden snapshot: custom.host compiles to a stable IR sh
 {
   "components": {
     "api": {
-      "allowEmpty": false,
+      "empty": "fail",
       "name": "api",
       "selector": {
         "kind": "glob",
@@ -151,7 +151,7 @@ exports[`defineProject > golden snapshot: maxLinesPerFile compiles to a stable a
 {
   "components": {
     "api": {
-      "allowEmpty": false,
+      "empty": "fail",
       "name": "api",
       "selector": {
         "kind": "glob",

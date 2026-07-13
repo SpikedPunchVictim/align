@@ -4,8 +4,8 @@ import { toComponentName, toRepoRelativePath } from '../../src/types/branded.js'
 import type { ComponentDefinitionIR } from '../../src/types/ir.js';
 
 const components: Record<string, ComponentDefinitionIR> = {
-  core: { name: toComponentName('core'), selector: { kind: 'glob', patterns: ['packages/core/**'] }, allowEmpty: false },
-  cli: { name: toComponentName('cli'), selector: { kind: 'glob', patterns: ['packages/cli/**'] }, allowEmpty: false },
+  core: { name: toComponentName('core'), selector: { kind: 'glob', patterns: ['packages/core/**'] }, empty: 'fail' },
+  cli: { name: toComponentName('cli'), selector: { kind: 'glob', patterns: ['packages/cli/**'] }, empty: 'fail' },
 };
 
 const docPath = toRepoRelativePath('docs/ARCHITECTURE-RULES.md');

@@ -14,7 +14,7 @@ import type { ComponentName } from '../../src/types/branded.js';
 function components(...names: string[]): Readonly<Record<ComponentName, ComponentDefinitionIR>> {
   const out: Record<string, ComponentDefinitionIR> = {};
   for (const name of names) {
-    out[name] = { name, selector: { kind: 'glob', patterns: [`${name}/**`] }, allowEmpty: false };
+    out[name] = { name, selector: { kind: 'glob', patterns: [`${name}/**`] }, empty: 'fail' };
   }
   return out as Readonly<Record<ComponentName, ComponentDefinitionIR>>;
 }

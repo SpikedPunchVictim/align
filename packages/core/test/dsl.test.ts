@@ -9,7 +9,41 @@ describe('defineProject', () => {
     expect(ir.components['api']).toEqual({
       name: 'api',
       selector: { kind: 'glob', patterns: ['application/api/**'] },
-      allowEmpty: false,
+      empty: 'fail',
+    });
+  });
+
+  describe('greenfield mode: component empty policy (ADR 003 amendment)', () => {
+    it("a bare string component declaration defaults to empty: 'fail' (unchanged safety)", () => {
+      const ir = defineProject({ components: { api: 'application/api/**' } });
+      expect(ir.components['api']?.empty).toBe('fail');
+    });
+
+    it("allowEmpty: true (deprecated alias) resolves to empty: 'allow' — back-compat for align's own history and external adopters (e.g. kluster's sdd component)", () => {
+      const ir = defineProject({ components: { api: { pattern: 'application/api/**', allowEmpty: true } } });
+      expect(ir.components['api']?.empty).toBe('allow');
+    });
+
+    it("empty: 'allow' is authored directly", () => {
+      const ir = defineProject({ components: { api: { pattern: 'application/api/**', empty: 'allow' } } });
+      expect(ir.components['api']?.empty).toBe('allow');
+    });
+
+    it("empty: 'until-populated' is authored directly (greenfield authoring form)", () => {
+      const ir = defineProject({ components: { api: { pattern: 'application/api/**', empty: 'until-populated' } } });
+      expect(ir.components['api']?.empty).toBe('until-populated');
+    });
+
+    it('empty wins when both empty and the deprecated allowEmpty are authored together', () => {
+      const ir = defineProject({
+        components: { api: { pattern: 'application/api/**', allowEmpty: true, empty: 'until-populated' } },
+      });
+      expect(ir.components['api']?.empty).toBe('until-populated');
+    });
+
+    it('allowEmpty: false alone still resolves to fail (does not accidentally opt in)', () => {
+      const ir = defineProject({ components: { api: { pattern: 'application/api/**', allowEmpty: false } } });
+      expect(ir.components['api']?.empty).toBe('fail');
     });
   });
 

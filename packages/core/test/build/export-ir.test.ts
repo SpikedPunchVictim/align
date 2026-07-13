@@ -5,7 +5,7 @@ import type { RulesetIR } from '../../src/types/ir.js';
 
 const RULESET: RulesetIR = {
   irVersion: '1',
-  components: { app: { name: 'app', selector: { kind: 'glob', patterns: ['src/**'] }, allowEmpty: false } },
+  components: { app: { name: 'app', selector: { kind: 'glob', patterns: ['src/**'] }, empty: 'fail' } },
   rules: [{ kind: 'arch.no-cycles', id: 'arch.no-cycles:repo', scope: 'repo', includeTypeOnly: false, provenance: {} }],
 };
 

@@ -142,7 +142,7 @@ describe('align check — stale generated-rules.json false-green guard (RULESET_
       `import type { RulesetIR } from '@spikedpunch/align-core';\n\n` +
         `const ruleset: RulesetIR = {\n` +
         `  irVersion: '1',\n` +
-        `  components: { app: { name: 'app', selector: { kind: 'glob', patterns: ['src/**'] }, allowEmpty: false } },\n` +
+        `  components: { app: { name: 'app', selector: { kind: 'glob', patterns: ['src/**'] }, empty: 'fail' } },\n` +
         `  rules: [{ kind: 'arch.no-dependency', id: 'hand:app->ghost', from: 'app', to: 'ghost', provenance: {} }],\n` +
         `};\n\nexport default ruleset;\n`,
       'utf8',
@@ -189,7 +189,7 @@ describe('align check — stale generated-rules.json false-green guard (RULESET_
       `import type { RulesetIR } from '@spikedpunch/align-core';\n\n` +
         `const ruleset: RulesetIR = {\n` +
         `  irVersion: '1',\n` +
-        `  components: { app: { name: 'app', selector: { kind: 'glob', patterns: ['src/**'] }, allowEmpty: false } },\n` +
+        `  components: { app: { name: 'app', selector: { kind: 'glob', patterns: ['src/**'] }, empty: 'fail' } },\n` +
         `  rules: [{ kind: 'custom.host', id: 'custom.host:hand-rolled', hostRuleName: 'hand-rolled', portable: false, provenance: {} }],\n` +
         `};\n\nexport default ruleset;\n`,
       'utf8',

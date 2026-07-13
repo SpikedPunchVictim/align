@@ -15,7 +15,7 @@ function sourceFileFor(text: string): ts.SourceFile {
 }
 
 function allComponent(): Record<string, ComponentDefinitionIR> {
-  return { [toComponentName('all')]: { name: 'all', selector: { kind: 'glob', patterns: ['**'] }, allowEmpty: false } };
+  return { [toComponentName('all')]: { name: 'all', selector: { kind: 'glob', patterns: ['**'] }, empty: 'fail' } };
 }
 
 describe('extractExportedSymbols', () => {
