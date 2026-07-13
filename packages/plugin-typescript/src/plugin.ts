@@ -1,4 +1,4 @@
-import type { LanguagePlugin } from '@align/core';
+import type { LanguagePlugin } from '@spikedpunch/align-core';
 import { TypeScriptScanner } from './scanner.js';
 
 export class TypeScriptPlugin implements LanguagePlugin {

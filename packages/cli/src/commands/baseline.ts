@@ -1,4 +1,4 @@
-import { InMemoryBaselineStore, toRuleId } from '@align/core';
+import { InMemoryBaselineStore, toRuleId } from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, writeBaseline } from '../align-dir.js';

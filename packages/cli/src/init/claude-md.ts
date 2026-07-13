@@ -6,7 +6,7 @@ const END_MARKER = '<!-- align:end -->';
 
 const BLOCK_BODY = `## align — architecture conformance
 
-This repo is checked by [align](https://github.com) for dependency-direction and import-cycle
+This repo is checked by [align](https://github.com/SpikedPunchVictim/align) for dependency-direction and import-cycle
 conformance. Run \`align check\` (or the \`align_check\` MCP tool if the align MCP server is
 connected) after any structural code change — new imports, moved files, restructured modules.
 

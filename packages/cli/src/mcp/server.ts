@@ -12,7 +12,7 @@ import * as path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { buildMcpCheckPayload, proposeRulesFromDoc, ruleFragmentSchema, toRepoRelativePath, type CheckRun } from '@align/core';
+import { buildMcpCheckPayload, proposeRulesFromDoc, ruleFragmentSchema, toRepoRelativePath, type CheckRun } from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, writeBaseline } from '../align-dir.js';

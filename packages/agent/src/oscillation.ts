@@ -5,7 +5,7 @@
  * cycle in the state space, not progress — stop immediately and escalate naming both rule ids,
  * rather than burning the remaining REPAIR budget ping-ponging.
  */
-import type { RuleId, ViolationId } from '@align/core';
+import type { RuleId, ViolationId } from '@spikedpunch/align-core';
 
 export interface AttemptFingerprint {
   readonly violationIds: ReadonlySet<ViolationId>;

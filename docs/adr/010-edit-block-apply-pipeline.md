@@ -88,7 +88,7 @@ value itself is Design Reserve (needed only once real files hit it).
 - `Violation.snippet` and `Violation.range` (fixed now, `docs/core-interfaces.md`) must be precise enough
   that a Stage 4 `search` block can be constructed from them without additional file reads for the common
   case — this is a v1 data-quality requirement even though the consuming pipeline doesn't exist yet.
-- The apply pipeline is entirely engine-side and file-scoped; it introduces no dependency from `@align/core`
+- The apply pipeline is entirely engine-side and file-scoped; it introduces no dependency from `@spikedpunch/align-core`
   on any LLM client — `FixProposal` is just a zod schema core validates, same as any other IR.
 
 ## Evidence

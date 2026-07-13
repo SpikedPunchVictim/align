@@ -1,4 +1,4 @@
-import type { FixProposal, RepoRelativePath } from '@align/core';
+import type { FixProposal, RepoRelativePath } from '@spikedpunch/align-core';
 import type { FixProvider, FixProviderInput } from '../src/fixProvider.js';
 
 export type ScriptedResponse = FixProposal | ((input: FixProviderInput) => FixProposal);

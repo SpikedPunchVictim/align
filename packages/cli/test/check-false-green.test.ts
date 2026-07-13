@@ -139,7 +139,7 @@ describe('align check — stale generated-rules.json false-green guard (RULESET_
     // RulesetIR could — the same runtime gap `mergeGeneratedRules` output shares.
     fs.writeFileSync(
       path.join(tmpDir, 'align.config.ts'),
-      `import type { RulesetIR } from '@align/core';\n\n` +
+      `import type { RulesetIR } from '@spikedpunch/align-core';\n\n` +
         `const ruleset: RulesetIR = {\n` +
         `  irVersion: '1',\n` +
         `  components: { app: { name: 'app', selector: { kind: 'glob', patterns: ['src/**'] }, allowEmpty: false } },\n` +
@@ -186,7 +186,7 @@ describe('align check — stale generated-rules.json false-green guard (RULESET_
     // The DSL has no custom.host verb, so a raw RulesetIR export is the only hand-written route.
     fs.writeFileSync(
       path.join(tmpDir, 'align.config.ts'),
-      `import type { RulesetIR } from '@align/core';\n\n` +
+      `import type { RulesetIR } from '@spikedpunch/align-core';\n\n` +
         `const ruleset: RulesetIR = {\n` +
         `  irVersion: '1',\n` +
         `  components: { app: { name: 'app', selector: { kind: 'glob', patterns: ['src/**'] }, allowEmpty: false } },\n` +
@@ -214,8 +214,8 @@ describe('align check — stale generated-rules.json false-green guard (RULESET_
     // synthetic in-memory orchestrator like the core-level e2e test.
     fs.writeFileSync(
       path.join(tmpDir, 'align.config.ts'),
-      `import { defineProject } from '@align/core/dsl';\n` +
-        `import type { HostPredicate } from '@align/core';\n\n` +
+      `import { defineProject } from '@spikedpunch/align-core/dsl';\n` +
+        `import type { HostPredicate } from '@spikedpunch/align-core';\n\n` +
         `export const hostRules: Record<string, HostPredicate> = {\n` +
         `  'flag-a': (ctx) => ctx.files.filter((f) => f.endsWith('a.ts')).map((f) => ({ file: f, message: 'a.ts is flagged by the registered predicate' })),\n` +
         `};\n\n` +

@@ -4,8 +4,8 @@
  * imports `@anthropic-ai/sdk`; it only ever sees this interface, which any fake can implement in
  * tests. `AnthropicFixProvider` (anthropicFixProvider.ts) is the one real implementation.
  */
-import { sha256Hex, type RepoRelativePath, type RuleId, type Violation } from '@align/core';
-import type { FailureContext, FixProposal } from '@align/core';
+import { sha256Hex, type RepoRelativePath, type RuleId, type Violation } from '@spikedpunch/align-core';
+import type { FailureContext, FixProposal } from '@spikedpunch/align-core';
 
 export interface RuleExplanation {
   readonly ruleId: RuleId;

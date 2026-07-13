@@ -1,7 +1,7 @@
 # Contributing to align
 
 Thanks for looking at align. This is a pnpm workspace with four packages
-(`@align/core`, `@align/plugin-typescript`, `@align/cli`, `@align/agent`),
+(`@spikedpunch/align-core`, `@spikedpunch/align-plugin-typescript`, `@spikedpunch/align-cli`, `@spikedpunch/align-agent`),
 written in strict-mode TypeScript, tested with vitest.
 
 ## Prerequisites
@@ -25,7 +25,7 @@ pnpm -r test        # vitest run per package
 ```
 
 Run a single package's scripts with `pnpm --filter <package-name> <script>`,
-e.g. `pnpm --filter @align/core test`.
+e.g. `pnpm --filter @spikedpunch/align-core test`.
 
 ## Dogfood-check locally
 

@@ -49,7 +49,7 @@ describe('scanManifests (ADR 013 manifest scan domain)', () => {
 });
 
 describe('NodeManifestScanner (ManifestScanner injection seam, ADR 013)', () => {
-  it('implements @align/core\'s ManifestScanner interface', async () => {
+  it('implements @spikedpunch/align-core\'s ManifestScanner interface', async () => {
     const scanner = new NodeManifestScanner();
     const inventory = await scanner.scan({ rootDir: path.join(fixturesDir, 'manifest-security'), excludes: [] });
     expect(inventory.manifests.length).toBeGreaterThan(0);

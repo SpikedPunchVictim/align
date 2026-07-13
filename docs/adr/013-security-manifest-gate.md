@@ -71,7 +71,7 @@ pair, matching ADR 006's "line numbers break under reformatting" doctrine extend
 manifest rules introduce (a dependency's specifier can legitimately change without the finding's identity
 changing).
 
-**Scan-domain placement: `@align/plugin-typescript`, not `@align/core`, not a new `plugin-manifest`
+**Scan-domain placement: `@spikedpunch/align-plugin-typescript`, not `@spikedpunch/align-core`, not a new `plugin-manifest`
 package.** The probe explicitly flagged this as an open design question — package.json/pnpm-lock.yaml text
 is a different input class from `plugin-typescript`'s TS-compiler-API source scanning, so it isn't "just
 another file type" for the existing `Scanner`. It stays inside `plugin-typescript` rather than becoming a
@@ -80,7 +80,7 @@ argument (ADR 001/004) that keeps `plugin-typescript` itself separate from core 
 new package, at the cost of one more `package.json`/build target for zero isolation benefit with exactly one
 consumer; and (b) it reuses `workspace.ts`'s existing `loadWorkspacePackages` — a genuine "don't duplicate"
 opportunity a separate package would have to either re-implement or import cross-package for one shared
-helper. `@align/core` owns only the `ManifestScanner` injection interface (mirrors `Scanner`/
+helper. `@spikedpunch/align-core` owns only the `ManifestScanner` injection interface (mirrors `Scanner`/
 `LanguagePlugin`) and the pure, I/O-free evaluators (`rules/manifest-evaluators.ts`); the CLI composition
 root injects `plugin-typescript`'s `NodeManifestScanner` exactly like it injects `TypeScriptPlugin` — core
 never imports `plugin-typescript` directly (ARCHITECTURE.md §5).

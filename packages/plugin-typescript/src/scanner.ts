@@ -3,7 +3,7 @@
  * API (not ts-morph — the raw compiler API is the spike-proven implementation), extract edges,
  * discard the AST immediately. Ported from spike/src/scanner.ts, adapted to core's `Scanner`
  * contract and extended with the asset-specifier / configurable-build-output-exclude vocabulary
- * and snippet capture (needed for `Violation.snippet`, see @align/core's documented deviation).
+ * and snippet capture (needed for `Violation.snippet`, see @spikedpunch/align-core's documented deviation).
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -24,7 +24,7 @@ import {
   type ScanInput,
   type Scanner,
   type UncertaintyMarker,
-} from '@align/core';
+} from '@spikedpunch/align-core';
 import { extractExportedSymbols } from './exports.js';
 import { TsconfigResolver } from './tsconfig-resolver.js';
 import { loadWorkspacePackages, type WorkspacePackage } from './workspace.js';
@@ -83,7 +83,7 @@ interface FileScanResult {
   readonly uncertain: UncertaintyMarker[];
   readonly loc: number;
   readonly exports: readonly string[];
-  // First line of the file, trimmed — `DependencyGraphNode.snippet`'s source (see @align/core's
+  // First line of the file, trimmed — `DependencyGraphNode.snippet`'s source (see @spikedpunch/align-core's
   // documented deviation on that field). Cheap: `lines` is already in memory for `loc`.
   readonly snippet: string;
 }
@@ -202,7 +202,7 @@ function isExcludedPath(relPath: string, excludes: readonly string[]): boolean {
 }
 
 /** Minimal glob support for exclude patterns (e.g. `**\/*.generated.ts`) without pulling in a
- * new dependency — reuses the same small pattern vocabulary as @align/core's component globs. */
+ * new dependency — reuses the same small pattern vocabulary as @spikedpunch/align-core's component globs. */
 function globLikeMatch(pattern: string, filePath: string): boolean {
   if (!pattern.includes('*')) return false;
   const escaped = pattern

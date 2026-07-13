@@ -5,7 +5,7 @@
  * import" is often deleting the import AND the feature that used it, which every form gate would
  * happily call green.
  */
-import type { RepoRelativePath } from '@align/core';
+import type { RepoRelativePath } from '@spikedpunch/align-core';
 import type { SymbolTableEntry } from './fixProvider.js';
 
 export interface SymbolRemoval {

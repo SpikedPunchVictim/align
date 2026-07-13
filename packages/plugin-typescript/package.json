@@ -1,5 +1,5 @@
 {
-  "name": "@align/plugin-typescript",
+  "name": "@spikedpunch/align-plugin-typescript",
   "version": "0.1.0",
   "description": "TypeScript/JavaScript dependency-graph plugin for align — ts-morph-based scanning and language adapters.",
   "license": "MIT",
@@ -40,7 +40,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@align/core": "workspace:*",
+    "@spikedpunch/align-core": "workspace:*",
     "typescript": "^5.6.3",
     "yaml": "^2.6.0"
   },

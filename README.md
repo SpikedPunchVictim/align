@@ -1,5 +1,7 @@
 # align
 
+![CI](https://github.com/SpikedPunchVictim/align/actions/workflows/ci.yml/badge.svg)
+
 **An architecture-conformance verification oracle for humans and LLM coding agents.**
 
 align compiles a fluent TypeScript DSL into a portable JSON IR, then evaluates it against a fresh
@@ -55,15 +57,15 @@ cd packages/cli && npm link && cd -     # links via npm's global bin instead
 align --version
 ```
 
-`align.config.ts` also imports directly from `@align/core` (`import { defineProject } from
-'@align/core/dsl'`), so a target repo needs that package resolvable through normal Node module
+`align.config.ts` also imports directly from `@spikedpunch/align-core` (`import { defineProject } from
+'@spikedpunch/align-core/dsl'`), so a target repo needs that package resolvable through normal Node module
 resolution too. A repo nested inside this monorepo's tree (as `test-apps/*` is, for dogfooding)
-inherits `@align/core` for free by walking up to this repo's `node_modules`. For a genuinely
+inherits `@spikedpunch/align-core` for free by walking up to this repo's `node_modules`. For a genuinely
 external repo, link it explicitly:
 
 ```bash
 cd /path/to/align/packages/core && npm link
-cd /path/to/your/repo && npm link @align/core
+cd /path/to/your/repo && npm link @spikedpunch/align-core
 ```
 
 ### Point it at a repo
@@ -126,7 +128,7 @@ second-guess.
 function receives a typed `ComponentContext` and returns an array of `RuleIR`:
 
 ```ts
-import { defineProject } from '@align/core/dsl';
+import { defineProject } from '@spikedpunch/align-core/dsl';
 
 export default defineProject({
   components: {
@@ -140,7 +142,7 @@ export default defineProject({
     c.arch
       .layer(c.core)
       .cannotDependOn(c.pluginTypescript, c.cli, c.agent)
-      .because('@align/core has zero framework dependencies (zod only).'),
+      .because('@spikedpunch/align-core has zero framework dependencies (zod only).'),
     c.arch
       .layer(c.cli)
       .canOnlyDependOn(c.core, c.pluginTypescript, c.agent)
@@ -351,8 +353,8 @@ For an invariant the built-in rule kinds can't express, register a pure function
 `align.config.ts`'s sibling `hostRules` export and reference it by name:
 
 ```ts
-import { defineProject } from '@align/core/dsl';
-import type { HostPredicate, HostRuleContext, HostViolation } from '@align/core';
+import { defineProject } from '@spikedpunch/align-core/dsl';
+import type { HostPredicate, HostRuleContext, HostViolation } from '@spikedpunch/align-core';
 
 export default defineProject({
   components: { app: 'src/**' },
@@ -458,11 +460,11 @@ format` before any pagination applies.
 
 ```
 packages/
-├── core/               # @align/core — Violation model, RuleIR (zod), the DSL (@align/core/dsl),
+├── core/               # @spikedpunch/align-core — Violation model, RuleIR (zod), the DSL (@spikedpunch/align-core/dsl),
 │                       #   gate stack, baseline, orchestrator. Zero framework dependencies.
-├── plugin-typescript/  # @align/plugin-typescript — ts-morph/compiler-API dependency graph + adapters
-├── cli/                # @align/cli — commander CLI; hosts `align mcp` (stdio MCP server)
-└── agent/              # @align/agent — built-in BYOK fix loop (`align agent run`)
+├── plugin-typescript/  # @spikedpunch/align-plugin-typescript — ts-morph/compiler-API dependency graph + adapters
+├── cli/                # @spikedpunch/align-cli — commander CLI; hosts `align mcp` (stdio MCP server)
+└── agent/              # @spikedpunch/align-agent — built-in BYOK fix loop (`align agent run`)
 ```
 
 ## Development

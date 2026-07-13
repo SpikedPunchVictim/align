@@ -144,7 +144,7 @@ describe('align check — empty-component false-green guard (ADR 003 empty-selec
     tmpDir = copyFixture('simple-app');
     fs.writeFileSync(
       path.join(tmpDir, 'align.config.ts'),
-      `import { defineProject } from '@align/core/dsl';\n\n` +
+      `import { defineProject } from '@spikedpunch/align-core/dsl';\n\n` +
         `export default defineProject({\n` +
         `  components: { app: 'src/**', ghost: 'src/ghost/**' },\n` +
         `  rules: (c) => [c.arch.layer(c.app).cannotDependOn(c.ghost)],\n` +
@@ -165,7 +165,7 @@ describe('align check — empty-component false-green guard (ADR 003 empty-selec
     // the rule referencing it would evaluate vacuously green.
     fs.writeFileSync(
       path.join(tmpDir, 'align.config.ts'),
-      `import { defineProject } from '@align/core/dsl';\n\n` +
+      `import { defineProject } from '@spikedpunch/align-core/dsl';\n\n` +
         `export default defineProject({\n` +
         `  components: { app: 'src/**', shadowed: 'src/**' },\n` +
         `  rules: (c) => [c.arch.layer(c.shadowed).cannotDependOn(c.app)],\n` +
@@ -184,7 +184,7 @@ describe('align check — empty-component false-green guard (ADR 003 empty-selec
     tmpDir = copyFixture('simple-app');
     fs.writeFileSync(
       path.join(tmpDir, 'align.config.ts'),
-      `import { defineProject } from '@align/core/dsl';\n\n` +
+      `import { defineProject } from '@spikedpunch/align-core/dsl';\n\n` +
         `export default defineProject({\n` +
         `  components: { app: 'src/**', ghost: { pattern: 'src/ghost/**', allowEmpty: true } },\n` +
         `  rules: (c) => [c.arch.layer(c.app).cannotDependOn(c.ghost)],\n` +

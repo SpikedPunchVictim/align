@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { toRepoRelativePath } from '@align/core';
+import { toRepoRelativePath } from '@spikedpunch/align-core';
 import { findForbiddenPathsInProposal, groupViolationsByFile, isForbiddenPath, usesSuppressions } from '../src/rails.js';
-import type { FixProposal } from '@align/core';
+import type { FixProposal } from '@spikedpunch/align-core';
 
 function proposal(files: FixProposal['files'], suppressions?: FixProposal['suppressions']): FixProposal {
   return { files, rationale: 'test', ...(suppressions !== undefined ? { suppressions } : {}) };

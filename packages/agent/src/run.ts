@@ -17,7 +17,7 @@ import {
   type RuleId,
   type RulesetIR,
   type Violation,
-} from '@align/core';
+} from '@spikedpunch/align-core';
 import type { AgentEffects } from './effects.js';
 import type { FixProviderInput, RuleExplanation } from './fixProvider.js';
 import { buildCondensedSymbolTable } from './symbolTable.js';

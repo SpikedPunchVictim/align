@@ -1,10 +1,10 @@
 /**
  * Edit-block apply pipeline — schema half (ADR 010).
  *
- * `FixProposal` is the zod-validated shape an LLM `FixProvider` (Stage 4, `@align/agent`) must
+ * `FixProposal` is the zod-validated shape an LLM `FixProvider` (Stage 4, `@spikedpunch/align-agent`) must
  * emit: search/replace edit blocks, never full files, never line-number diffs. This module has
  * zero LLM-client dependencies — it is just a zod IR, validated the same way any other IR in
- * `@align/core` is validated (parse-don't-validate, CODING_BEST_PRACTICES.md §12). The engine
+ * `@spikedpunch/align-core` is validated (parse-don't-validate, CODING_BEST_PRACTICES.md §12). The engine
  * that applies a validated `FixProposal` lives in `./apply.js`.
  */
 import { z } from 'zod';

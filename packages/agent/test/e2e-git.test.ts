@@ -1,10 +1,10 @@
 /**
  * End-to-end validation against a REAL temp git repo + REAL `createNodeGitEffects` (no mocking of
  * `git`/`gh`) + a scripted `FakeFixProvider` (no network). `runCheck`/`scanGraph` are small
- * scripted closures rather than the real `@align/plugin-typescript` scanner — exercising the real
- * TS scanner here would require this test file to import `@align/plugin-typescript`, which would
- * itself violate `@align/agent`'s own dogfooded "depends only on @align/core" rule (align.config.ts).
- * The apply pipeline (`applyFixProposalFiles`, `@align/core`), the git rails, and the terminal
+ * scripted closures rather than the real `@spikedpunch/align-plugin-typescript` scanner — exercising the real
+ * TS scanner here would require this test file to import `@spikedpunch/align-plugin-typescript`, which would
+ * itself violate `@spikedpunch/align-agent`'s own dogfooded "depends only on @spikedpunch/align-core" rule (align.config.ts).
+ * The apply pipeline (`applyFixProposalFiles`, `@spikedpunch/align-core`), the git rails, and the terminal
  * merge are all real; only violation detection is scripted, which is exactly the seam
  * `AgentEffects.runCheck` exists to isolate.
  *
@@ -16,7 +16,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { toRepoRelativePath, type CheckRun, type RulesetIR } from '@align/core';
+import { toRepoRelativePath, type CheckRun, type RulesetIR } from '@spikedpunch/align-core';
 import { createNodeGitEffects } from '../src/git.js';
 import { runAgentLoop, defaultWorkBranchName, type AgentEffects, type AgentRunOptions } from '../src/run.js';
 import { FakeFixProvider } from './fakeFixProvider.js';

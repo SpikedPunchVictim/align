@@ -1,5 +1,5 @@
 {
-  "name": "@align/core",
+  "name": "@spikedpunch/align-core",
   "version": "0.1.0",
   "description": "Zero-dependency architecture-conformance rule engine for align: the DSL, JSON IR schema, gate stack, and baseline.",
   "license": "MIT",

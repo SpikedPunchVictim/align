@@ -1,7 +1,7 @@
 /**
- * Fluent authoring surface -> IR serializer (ADR 002). Exported as the `@align/core/dsl` subpath
- * — folded into `@align/core` for v1 (ARCHITECTURE.md §5: single consumer, extraction to a
- * standalone `@align/dsl` package is cheap and deferred until a second consumer needs it).
+ * Fluent authoring surface -> IR serializer (ADR 002). Exported as the `@spikedpunch/align-core/dsl` subpath
+ * — folded into `@spikedpunch/align-core` for v1 (ARCHITECTURE.md §5: single consumer, extraction to a
+ * standalone `@spikedpunch/align-dsl` package is cheap and deferred until a second consumer needs it).
  */
 import { toComponentName, toRuleId, type RuleId } from '../types/branded.js';
 import type { ComponentDefinitionIR, FileSelector, RuleIR, RulesetIR } from '../types/ir.js';

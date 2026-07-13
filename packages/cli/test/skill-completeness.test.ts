@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ruleIRSchema } from '@align/core';
+import { ruleIRSchema } from '@spikedpunch/align-core';
 import type { z } from 'zod';
 import { renderSkillMarkdown } from '../src/skill/render.js';
 import { buildProgram } from '../src/program.js';

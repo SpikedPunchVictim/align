@@ -4,7 +4,7 @@
  * be driven end-to-end by a fake in tests, per CODING_BEST_PRACTICES.md §15 ("if you're reaching
  * for module mocking, the dependency wasn't injected").
  */
-import type { CheckRun, DependencyGraph, RepoRelativePath } from '@align/core';
+import type { CheckRun, DependencyGraph, RepoRelativePath } from '@spikedpunch/align-core';
 import type { FixProvider } from './fixProvider.js';
 
 export interface GitCommitResult {

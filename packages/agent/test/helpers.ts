@@ -1,4 +1,4 @@
-import { toComponentName, toRepoRelativePath, toRuleId, toViolationId, type CheckRun, type DependencyGraph, type DependencyGraphEdge, type DependencyGraphNode, type EdgeKind, type GateResult, type Violation } from '@align/core';
+import { toComponentName, toRepoRelativePath, toRuleId, toViolationId, type CheckRun, type DependencyGraph, type DependencyGraphEdge, type DependencyGraphNode, type EdgeKind, type GateResult, type Violation } from '@spikedpunch/align-core';
 
 export function node(file: string, component: string, exports: string[] = [], loc = 10): DependencyGraphNode {
   return { file: toRepoRelativePath(file), component: toComponentName(component), loc, exports };

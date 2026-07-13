@@ -86,7 +86,7 @@ export interface ArchFactory {
 export interface CustomFactory {
   /** Produces a `custom.host` IR rule (ADR 002's escape hatch, docs/proposals/rule-expansion-
    * evaluation.md §B.0) referencing a predicate registered by the same name in align.config.ts's
-   * sibling `hostRules` export (`{ [hostRuleName]: HostPredicate }`, `@align/core`'s
+   * sibling `hostRules` export (`{ [hostRuleName]: HostPredicate }`, `@spikedpunch/align-core`'s
    * `HostPredicateRegistry`) — not passed through `defineProject` itself, since `RulesetIR` is
    * portable JSON (ADR 002) and predicates are functions. `defineProject` only builds the
    * reference (`hostRuleName`, `portable: false`); `validateHostRules` (the orchestrator's guard

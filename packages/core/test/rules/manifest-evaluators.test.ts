@@ -73,7 +73,7 @@ describe('evaluateSourceHygiene (security.manifest.source-hygiene, ADR 013)', ()
     const inv = inventory(
       manifest('package.json', '{}', [
         { name: 'zod', specifier: '^3.23.8', field: 'dependencies' },
-        { name: '@align/core', specifier: 'workspace:*', field: 'dependencies' },
+        { name: '@spikedpunch/align-core', specifier: 'workspace:*', field: 'dependencies' },
         { name: 'aliased', specifier: 'npm:real-package@^1.0.0', field: 'dependencies' },
         { name: 'cataloged', specifier: 'catalog:', field: 'dependencies' },
       ]),

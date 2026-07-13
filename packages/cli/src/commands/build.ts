@@ -27,8 +27,8 @@ import {
   type RuleIR,
   type RulesLock,
   type SourceRange,
-} from '@align/core';
-import { TypeScriptPlugin } from '@align/plugin-typescript';
+} from '@spikedpunch/align-core';
+import { TypeScriptPlugin } from '@spikedpunch/align-plugin-typescript';
 import { loadConfig, CONFIG_FILENAME } from '../config.js';
 import { writeGeneratedRulesNote } from '../init/config-comment.js';
 import {

@@ -41,14 +41,14 @@ later stage's evidence demands it — nothing is deleted, only sequenced (see AD
 
 ```mermaid
 flowchart TB
-  subgraph CLI["@align/cli — composition root"]
+  subgraph CLI["@spikedpunch/align-cli — composition root"]
     Init["align init"]
     Check["align check"]
     Baseline["align baseline accept/prune/show"]
     Mcp["align mcp (stdio MCP server)"]
   end
 
-  subgraph Core["@align/core — zero framework deps (zod only)"]
+  subgraph Core["@spikedpunch/align-core — zero framework deps (zod only)"]
     DSL["DSL: defineProject / ComponentContext\n(fluent builder -> IR serializer)"]
     Registry["Components Registry\n(ComponentRef resolution)"]
     Orchestrator["Gate Orchestrator\n(rescan-on-check, freshness invariant)"]
@@ -58,7 +58,7 @@ flowchart TB
     Payload["Payload builder\n(priority sort, dedup, caps/pagination)"]
   end
 
-  subgraph Plugin["@align/plugin-typescript"]
+  subgraph Plugin["@spikedpunch/align-plugin-typescript"]
     Scanner["Per-file syntactic scanner\n(scan-and-discard)"]
     TsConfig["Nearest-tsconfig resolver"]
     Workspace["Workspace-name resolver\n(pnpm-workspace.yaml fallback)"]
@@ -160,28 +160,28 @@ Full detail for every later-stage/reserve row lives in `IMPLEMENTATION_PLAN.md` 
 
 ```
 packages/
-├── core/               # @align/core — DSL + IR (zod) + engine + baseline + PluginRegistry interfaces.
+├── core/               # @spikedpunch/align-core — DSL + IR (zod) + engine + baseline + PluginRegistry interfaces.
 │                       #   Zero framework dependencies (zod only, per locked decision).
-├── plugin-typescript/  # @align/plugin-typescript — TS compiler API scanner, tsconfig/workspace resolution,
+├── plugin-typescript/  # @spikedpunch/align-plugin-typescript — TS compiler API scanner, tsconfig/workspace resolution,
 │                       #   + the manifest scan domain (package.json/pnpm-lock.yaml, ADR 013).
-└── cli/                # @align/cli — composition root: commander CLI + `align mcp` (stdio MCP server).
+└── cli/                # @spikedpunch/align-cli — composition root: commander CLI + `align mcp` (stdio MCP server).
 ```
 
-**Three packages, not five.** `@align/agent` (Stage 4) and a standalone `@align/docs` (rules-build, Stage 4)
+**Three packages, not five.** `@spikedpunch/align-agent` (Stage 4) and a standalone `@spikedpunch/align-docs` (rules-build, Stage 4)
 are not created until their stage starts — an empty package is not a design decision, it's clutter.
 
-**`@align/dsl` is folded into `@align/core` for v1 — judgment call, flagged for review.** The plan's
+**`@spikedpunch/align-dsl` is folded into `@spikedpunch/align-core` for v1 — judgment call, flagged for review.** The plan's
 long-term layout gives the fluent builder its own package. In v1 the builder is a thin, framework-free layer
-that immediately serializes to the IR `@align/core` already owns; splitting it out today buys isolation
+that immediately serializes to the IR `@spikedpunch/align-core` already owns; splitting it out today buys isolation
 nobody consumes yet (there is exactly one caller: `align.config.ts`, loaded by the CLI) at the cost of a
 second `package.json`, a second build target, and a cross-package type import for every DSL type used inside
 core's own tests. Per the coding-standards "rule of three" (`CODING_BEST_PRACTICES.md` §25): duplication and
 premature splitting are both smells, and a package boundary with a single consumer is the packaging
-equivalent of premature abstraction. Extraction to `@align/dsl` is cheap and fully reversible — it becomes
+equivalent of premature abstraction. Extraction to `@spikedpunch/align-dsl` is cheap and fully reversible — it becomes
 justified the moment a second consumer needs the builder without the engine (e.g., IDE tooling that
 type-checks `align.config.ts` without pulling in rule evaluators, or the Stage 5 `align playground`). Until
-then it stays inside `@align/core` as a clearly-bounded internal module (`@align/core/dsl`), still exported,
-still tested in isolation. `@align/plugin-typescript` is **not** folded in: it depends on the `typescript`
+then it stays inside `@spikedpunch/align-core` as a clearly-bounded internal module (`@spikedpunch/align-core/dsl`), still exported,
+still tested in isolation. `@spikedpunch/align-plugin-typescript` is **not** folded in: it depends on the `typescript`
 package, and core's "zero framework dependencies (zod only)" invariant is the thing that keeps core
 importable by a future non-Node/non-TS consumer without dragging a compiler along — that boundary is worth
 the extra package from day one.
@@ -190,13 +190,13 @@ the extra package from day one.
 reverse); `cli → {core, plugin-typescript}`. Core never imports downstream — enforced by align's own
 `arch.no-dependency` rules against its own repo starting Stage 2, per the plan's dogfooding commitment.
 
-**Composition root**: `@align/cli` is the only package that imports a concrete `LanguagePlugin` (or
+**Composition root**: `@spikedpunch/align-cli` is the only package that imports a concrete `LanguagePlugin` (or
 `ManifestScanner`) and registers it. The orchestrator (in core) is constructed with a
 `PluginRegistry` and, as of ADR 013, a `ManifestScanner`; core never imports `plugin-typescript`
 directly:
 
 ```ts
-// @align/core — interfaces only
+// @spikedpunch/align-core — interfaces only
 interface PluginRegistry {
   getPluginForFile(file: RepoRelativePath): LanguagePlugin | undefined;
   getAllPlugins(): readonly LanguagePlugin[];
@@ -205,8 +205,8 @@ interface ManifestScanner {
   scan(options: ManifestScanOptions): Promise<ManifestInventory> | ManifestInventory;
 }
 
-// @align/cli — composition root
-import { NodeManifestScanner, TypeScriptPlugin } from '@align/plugin-typescript';
+// @spikedpunch/align-cli — composition root
+import { NodeManifestScanner, TypeScriptPlugin } from '@spikedpunch/align-plugin-typescript';
 const registry: PluginRegistry = new StaticPluginRegistry([new TypeScriptPlugin()]);
 const manifestScanner: ManifestScanner = new NodeManifestScanner();
 const orchestrator = new GateOrchestrator(registry, /* rulesetIR, baselineStore, hostPredicates */ undefined, manifestScanner);
@@ -221,7 +221,7 @@ dependencies" argument that keeps `plugin-typescript` itself separate from core,
 boundary) and because it reuses `workspace.ts`'s existing `loadWorkspacePackages` — splitting it out
 would either duplicate that inventory logic or force a cross-package dependency for one shared
 helper, the same "packaging equivalent of premature abstraction" judgment call this section already
-makes for `@align/dsl` above. Core only owns the `ManifestScanner` injection interface and the pure
+makes for `@spikedpunch/align-dsl` above. Core only owns the `ManifestScanner` injection interface and the pure
 manifest-based evaluators (`rules/manifest-evaluators.ts`) — same shape as the `Scanner`/
 `LanguagePlugin` split one paragraph up.
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toRepoRelativePath } from '@align/core';
+import { toRepoRelativePath } from '@spikedpunch/align-core';
 import { buildCondensedSymbolTable } from '../src/symbolTable.js';
 import { edge, graph, node } from './helpers.js';
 

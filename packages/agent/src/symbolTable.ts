@@ -8,7 +8,7 @@
  * module-resolution reachability analysis (which `DependencyGraph.edges` doesn't make free to
  * compute precisely — barrels/re-exports are not resolved, per `plugin-typescript`'s scanner).
  */
-import type { DependencyGraph, RepoRelativePath } from '@align/core';
+import type { DependencyGraph, RepoRelativePath } from '@spikedpunch/align-core';
 import type { SymbolTableEntry } from './fixProvider.js';
 
 export function buildCondensedSymbolTable(target: RepoRelativePath, graph: DependencyGraph): readonly SymbolTableEntry[] {

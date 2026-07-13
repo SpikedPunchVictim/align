@@ -2,8 +2,8 @@
  * Safety-rail pure checks (IMPLEMENTATION_PLAN.md Stage 4 "Safety rails"). Kept separate from the
  * git/fs imperative shell so every rail is independently unit-testable with plain data.
  */
-import type { RepoRelativePath } from '@align/core';
-import type { FixProposal } from '@align/core';
+import type { RepoRelativePath } from '@spikedpunch/align-core';
+import type { FixProposal } from '@spikedpunch/align-core';
 
 const FORBIDDEN_PATH_PREFIXES = ['.align/', '.align'] as const;
 const FORBIDDEN_EXACT_FILES = ['align.config.ts'] as const;

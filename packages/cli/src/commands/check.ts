@@ -5,7 +5,7 @@ import {
   type CheckRun,
   type ExportedRuleset,
   type InMemoryBaselineStore,
-} from '@align/core';
+} from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, readGeneratedRules, readRulesetIr, readRulesLock, writeBaseline } from '../align-dir.js';

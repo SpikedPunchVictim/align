@@ -1,8 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline/promises';
-import { defineProject, type ComponentsInput } from '@align/core/dsl';
-import { TypeScriptPlugin } from '@align/plugin-typescript';
+import { defineProject, type ComponentsInput } from '@spikedpunch/align-core/dsl';
+import { TypeScriptPlugin } from '@spikedpunch/align-plugin-typescript';
 import { detectComponents } from '../init/detect-components.js';
 import { suggestLayers } from '../init/suggest-layers.js';
 import { renderConfig } from '../init/render-config.js';

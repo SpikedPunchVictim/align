@@ -32,7 +32,7 @@ describe('align doctor', () => {
     });
     fs.writeFileSync(
       path.join(tmpDir, 'align.config.ts'),
-      `import { defineProject } from '@align/core/dsl';\nexport default defineProject({ components: { app: 'src/**' } });\n`,
+      `import { defineProject } from '@spikedpunch/align-core/dsl';\nexport default defineProject({ components: { app: 'src/**' } });\n`,
       'utf8',
     );
     fs.symlinkSync(path.join(process.cwd(), 'node_modules'), path.join(tmpDir, 'node_modules'), 'dir');
@@ -78,10 +78,10 @@ describe('align doctor', () => {
     writeTsconfig(tmpDir, { compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext' } });
     fs.writeFileSync(
       path.join(tmpDir, 'align.config.ts'),
-      `import { defineProject } from '@align/core/dsl';\nexport default defineProject({ components: { app: 'src/**' } });\n`,
+      `import { defineProject } from '@spikedpunch/align-core/dsl';\nexport default defineProject({ components: { app: 'src/**' } });\n`,
       'utf8',
     );
-    // Resolve `@align/core/dsl` so align.config.ts's own import doesn't add unrelated
+    // Resolve `@spikedpunch/align-core/dsl` so align.config.ts's own import doesn't add unrelated
     // 'unresolvable-specifier' noise to this test's uncertainty assertions.
     fs.symlinkSync(path.join(process.cwd(), 'node_modules'), path.join(tmpDir, 'node_modules'), 'dir');
 

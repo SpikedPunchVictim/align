@@ -77,8 +77,8 @@ describe('align export-ir', () => {
     tmpDir = copyFixture('simple-app');
     fs.writeFileSync(
       path.join(tmpDir, 'align.config.ts'),
-      `import { defineProject } from '@align/core/dsl';\n` +
-        `import type { HostPredicate } from '@align/core';\n\n` +
+      `import { defineProject } from '@spikedpunch/align-core/dsl';\n` +
+        `import type { HostPredicate } from '@spikedpunch/align-core';\n\n` +
         `export default defineProject({\n` +
         `  components: { app: 'src/**' },\n` +
         `  rules: (c) => [c.custom.host('always-clean')],\n` +
@@ -136,7 +136,7 @@ describe('align check --untrusted — the proof: never imports align.config.ts',
       path.join(tmpDir, 'align.config.ts'),
       `import * as fs from 'node:fs';\n` +
         `fs.writeFileSync(${JSON.stringify(sentinel)}, 'align.config.ts executed');\n` +
-        `import { defineProject } from '@align/core/dsl';\n` +
+        `import { defineProject } from '@spikedpunch/align-core/dsl';\n` +
         `export default defineProject({ components: { app: 'src/**' }, rules: (c) => [c.arch.noCycles()] });\n`,
       'utf8',
     );

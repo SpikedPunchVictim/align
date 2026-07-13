@@ -1,13 +1,13 @@
 /**
  * Rule-kind reference (Stage 5, IMPLEMENTATION_PLAN.md "Elevated first items"): the *list* of
- * kinds is walked live off `ruleIRSchema` (`@align/core`'s zod discriminated union) — never
+ * kinds is walked live off `ruleIRSchema` (`@spikedpunch/align-core`'s zod discriminated union) — never
  * hand-typed — so a new rule kind added to the IR shows up here automatically and a forgotten
  * description fails fast (`describeRuleKinds`), the same discipline `dsl/verb-manifest.ts`
  * applies to the DSL verb surface. `test/skill-completeness.test.ts` additionally asserts every
  * live kind's text actually appears in the rendered skill markdown — the "adding a rule kind
  * without skill coverage must fail CI" requirement.
  */
-import { ruleIRSchema } from '@align/core';
+import { ruleIRSchema } from '@spikedpunch/align-core';
 import type { z } from 'zod';
 
 /** Walks the live `ruleIRSchema` discriminated union and returns its member `kind` literals in

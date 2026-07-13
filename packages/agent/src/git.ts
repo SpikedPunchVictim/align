@@ -1,5 +1,5 @@
 /**
- * Real `git`/`gh` implementation of `GitEffects` — the only place in `@align/agent` that shells
+ * Real `git`/`gh` implementation of `GitEffects` — the only place in `@spikedpunch/align-agent` that shells
  * out. No git library dependency exists anywhere else in this monorepo (confirmed at Stage-4
  * research time), so this is net-new plumbing: thin wrappers over `git`/`gh` via
  * `node:child_process`, never a shell string (execFile, not exec — no shell-injection surface

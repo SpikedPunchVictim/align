@@ -1,4 +1,4 @@
-import type { DependencyGraph } from '@align/core';
+import type { DependencyGraph } from '@spikedpunch/align-core';
 
 export interface LayerSuggestion {
   readonly layer: string;

@@ -3,7 +3,7 @@
  * Given a group's attempt history, decides the next action — never touches git, the network, or
  * the filesystem. Consumed by `run.ts`'s imperative shell.
  */
-import type { RuleId } from '@align/core';
+import type { RuleId } from '@spikedpunch/align-core';
 import { detectOscillation, type AttemptFingerprint } from './oscillation.js';
 
 export type RepairDecision =

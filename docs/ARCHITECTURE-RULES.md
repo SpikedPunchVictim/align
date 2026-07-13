@@ -4,7 +4,7 @@ This doc is align's own buildable intent source (ADR 011, `align build`) — the
 constraints below compile to `.align/generated-rules.json` the same way `package.json` resolves to
 a lockfile. It intentionally restates two constraints already hand-authored in `align.config.ts`
 (core isolation, no cycles): rebuilding this doc merges into the existing rules rather than
-duplicating them (`@align/core`'s `mergeGeneratedRules`), and a violation of either one now quotes
+duplicating them (`@spikedpunch/align-core`'s `mergeGeneratedRules`), and a violation of either one now quotes
 this doc's own text — proof that `align build` slots into an already-DSL-authored repo without a
 rip-and-replace.
 

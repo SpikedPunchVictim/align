@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { mergeGeneratedRules, type HostPredicate, type HostPredicateRegistry, type RulesetIR } from '@align/core';
+import { mergeGeneratedRules, type HostPredicate, type HostPredicateRegistry, type RulesetIR } from '@spikedpunch/align-core';
 import { readGeneratedRules } from './align-dir.js';
 
 export interface LoadedConfig {
@@ -25,7 +25,7 @@ function toHostPredicateRegistry(hostRules: Record<string, HostPredicate> | unde
 
 export interface LoadConfigOptions {
   /** Merge `.align/generated-rules.json` into the loaded ruleset when present (ADR 011's
-   * config-integration mechanism — see `@align/core`'s `mergeGeneratedRules`). Defaults to `true`
+   * config-integration mechanism — see `@spikedpunch/align-core`'s `mergeGeneratedRules`). Defaults to `true`
    * so every existing surface (`check`, `doctor`, `mcp`) enforces doc-built rules automatically,
    * with zero required edits to `align.config.ts`. `align build`'s own dry-run pipeline passes
    * `false` to see the hand-authored ruleset in isolation, since it needs to diff the CURRENT
@@ -42,7 +42,7 @@ export const CONFIG_FILENAME = 'align.config.ts';
  * enums/parameter-properties) precisely so this keeps working without a build step.
  *
  * ADR 011 config-integration mechanism: after loading the hand-authored ruleset, this merges in
- * `.align/generated-rules.json` when present (`mergeGeneratedRules`, `@align/core/build`) — the
+ * `.align/generated-rules.json` when present (`mergeGeneratedRules`, `@spikedpunch/align-core/build`) — the
  * loader boundary was chosen over an explicit `withGeneratedRules()` call in every
  * `align.config.ts` (or `defineProject` doing its own fs I/O) as the least-magical option that
  * still requires zero human edits to the config file; see the Stage 3 final report.

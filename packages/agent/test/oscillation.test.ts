@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toRuleId, toViolationId } from '@align/core';
+import { toRuleId, toViolationId } from '@spikedpunch/align-core';
 import { detectOscillation, type AttemptFingerprint } from '../src/oscillation.js';
 
 function fp(violationIds: string[], ruleIds: string[]): AttemptFingerprint {

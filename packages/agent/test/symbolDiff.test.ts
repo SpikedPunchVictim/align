@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toRepoRelativePath } from '@align/core';
+import { toRepoRelativePath } from '@spikedpunch/align-core';
 import { diffExportedSymbols } from '../src/symbolDiff.js';
 
 describe('diffExportedSymbols', () => {

@@ -1,4 +1,4 @@
-import { defineProject } from '@align/core/dsl';
+import { defineProject } from '@spikedpunch/align-core/dsl';
 
 export default defineProject({
   components: { api: 'src/api/**', ui: 'src/ui/**' },

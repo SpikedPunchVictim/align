@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { loadWorkspacePackages } from '@align/plugin-typescript';
+import { loadWorkspacePackages } from '@spikedpunch/align-plugin-typescript';
 
 export interface DetectedComponent {
   readonly name: string;

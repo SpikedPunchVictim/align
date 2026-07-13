@@ -2,7 +2,7 @@
  * Manifest scan domain (ADR 013): a genuinely different input class from everything
  * `plugin-typescript`'s TS-source scanner produces (`DependencyGraph`) — package.json/pnpm-lock.yaml
  * text, not parsed TypeScript. Core defines only the shape and the injection seam
- * (`ManifestScanner`); the concrete pnpm/Node-ecosystem reader lives in `@align/plugin-typescript`
+ * (`ManifestScanner`); the concrete pnpm/Node-ecosystem reader lives in `@spikedpunch/align-plugin-typescript`
  * (ADR 013's placement decision), wired in at the CLI composition root exactly like
  * `LanguagePlugin`/`TypeScriptPlugin` already is — core never imports plugin-typescript directly
  * (ARCHITECTURE.md §5).

@@ -4,7 +4,7 @@
  * tests that write, commit, then revert see the file content actually restored — matching what
  * `git reset --hard <sha>~1` does for real.
  */
-import type { CheckRun, DependencyGraph, RepoRelativePath } from '@align/core';
+import type { CheckRun, DependencyGraph, RepoRelativePath } from '@spikedpunch/align-core';
 import type { AgentEffects, GitCommitResult, GitEffects, PrResult, PushResult, RebaseResult } from '../src/effects.js';
 import type { FixProvider } from '../src/fixProvider.js';
 

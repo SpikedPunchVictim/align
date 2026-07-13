@@ -10,7 +10,7 @@
  * workload Sonnet-tier is for. Config/env-selectable (`ALIGN_AGENT_MODEL` / `--model`).
  */
 import Anthropic from '@anthropic-ai/sdk';
-import { fixProposalSchema, type FixProposal } from '@align/core';
+import { fixProposalSchema, type FixProposal } from '@spikedpunch/align-core';
 import type { FixProvider, FixProviderInput } from './fixProvider.js';
 
 export const DEFAULT_MODEL = 'claude-sonnet-5';

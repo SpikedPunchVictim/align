@@ -1,5 +1,5 @@
-import { buildUncertaintyAdvisories, toComponentName, type Advisory, type UncertaintyMarker } from '@align/core';
-import { TypeScriptPlugin, UNMAPPED_COMPONENT, findDeadAliases, findOrphanedPackages } from '@align/plugin-typescript';
+import { buildUncertaintyAdvisories, toComponentName, type Advisory, type UncertaintyMarker } from '@spikedpunch/align-core';
+import { TypeScriptPlugin, UNMAPPED_COMPONENT, findDeadAliases, findOrphanedPackages } from '@spikedpunch/align-plugin-typescript';
 import { loadConfig } from '../config.js';
 
 const UNMAPPED_EXAMPLES = 5;

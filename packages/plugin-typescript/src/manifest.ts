@@ -18,7 +18,7 @@ import {
   type ManifestRecord,
   type ManifestScanner,
   type ManifestScanOptions,
-} from '@align/core';
+} from '@spikedpunch/align-core';
 import { loadWorkspacePackages } from './workspace.js';
 
 const DEP_FIELDS: readonly ManifestDepField[] = ['dependencies', 'devDependencies', 'optionalDependencies'];
@@ -134,9 +134,9 @@ export function scanManifests(rootDir: string, excludes: readonly string[] = [])
   return { manifests, lockfilePresent: lock !== undefined };
 }
 
-/** `@align/core`'s `ManifestScanner` injection seam, concretely implemented for the pnpm/Node
+/** `@spikedpunch/align-core`'s `ManifestScanner` injection seam, concretely implemented for the pnpm/Node
  * ecosystem — wired in at the CLI composition root exactly like `TypeScriptPlugin`
- * (`packages/cli/src/composition-root.ts`), never imported by `@align/core` directly. */
+ * (`packages/cli/src/composition-root.ts`), never imported by `@spikedpunch/align-core` directly. */
 export class NodeManifestScanner implements ManifestScanner {
   scan(options: ManifestScanOptions): ManifestInventory {
     return scanManifests(options.rootDir, options.excludes);

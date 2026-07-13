@@ -10,7 +10,7 @@
  * confidence on files with imported-but-unexercised code. Documented in the agent package README
  * per the plan's requirement to state this plainly.
  */
-import type { DependencyGraph, RepoRelativePath } from '@align/core';
+import type { DependencyGraph, RepoRelativePath } from '@spikedpunch/align-core';
 
 const DEFAULT_TEST_FILE_PATTERN = /\.(test|spec)\./;
 

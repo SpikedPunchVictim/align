@@ -3,7 +3,7 @@
  *
  * Pure functions only (CODING_BEST_PRACTICES.md §14): given immutable original text and a set of
  * proposed edit blocks, decide whether the edits apply and what the resulting text is. No I/O —
- * callers (in `@align/agent`) are responsible for reading the original file and writing the
+ * callers (in `@spikedpunch/align-agent`) are responsible for reading the original file and writing the
  * result. This keeps the algorithm trivially unit-testable with plain strings.
  *
  * Algorithm (ADR 010):

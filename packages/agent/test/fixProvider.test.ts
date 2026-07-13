@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toRepoRelativePath } from '@align/core';
+import { toRepoRelativePath } from '@spikedpunch/align-core';
 import { MemoizingFixProvider } from '../src/fixProvider.js';
 import type { FixProviderInput } from '../src/fixProvider.js';
 import { FakeFixProvider } from './fakeFixProvider.js';

@@ -1,4 +1,4 @@
-import { buildExportedRuleset } from '@align/core';
+import { buildExportedRuleset } from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { writeRulesetIr } from '../align-dir.js';
 

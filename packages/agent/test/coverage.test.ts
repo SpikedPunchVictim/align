@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toRepoRelativePath } from '@align/core';
+import { toRepoRelativePath } from '@spikedpunch/align-core';
 import { isFileCovered } from '../src/coverage.js';
 import { edge, graph, node } from './helpers.js';
 

@@ -2,8 +2,8 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
-import { toComponentName } from '@align/core';
-import type { ComponentDefinitionIR } from '@align/core';
+import { toComponentName } from '@spikedpunch/align-core';
+import type { ComponentDefinitionIR } from '@spikedpunch/align-core';
 import { extractExportedSymbols } from '../src/exports.js';
 import { TypeScriptScanner } from '../src/scanner.js';
 

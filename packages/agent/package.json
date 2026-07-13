@@ -1,5 +1,5 @@
 {
-  "name": "@align/agent",
+  "name": "@spikedpunch/align-agent",
   "version": "0.1.0",
   "description": "Built-in BYOK LLM fix loop for align architecture-conformance violations (align agent run).",
   "license": "MIT",
@@ -40,7 +40,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@align/core": "workspace:*",
+    "@spikedpunch/align-core": "workspace:*",
     "@anthropic-ai/sdk": "^0.68.0",
     "zod": "^3.23.8"
   },

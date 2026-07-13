@@ -1,14 +1,14 @@
 /**
  * `align agent run` — the CLI composition root for the Stage 4 BYOK fix loop. Mirrors
- * `composition-root.ts`'s discipline: `@align/agent` never imports `@align/plugin-typescript` or
- * touches the filesystem/git directly (per its stated dependency budget, `@align/core` +
+ * `composition-root.ts`'s discipline: `@spikedpunch/align-agent` never imports `@spikedpunch/align-plugin-typescript` or
+ * touches the filesystem/git directly (per its stated dependency budget, `@spikedpunch/align-core` +
  * `@anthropic-ai/sdk`); this file is the only place that wires the real `TypeScriptPlugin` scanner,
  * `node:fs`, and real git into `AgentEffects`.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { toRepoRelativePath, type HostPredicateRegistry, type RepoRelativePath } from '@align/core';
-import { TypeScriptPlugin } from '@align/plugin-typescript';
+import { toRepoRelativePath, type HostPredicateRegistry, type RepoRelativePath } from '@spikedpunch/align-core';
+import { TypeScriptPlugin } from '@spikedpunch/align-plugin-typescript';
 import {
   AnthropicFixProvider,
   MemoizingFixProvider,
@@ -19,7 +19,7 @@ import {
   type AgentEffects,
   type AgentRunOptions,
   type AgentRunResult,
-} from '@align/agent';
+} from '@spikedpunch/align-agent';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline } from '../align-dir.js';
@@ -139,6 +139,6 @@ export async function runAgentCommand(rootDir: string, options: AgentRunCliOptio
   return exitCodeFor(result);
 }
 
-// Re-exported so tests/CLI wiring can construct a RepoRelativePath without importing @align/core
+// Re-exported so tests/CLI wiring can construct a RepoRelativePath without importing @spikedpunch/align-core
 // directly in every call site.
 export { toRepoRelativePath };

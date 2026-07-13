@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toRepoRelativePath, type RulesetIR } from '@align/core';
+import { toRepoRelativePath, type RulesetIR } from '@spikedpunch/align-core';
 import { runAgentLoop, defaultWorkBranchName, type AgentRunOptions } from '../src/run.js';
 import { FakeFixProvider } from './fakeFixProvider.js';
 import { createFakeEffects } from './fakeEffects.js';

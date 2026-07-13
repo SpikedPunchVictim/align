@@ -19,7 +19,7 @@ import { validateClassifiedComponents } from './components/registry.js';
 const NO_HOST_PREDICATES: HostPredicateRegistry = new Map();
 
 /** No-op default for callers that don't inject a real manifest scanner (most existing tests never
- * author `security.manifest.*` rules; a real deployment gets `@align/plugin-typescript`'s
+ * author `security.manifest.*` rules; a real deployment gets `@spikedpunch/align-plugin-typescript`'s
  * `NodeManifestScanner` from the CLI composition root — core never imports plugin-typescript
  * directly, ADR 013/ARCHITECTURE.md §5). Returns the empty inventory, never throws — a repo with
  * no `security.manifest.*` rules authored never even calls this. */
@@ -45,7 +45,7 @@ export class GateOrchestrator {
      * keeps working unchanged. */
     private readonly hostPredicates: HostPredicateRegistry = NO_HOST_PREDICATES,
     /** Injected, never constructed here (ADR 013, same seam as `hostPredicates` above) — the CLI
-     * composition root wires in `@align/plugin-typescript`'s `NodeManifestScanner`. Defaults to a
+     * composition root wires in `@spikedpunch/align-plugin-typescript`'s `NodeManifestScanner`. Defaults to a
      * no-op so every pre-existing caller (tests, anything not authoring `security.manifest.*`
      * rules) keeps working unchanged. */
     private readonly manifestScanner: ManifestScanner = NO_MANIFEST_SCANNER,
@@ -186,7 +186,7 @@ export class GateOrchestrator {
 
   /**
    * `security` gate (ADR 013): scans the manifest domain (root + workspace `package.json` +
-   * `pnpm-lock.yaml`, `@align/plugin-typescript`'s `NodeManifestScanner` in real deployments) and
+   * `pnpm-lock.yaml`, `@spikedpunch/align-plugin-typescript`'s `NodeManifestScanner` in real deployments) and
    * evaluates every `security.manifest.*` rule against it via `evaluateManifestRule`. Always
    * `dependsOn: []` (ADR 008's always-run carve-out) — a manifest scan failure is this gate's own
    * `error`, never cascades from or into the architecture gate's status.

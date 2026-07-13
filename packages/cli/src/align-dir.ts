@@ -1,5 +1,5 @@
 /**
- * Imperative shell around `@align/core`'s pure `BaselineStore` (CODING_BEST_PRACTICES.md §15/16:
+ * Imperative shell around `@spikedpunch/align-core`'s pure `BaselineStore` (CODING_BEST_PRACTICES.md §15/16:
  * functional core, imperative shell) — all filesystem I/O for `.align/` lives here, not in core.
  */
 import * as fs from 'node:fs';
@@ -12,7 +12,7 @@ import {
   type ExportedRuleset,
   type GeneratedRulesFile,
   type RulesLock,
-} from '@align/core';
+} from '@spikedpunch/align-core';
 
 export const ALIGN_DIR = '.align';
 const BASELINE_FILENAME = 'baseline.json';

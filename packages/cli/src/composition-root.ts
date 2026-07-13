@@ -1,5 +1,5 @@
 /**
- * `@align/cli` is the composition root (ARCHITECTURE.md §5): the only package that imports a
+ * `@spikedpunch/align-cli` is the composition root (ARCHITECTURE.md §5): the only package that imports a
  * concrete `LanguagePlugin` and registers it. Core never imports `plugin-typescript` directly.
  */
 import {
@@ -9,8 +9,8 @@ import {
   type BaselineEntry,
   type HostPredicateRegistry,
   type RulesetIR,
-} from '@align/core';
-import { NodeManifestScanner, TypeScriptPlugin } from '@align/plugin-typescript';
+} from '@spikedpunch/align-core';
+import { NodeManifestScanner, TypeScriptPlugin } from '@spikedpunch/align-plugin-typescript';
 
 /** `hostPredicates` defaults to empty so every existing caller keeps working unchanged; a real
  * `align.config.ts` with a `hostRules` export flows its extracted registry (`config.ts`'s

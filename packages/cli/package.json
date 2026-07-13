@@ -1,5 +1,5 @@
 {
-  "name": "@align/cli",
+  "name": "@spikedpunch/align-cli",
   "version": "0.1.0",
   "description": "align CLI — an architecture-conformance verification oracle for LLM coding agents, with a built-in MCP server.",
   "license": "MIT",
@@ -43,9 +43,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@align/agent": "workspace:*",
-    "@align/core": "workspace:*",
-    "@align/plugin-typescript": "workspace:*",
+    "@spikedpunch/align-agent": "workspace:*",
+    "@spikedpunch/align-core": "workspace:*",
+    "@spikedpunch/align-plugin-typescript": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.9.0",
     "commander": "^12.1.0",
     "zod": "^3.23.8"

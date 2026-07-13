@@ -1,6 +1,6 @@
-import type { McpExplainRulePayload, RepoRelativePath } from '@align/core';
-import { buildViolationMermaid, evaluateRule, toComponentName, toRuleId } from '@align/core';
-import { TypeScriptPlugin } from '@align/plugin-typescript';
+import type { McpExplainRulePayload, RepoRelativePath } from '@spikedpunch/align-core';
+import { buildViolationMermaid, evaluateRule, toComponentName, toRuleId } from '@spikedpunch/align-core';
+import { TypeScriptPlugin } from '@spikedpunch/align-plugin-typescript';
 import { loadConfig } from '../config.js';
 
 const EXAMPLES_PER_COMPONENT = 3;

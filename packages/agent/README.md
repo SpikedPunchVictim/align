@@ -1,8 +1,8 @@
-# @align/agent
+# @spikedpunch/align-agent
 
 The Stage 4 BYOK (bring-your-own-key) LLM fix loop (ADR 010, `IMPLEMENTATION_PLAN.md` Stage 4).
-Depends only on `@align/core` and `@anthropic-ai/sdk`; never imports `@align/plugin-typescript` or
-`@align/cli` (enforced by align's own dogfooded `align.config.ts` layering rule). `@align/cli` is
+Depends only on `@spikedpunch/align-core` and `@anthropic-ai/sdk`; never imports `@spikedpunch/align-plugin-typescript` or
+`@spikedpunch/align-cli` (enforced by align's own dogfooded `align.config.ts` layering rule). `@spikedpunch/align-cli` is
 the composition root that wires the real `TypeScriptPlugin` scanner, `node:fs`, and `git`/`gh`
 into this package's `AgentEffects` interface (see `packages/cli/src/commands/agent.ts`).
 
@@ -39,11 +39,11 @@ tool-wrapping gates (Stage 5) activate it.
 
 ## Design notes / deviations
 
-- **Apply pipeline lives in `@align/core/fix`, not here** — per ADR 010 ("the LLM proposes, the
+- **Apply pipeline lives in `@spikedpunch/align-core/fix`, not here** — per ADR 010 ("the LLM proposes, the
   engine applies... this pipeline is entirely engine-side... it introduces no dependency from
-  `@align/core` on any LLM client"). `FixProposal`/`EditBlock` zod schemas and the deterministic
+  `@spikedpunch/align-core` on any LLM client"). `FixProposal`/`EditBlock` zod schemas and the deterministic
   byte-offset apply algorithm are pure data/algorithm with zero LLM awareness, so they belong in
-  core alongside every other IR core validates — `@align/agent` only supplies the `FixProvider`
+  core alongside every other IR core validates — `@spikedpunch/align-agent` only supplies the `FixProvider`
   that produces a `FixProposal` and the effects shell that applies one.
 - **`condensedSymbolTable` is component-scoped**, not repo-wide or import-graph-reachability-scoped
   — a repo-wide symbol table would blow the token budget on any non-trivial repo; component scope
@@ -59,7 +59,7 @@ tool-wrapping gates (Stage 5) activate it.
   cost-sensitive/high-volume workload Sonnet-tier targets. Override via `--model` or
   `ALIGN_AGENT_MODEL`.
 - **No fuzzy/whitespace-normalized apply fallback** (Design Reserve, ADR 010) — exact match +
-  `nearLine` disambiguation only, in `@align/core/fix`.
+  `nearLine` disambiguation only, in `@spikedpunch/align-core/fix`.
 
 ## `align agent run`
 

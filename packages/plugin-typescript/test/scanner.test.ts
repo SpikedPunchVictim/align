@@ -3,8 +3,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { toComponentName } from '@align/core';
-import type { ComponentDefinitionIR } from '@align/core';
+import { toComponentName } from '@spikedpunch/align-core';
+import type { ComponentDefinitionIR } from '@spikedpunch/align-core';
 import { TypeScriptScanner } from '../src/scanner.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));

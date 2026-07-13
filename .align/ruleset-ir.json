@@ -1,6 +1,6 @@
 {
   "irVersion": "1",
-  "exportedAt": 1783925913228,
+  "exportedAt": 1783926845035,
   "excludes": [
     "test-apps",
     "spike",
@@ -75,7 +75,7 @@
         "from": "core",
         "to": "pluginTypescript",
         "provenance": {
-          "because": "@align/core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5). Enforced by docs/ARCHITECTURE-RULES.md:19: '- **Rule**: `core` must not depend on `pluginTypescript`.'",
+          "because": "@spikedpunch/align-core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5). Enforced by docs/ARCHITECTURE-RULES.md:19: '- **Rule**: `core` must not depend on `pluginTypescript`.'",
           "sourceFile": "docs/ARCHITECTURE-RULES.md",
           "sourceLineRange": {
             "startLine": 19,
@@ -90,7 +90,7 @@
         "from": "core",
         "to": "cli",
         "provenance": {
-          "because": "@align/core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5). Enforced by docs/ARCHITECTURE-RULES.md:23: '- **Rule**: `core` must not depend on `cli`.'",
+          "because": "@spikedpunch/align-core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5). Enforced by docs/ARCHITECTURE-RULES.md:23: '- **Rule**: `core` must not depend on `cli`.'",
           "sourceFile": "docs/ARCHITECTURE-RULES.md",
           "sourceLineRange": {
             "startLine": 23,
@@ -121,7 +121,7 @@
         "from": "core",
         "to": "agent",
         "provenance": {
-          "because": "@align/core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5)."
+          "because": "@spikedpunch/align-core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5)."
         }
       },
       {
@@ -153,7 +153,7 @@
           }
         ],
         "provenance": {
-          "because": "@align/agent (Stage 4 BYOK fix loop, ADR 010) depends only on @align/core + @anthropic-ai/sdk — it never imports plugin-typescript or cli; the CLI composition root wires concrete effects (git, fs, the TS scanner) into it, not the reverse (IMPLEMENTATION_PLAN.md Stage 4)."
+          "because": "@spikedpunch/align-agent (Stage 4 BYOK fix loop, ADR 010) depends only on @spikedpunch/align-core + @anthropic-ai/sdk — it never imports plugin-typescript or cli; the CLI composition root wires concrete effects (git, fs, the TS scanner) into it, not the reverse (IMPLEMENTATION_PLAN.md Stage 4)."
         }
       },
       {

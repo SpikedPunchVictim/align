@@ -5,7 +5,7 @@
  * may ever be depended on by CI or by any other test's pass/fail status.
  */
 import { describe, expect, it } from 'vitest';
-import { toRepoRelativePath, toRuleId, toViolationId } from '@align/core';
+import { toRepoRelativePath, toRuleId, toViolationId } from '@spikedpunch/align-core';
 import { AnthropicFixProvider } from '../src/anthropicFixProvider.js';
 
 const shouldRun = process.env['ALIGN_LIVE_SMOKE'] === '1' && Boolean(process.env['ANTHROPIC_API_KEY']);

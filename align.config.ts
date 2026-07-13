@@ -1,5 +1,5 @@
-import { defineProject } from '@align/core/dsl';
-import { toRepoRelativePath, type HostPredicate, type HostRuleContext, type HostViolation, type RepoRelativePath } from '@align/core';
+import { defineProject } from '@spikedpunch/align-core/dsl';
+import { toRepoRelativePath, type HostPredicate, type HostRuleContext, type HostViolation, type RepoRelativePath } from '@spikedpunch/align-core';
 
 // align dogfoods itself (IMPLEMENTATION_PLAN.md Stage 1 success criteria): core never imports
 // plugin-typescript or cli, and the whole repo stays cycle-free. Hand-refined from `align init`'s
@@ -113,7 +113,7 @@ export default defineProject({
     c.arch
       .layer(c.core)
       .cannotDependOn(c.pluginTypescript, c.cli, c.agent)
-      .because('@align/core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5).'),
+      .because('@spikedpunch/align-core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5).'),
     c.arch
       .layer(c.cli)
       .canOnlyDependOn(c.core, c.pluginTypescript, c.agent)
@@ -121,7 +121,7 @@ export default defineProject({
     c.arch
       .layer(c.agent)
       .canOnlyDependOn(c.core)
-      .because('@align/agent (Stage 4 BYOK fix loop, ADR 010) depends only on @align/core + @anthropic-ai/sdk — it never imports plugin-typescript or cli; the CLI composition root wires concrete effects (git, fs, the TS scanner) into it, not the reverse (IMPLEMENTATION_PLAN.md Stage 4).'),
+      .because('@spikedpunch/align-agent (Stage 4 BYOK fix loop, ADR 010) depends only on @spikedpunch/align-core + @anthropic-ai/sdk — it never imports plugin-typescript or cli; the CLI composition root wires concrete effects (git, fs, the TS scanner) into it, not the reverse (IMPLEMENTATION_PLAN.md Stage 4).'),
     c.custom
       .host('typesLayerIsLeaf')
       .because("packages/core/src/types/ is align's foundation layer (branded types, IR zod schema, Violation model) and must not acquire a dependency on any sibling subdirectory of packages/core/src/ — a sub-path-scoped invariant arch.layers/arch.no-dependency can't express at core's whole-component granularity (docs/proposals/rule-expansion-evaluation.md §A.2.2). Predicate registered in this file's hostRules export."),

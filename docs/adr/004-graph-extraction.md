@@ -7,7 +7,7 @@
 The dependency graph is align's ground truth — every rule evaluates over it. Its extraction strategy has the
 largest number of independently falsifiable claims in the whole design (memory bound, edge classification
 correctness, config discovery correctness), so it's the part the spike spent the most measurement on. This
-ADR fixes the extraction contract for the single v1 language plugin (`@align/plugin-typescript`).
+ADR fixes the extraction contract for the single v1 language plugin (`@spikedpunch/align-plugin-typescript`).
 
 ## Decision
 

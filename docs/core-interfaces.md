@@ -1,6 +1,6 @@
-# `@align/core` — Interface Signatures
+# `@spikedpunch/align-core` — Interface Signatures
 
-This document specifies the full TypeScript surface of `@align/core` for v1 (ADR 001/008 scope: `parse`,
+This document specifies the full TypeScript surface of `@spikedpunch/align-core` for v1 (ADR 001/008 scope: `parse`,
 `architecture`, and — as of ADR 013 — `security` gates), plus two contracts that activate at later stages
 (`ValidatedEdit`/`FixProposal`, ADR 010) but must be anticipated now because the `Violation` model has to
 carry the data they need. Follows
@@ -326,8 +326,8 @@ type RuleEvaluator<TRule extends RuleIR = RuleIR> = (
 ## Manifest scan domain (ADR 013)
 
 A disjoint scan domain from `DependencyGraph`/`Scanner` above — package.json/pnpm-lock.yaml text,
-not parsed TypeScript. `@align/core` defines only the shape and the injection seam; the concrete
-pnpm/Node-ecosystem reader (`NodeManifestScanner`) lives in `@align/plugin-typescript` (ADR 013's
+not parsed TypeScript. `@spikedpunch/align-core` defines only the shape and the injection seam; the concrete
+pnpm/Node-ecosystem reader (`NodeManifestScanner`) lives in `@spikedpunch/align-plugin-typescript` (ADR 013's
 placement decision — core stays language/ecosystem-agnostic per ADR 001/004's boundary), wired in at
 the CLI composition root exactly like `LanguagePlugin`/`TypeScriptPlugin`.
 
@@ -512,7 +512,7 @@ independently of and before the TypeScript source scan, so a `parse` failure nev
 never masks `parse`/`architecture`. `GateOrchestrator`'s constructor takes a fifth, optional
 argument — `manifestScanner: ManifestScanner = <no-op returning an empty inventory>` — mirroring
 the `hostPredicates` injection seam above; the CLI composition root always supplies
-`@align/plugin-typescript`'s `NodeManifestScanner`.
+`@spikedpunch/align-plugin-typescript`'s `NodeManifestScanner`.
 
 ## Baseline store
 
@@ -558,7 +558,7 @@ interface PluginRegistry {
 // resolution, no priority ordering, no merged-graph logic across plugins. Those are real problems only
 // a second LanguagePlugin creates; the interface is written generically so adding one is additive at the
 // CLI composition root (ARCHITECTURE.md §5), not an interface rewrite. Future split point: when a second
-// language plugin starts, plugin contract + registry extract to `@align/plugin-api`
+// language plugin starts, plugin contract + registry extract to `@spikedpunch/align-plugin-api`
 // (`IMPLEMENTATION_PLAN.md`, Stage 5) — this interface is written to survive that extraction unchanged.
 class StaticPluginRegistry implements PluginRegistry {
   constructor(private readonly plugins: readonly LanguagePlugin[]) {}
