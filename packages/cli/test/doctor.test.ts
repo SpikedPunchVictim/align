@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runDoctor } from '../src/commands/doctor.js';
+import { ALIGN_VERSION } from '../src/telemetry/index.js';
 
 let tmpDir: string;
 
@@ -245,6 +246,86 @@ describe('align doctor', () => {
       const payload = await jsonReport(tmpDir);
       expect(payload.advisories.some((a) => a.kind === 'ungrounded-component')).toBe(false);
       expect(payload.advisories.some((a) => a.kind === 'until-populated-now-populated')).toBe(false);
+    });
+  });
+
+  // Stage 5 nice-to-have: `align skill --install` writes a point-in-time snapshot that goes stale
+  // as align evolves — doctor is the advisory surface that flags it.
+  describe('stale-skill advisory', () => {
+    function writeInstalledSkill(dir: string, body: string): void {
+      const skillDir = path.join(dir, '.claude', 'skills', 'align');
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(path.join(skillDir, 'SKILL.md'), body, 'utf8');
+    }
+
+    it('reports no advisory when no skill file is installed', async () => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-doctor-skillstamp-test-'));
+      const code = await runDoctor(tmpDir);
+      expect(code).toBe(0);
+
+      const logs: string[] = [];
+      const originalLog = console.log;
+      console.log = (msg: string) => logs.push(msg);
+      try {
+        await runDoctor(tmpDir);
+      } finally {
+        console.log = originalLog;
+      }
+      expect(logs.join('\n')).not.toContain('stale-skill');
+    });
+
+    it('reports a stale-skill advisory with old/new versions when the marker is behind the running binary', async () => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-doctor-skillstamp-test-'));
+      writeInstalledSkill(tmpDir, `---\nname: align\ndescription: x\n---\n\n<!-- align:start -->\n<!-- align-skill-version: 0.0.1 -->\n\n# align\n<!-- align:end -->\n`);
+
+      const logs: string[] = [];
+      const originalLog = console.log;
+      console.log = (msg: string) => logs.push(msg);
+      try {
+        await runDoctor(tmpDir);
+      } finally {
+        console.log = originalLog;
+      }
+      const output = logs.join('\n');
+      expect(output).toContain('stale-skill');
+      expect(output).toContain('v0.0.1');
+      expect(output).toContain(`current: v${ALIGN_VERSION}`);
+      expect(output).toContain('align skill --install');
+    });
+
+    it('reports a distinct predates-stamping message when the installed file has no version marker', async () => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-doctor-skillstamp-test-'));
+      writeInstalledSkill(tmpDir, `---\nname: align\ndescription: x\n---\n\n<!-- align:start -->\n# align\n<!-- align:end -->\n`);
+
+      const logs: string[] = [];
+      const originalLog = console.log;
+      console.log = (msg: string) => logs.push(msg);
+      try {
+        await runDoctor(tmpDir);
+      } finally {
+        console.log = originalLog;
+      }
+      const output = logs.join('\n');
+      expect(output).toContain('stale-skill');
+      expect(output).toContain('predates version stamping');
+    });
+
+    it('reports no advisory when the installed marker matches the running binary version', async () => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-doctor-skillstamp-test-'));
+      writeInstalledSkill(
+        tmpDir,
+        `---\nname: align\ndescription: x\n---\n\n<!-- align:start -->\n<!-- align-skill-version: ${ALIGN_VERSION} -->\n\n# align\n<!-- align:end -->\n`,
+      );
+
+      const logs: string[] = [];
+      const originalLog = console.log;
+      console.log = (msg: string) => logs.push(msg);
+      try {
+        await runDoctor(tmpDir);
+      } finally {
+        console.log = originalLog;
+      }
+      expect(logs.join('\n')).not.toContain('stale-skill');
     });
   });
 });

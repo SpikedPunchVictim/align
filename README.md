@@ -439,6 +439,12 @@ reference to `.claude/skills/align/SKILL.md` (`align skill --topic authoring|fix
 to stdout without installing anything) — verified: it writes a 16 KB, live-generated skill file
 that can never drift from what the installed binary actually supports.
 
+Unlike the live `align skill` output, `--install` writes a point-in-time snapshot, so it is stamped
+with the version that generated it (a human-visible line plus an `<!-- align-skill-version -->`
+marker near the top of the block). `align doctor` compares that marker against the running binary
+on every survey and flags a stale or pre-stamping snapshot with a `stale-skill` advisory — re-run
+`align skill --install` after upgrading align to refresh it.
+
 Token economy is why this matters in practice, not as an abstraction:
 
 > A live discovery probe showed a connected agent, asked "are there architectural problems here?",
@@ -754,11 +760,11 @@ format` before any pagination applies.
 | `align export-ir [options]` | Trusted context only: write the effective ruleset as portable JSON to `.align/ruleset-ir.json`, the data source `--untrusted` reads. |
 | `align baseline accept/prune/show [options]` | Manage the violation baseline (tolerated debt). |
 | `align explain [options] <ruleId>` | Explain one rule: kind, rationale, constrained components. |
-| `align doctor [options]` | Read-only advisory survey. Never fails — exit code always 0. |
+| `align doctor [options]` | Read-only advisory survey, including a stale installed skill snapshot. Never fails — exit code always 0. |
 | `align build [options]` | Compile a markdown architecture doc into the ruleset. Dry-run by default. |
 | `align agent run [options]` | Built-in BYOK LLM fix loop (requires `ANTHROPIC_API_KEY`, or `ANTHROPIC_BASE_URL` for a compatible endpoint). |
 | `align mcp [options]` | Start the align MCP server (stdio). |
-| `align skill [options]` | Print the LLM-facing authoring/fixing guide. `--install` writes `.claude/skills/align/SKILL.md`. |
+| `align skill [options]` | Print the LLM-facing authoring/fixing guide. `--install` writes a version-stamped `.claude/skills/align/SKILL.md`. |
 | `align telemetry [options]` | Summarize `.align/telemetry.jsonl` — latency percentiles, top-firing rules, time-to-green, dead rules, friction ranking. |
 
 Gates run in a fixed priority order — `architecture > security > types > lint > format`:

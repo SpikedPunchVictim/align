@@ -1,6 +1,10 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { buildUncertaintyAdvisories, findUngroundedComponents, toComponentName, type Advisory, type UncertaintyMarker } from '@spikedpunch/align-core';
 import { TypeScriptPlugin, UNMAPPED_COMPONENT, findDeadAliases, findOrphanedPackages } from '@spikedpunch/align-plugin-typescript';
 import { loadConfig } from '../config.js';
+import { ALIGN_VERSION } from '../telemetry/index.js';
+import { parseSkillVersionMarker } from '../skill/version-stamp.js';
 
 const UNMAPPED_EXAMPLES = 5;
 /** Stage 2 live-probe DX finding, carried into Stage 3: the agent had to script against the
@@ -34,9 +38,44 @@ interface DoctorReport {
   readonly uncertain: readonly UncertaintyMarker[];
 }
 
+/**
+ * `align skill --install` writes a point-in-time snapshot (`install.ts`/`version-stamp.ts`) that
+ * goes stale as align evolves — a SKILL.md installed before some feature shipped won't mention it,
+ * with nothing telling the human or agent the snapshot is behind. `doctor` is the natural
+ * read-only advisory surface for that: no advisory if there is no installed file (nothing to be
+ * stale about), a distinct message for a pre-stamping install (no marker at all) versus a stamped
+ * install that's simply behind the running binary's own `ALIGN_VERSION`. Deliberately simple
+ * string inequality, not semver comparison — any mismatch, including a missing marker, means
+ * "refresh"; there's no notion of a snapshot being "close enough".
+ */
+function buildStaleSkillAdvisory(rootDir: string): Advisory | undefined {
+  const filePath = path.join(rootDir, '.claude', 'skills', 'align', 'SKILL.md');
+  if (!fs.existsSync(filePath)) return undefined;
+
+  const content = fs.readFileSync(filePath, 'utf8');
+  const installedVersion = parseSkillVersionMarker(content);
+
+  if (installedVersion === undefined) {
+    return {
+      kind: 'stale-skill',
+      message: 'installed align skill snapshot predates version stamping — run `align skill --install` to refresh',
+    };
+  }
+  if (installedVersion !== ALIGN_VERSION) {
+    return {
+      kind: 'stale-skill',
+      message: `installed align skill snapshot is v${installedVersion} (current: v${ALIGN_VERSION}) — run \`align skill --install\` to refresh`,
+    };
+  }
+  return undefined;
+}
+
 async function collectDoctorReport(rootDir: string): Promise<DoctorReport> {
   const advisories: Advisory[] = [];
   let uncertain: readonly UncertaintyMarker[] = [];
+
+  const staleSkill = buildStaleSkillAdvisory(rootDir);
+  if (staleSkill !== undefined) advisories.push(staleSkill);
 
   const loaded = await loadConfig(rootDir).catch((err: unknown) => {
     advisories.push({

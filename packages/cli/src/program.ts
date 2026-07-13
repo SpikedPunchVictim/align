@@ -138,7 +138,8 @@ export function buildProgram(): Command {
     .command('doctor')
     .description(
       'Read-only advisory survey: dead tsconfig path aliases, uncertainty breakdown, unmapped ' +
-        'files, workspace-orphaned packages, empty components. Never fails — exit code is always 0.',
+        'files, workspace-orphaned packages, empty components, stale installed skill snapshot ' +
+        '(`align skill --install`). Never fails — exit code is always 0.',
     )
     .option('--json', 'print structured advisories + capped per-specifier uncertainty detail as JSON', false)
     .action(async (opts: { json: boolean }) => {
@@ -228,7 +229,8 @@ export function buildProgram(): Command {
     .description(
       'Print the LLM-facing align authoring/fixing guide (rule kinds, DSL verbs, bullet grammar, ' +
         'gates, and CLI commands generated live from the installed binary — never hand-written prose ' +
-        'that can drift). --install writes .claude/skills/align/SKILL.md into this repo.',
+        'that can drift). --install writes .claude/skills/align/SKILL.md into this repo, stamped with ' +
+        'the installing version (`align doctor` flags it once the snapshot goes stale).',
     )
     .option('--topic <topic>', 'authoring | fixing | all', 'all')
     .option('--install', 'write .claude/skills/align/SKILL.md (idempotent, delimited block)', false)

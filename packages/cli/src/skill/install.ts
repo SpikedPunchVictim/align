@@ -1,7 +1,9 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Command } from 'commander';
+import { ALIGN_VERSION } from '../telemetry/index.js';
 import { renderSkillMarkdown } from './render.js';
+import { renderVersionStamp } from './version-stamp.js';
 
 const START_MARKER = '<!-- align:start -->';
 const END_MARKER = '<!-- align:end -->';
@@ -32,6 +34,12 @@ description: >-
  * Always installs the full (`'all'`) guide regardless of the CLI invocation's `--topic` filter —
  * `--topic` only scopes the stdout preview for a single call; the installed artifact is meant to
  * be complete since it isn't re-run per interaction.
+ *
+ * The written block is stamped with the installing binary's `ALIGN_VERSION` (`version-stamp.ts`):
+ * a human-visible line plus a machine-parseable marker comment, both near the top of the block.
+ * Because the whole file is fully regenerated on every `--install` run (see above), re-running
+ * naturally updates the stamp in place — there is no separate "patch the existing stamp" step, and
+ * no risk of the block or the stamp duplicating.
  */
 export function writeSkillFile(rootDir: string, program: Command): string {
   const dir = path.join(rootDir, '.claude', 'skills', 'align');
@@ -39,7 +47,7 @@ export function writeSkillFile(rootDir: string, program: Command): string {
   fs.mkdirSync(dir, { recursive: true });
 
   const body = renderSkillMarkdown('all', program);
-  const content = `${FRONTMATTER}\n\n${START_MARKER}\n${body}\n${END_MARKER}\n`;
+  const content = `${FRONTMATTER}\n\n${START_MARKER}\n${renderVersionStamp(ALIGN_VERSION)}\n\n${body}\n${END_MARKER}\n`;
   fs.writeFileSync(filePath, content, 'utf8');
   return filePath;
 }
