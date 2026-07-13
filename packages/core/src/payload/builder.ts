@@ -1,5 +1,6 @@
 import type { ComponentName, RepoRelativePath, RuleId } from '../types/branded.js';
 import type { Category } from '../types/violation.js';
+import type { UngroundedComponent } from '../components/registry.js';
 import type { Advisory, CheckRun, GateStatus } from '../gates/types.js';
 import type { RuleIR } from '../types/ir.js';
 import type { Violation } from '../types/violation.js';
@@ -26,6 +27,12 @@ export interface McpCheckPayload {
   readonly violations: readonly Violation[]; // priority-sorted, capped, paginated — failures only
   readonly pagination?: { readonly cursor: string; readonly hasMore: boolean };
   readonly advisories: readonly Advisory[];
+  /** R1 (greenfield mode): components that are green only because they matched zero files this
+   * scan — structured so an agent can branch on it without string-parsing an advisory message
+   * (`{name, selector, policy}` per IMPLEMENTATION_PLAN.md's Design Reserve spec). Verdict stays
+   * `green` (an empty greenfield component is not a failure); this field is what makes that green
+   * distinguishable from a fully-grounded one. */
+  readonly ungroundedComponents: readonly UngroundedComponent[];
 }
 
 export interface BuildCheckPayloadOptions {
@@ -62,6 +69,7 @@ export function buildMcpCheckPayload(run: CheckRun, options: BuildCheckPayloadOp
     violations: page,
     ...(capped.length > pageSize ? { pagination: { cursor: String(offset + pageSize), hasMore } } : {}),
     advisories: run.advisories,
+    ungroundedComponents: run.ungroundedComponents,
   };
 }
 

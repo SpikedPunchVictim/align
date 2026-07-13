@@ -60,6 +60,7 @@ export function checkRun(violations: readonly Violation[], overrides: Partial<Ch
     gates: [gate],
     advisories: [],
     scannedAt: 0,
+    ungroundedComponents: [],
     ...overrides,
   };
 }
@@ -75,5 +76,5 @@ export function errorCheckRun(): CheckRun {
     cacheHits: 0,
     dependsOn: [],
   };
-  return { verdict: 'error', gates: [gate], advisories: [], scannedAt: 0 };
+  return { verdict: 'error', gates: [gate], advisories: [], scannedAt: 0, ungroundedComponents: [] };
 }

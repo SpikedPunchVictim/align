@@ -188,5 +188,15 @@ function printHuman(run: CheckRun, generatedRules?: { readonly count: number; re
   if (run.advisories.length > 0) {
     for (const a of run.advisories) console.log(`  advisory (${a.kind}): ${a.message}`);
   }
+  // R1 (greenfield mode): a distinct line near the verdict — not buried in `align explain`/
+  // `doctor` — so a check-agent's own loop sees "green because compliant" vs. "green because
+  // empty" as different states (registry.ts's `findUngroundedComponents` doc comment names the
+  // false-green hole this closes).
+  if (run.ungroundedComponents.length > 0) {
+    const names = run.ungroundedComponents.map((c) => c.name).join(', ');
+    console.log(
+      `⚠ ${run.ungroundedComponents.length} component(s) matched no files (ungrounded, provisionally green): ${names}`,
+    );
+  }
   console.log(`verdict: ${run.verdict}`);
 }

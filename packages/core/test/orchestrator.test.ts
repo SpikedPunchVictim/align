@@ -182,6 +182,79 @@ describe('GateOrchestrator', () => {
     expect(run.verdict).toBe('green');
   });
 
+  describe('greenfield mode: empty-policy matrix + R1 ungrounded-component surfacing', () => {
+    it("'fail' (default): a component matching zero files is a gate error, never green (unchanged safety)", async () => {
+      const ruleset = defineProject({
+        components: { api: 'application/api/**', ui: 'application/ui/**' },
+        rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
+      });
+      const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+      const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      expect(run.verdict).toBe('error');
+      expect(run.ungroundedComponents).toEqual([]);
+    });
+
+    it("'allow' (deprecated allowEmpty: true alias): green, and R1 surfaces it as ungrounded", async () => {
+      const ruleset = defineProject({
+        components: { api: 'application/api/**', ui: { pattern: 'application/ui/**', empty: 'allow' } },
+        rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
+      });
+      const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+      const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      expect(run.verdict).toBe('green');
+      expect(run.ungroundedComponents).toEqual([{ name: 'ui', selector: 'application/ui/**', policy: 'allow' }]);
+    });
+
+    it("'until-populated': green while empty, and R1 surfaces it as ungrounded — same shape as 'allow'", async () => {
+      const ruleset = defineProject({
+        components: { api: 'application/api/**', ui: { pattern: 'application/ui/**', empty: 'until-populated' } },
+        rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
+      });
+      const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+      const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      expect(run.verdict).toBe('green');
+      expect(run.ungroundedComponents).toEqual([{ name: 'ui', selector: 'application/ui/**', policy: 'until-populated' }]);
+    });
+
+    it("'until-populated', now populated: auto-arms — no ungrounded entry, and its rules evaluate for real (no manual flag flip)", async () => {
+      const ruleset = defineProject({
+        components: { api: 'application/api/**', ui: { pattern: 'application/ui/**', empty: 'until-populated' } },
+        rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
+      });
+      const registry = new StaticPluginRegistry([
+        fakePlugin(() =>
+          graph(
+            [node('application/api/a.ts', 'api'), node('application/ui/b.ts', 'ui')],
+            [edge('application/api/a.ts', 'application/ui/b.ts', { specifier: '../ui/b', line: 3 })],
+          ),
+        ),
+      ]);
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+      const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      // Populated -> the empty-check never fires, so the forbidden edge is evaluated normally and
+      // fires red — the exact auto-arm behavior R2 requires, with zero extra state to track.
+      expect(run.verdict).toBe('red');
+      expect(run.ungroundedComponents).toEqual([]);
+    });
+
+    it('ungroundedComponents is empty on a fully-grounded green run (no false positives)', async () => {
+      const ruleset = defineProject({
+        components: { api: 'application/api/**', ui: 'application/ui/**' },
+        rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
+      });
+      const registry = new StaticPluginRegistry([
+        fakePlugin(() => graph([node('application/api/a.ts', 'api'), node('application/ui/b.ts', 'ui')], [])),
+      ]);
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+      const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      expect(run.verdict).toBe('green');
+      expect(run.ungroundedComponents).toEqual([]);
+    });
+  });
+
   it('freshness: a fresh scan reflects a fix with no restart required (ADR 005)', async () => {
     const ruleset = defineProject({
       components: { api: 'application/api/**', ui: 'application/ui/**' },

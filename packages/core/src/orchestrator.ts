@@ -11,7 +11,7 @@ import { evaluateManifestRule, type SecurityManifestRule } from './rules/manifes
 import { ruleCategoryOf } from './rules/rule-category.js';
 import { validateRuleComponentRefs } from './rules/component-refs.js';
 import { validateHostRules, type HostPredicateRegistry } from './rules/host-rules.js';
-import { validateClassifiedComponents } from './components/registry.js';
+import { findUngroundedComponents, validateClassifiedComponents } from './components/registry.js';
 
 /** No predicates registered — the default for callers that don't inject one (most existing tests
  * exercise portable `arch.*` kinds only; a real deployment always gets a real registry from the
@@ -82,6 +82,7 @@ export class GateOrchestrator {
         gates,
         advisories: movedAdvisories(securityMoves),
         scannedAt,
+        ungroundedComponents: [],
       };
     }
 
@@ -101,11 +102,13 @@ export class GateOrchestrator {
     // surfaced as `error` — not `red`, not a silent drop (ADR 008: the architecture gate itself
     // couldn't produce a trustworthy verdict, same category as a scanner crash above):
     // 1. Every declared component must have at least one file classified to it this scan
-    //    (`allowEmpty: true` opts out, ADR 003). The TypeScript scanner independently enforces
-    //    the selector-based half of this doctrine (`validateComponents`, plugin-typescript
-    //    scanner.ts) at parse time; this classification-based check is plugin-independent and
-    //    additionally catches a component fully shadowed by an earlier component's selector under
-    //    first-match-wins — its rules would otherwise evaluate vacuously green.
+    //    (`empty: 'allow' | 'until-populated'` opts out, ADR 003 + its greenfield-mode amendment).
+    //    The TypeScript scanner independently enforces the selector-based half of this doctrine
+    //    (`validateComponents`, plugin-typescript scanner.ts) at parse time; this
+    //    classification-based check is plugin-independent and additionally catches a component
+    //    fully shadowed by an earlier component's selector under first-match-wins — its rules
+    //    would otherwise evaluate vacuously green. An opted-out-but-still-empty component isn't
+    //    silently green either way: `findUngroundedComponents` below surfaces it (R1).
     // 2. Every ComponentRef a rule embeds (hand-authored or `.align/generated-rules.json`-merged,
     //    ADR 011) must name a component present in the registry — otherwise `evaluateRule`
     //    simply never matches the stale name and the rule silently drops out.
@@ -113,8 +116,9 @@ export class GateOrchestrator {
     //    predicate is an unevaluatable rule reporting green. `this.hostPredicates`' key set is
     //    the real registered-name set once the CLI composition root injects one; a repo with no
     //    `hostRules` export gets the empty default, same as before registration existed.
+    const classifiedComponents = new Set(graph.nodes.map((n) => n.component));
     try {
-      validateClassifiedComponents(this.ruleset.components, new Set(graph.nodes.map((n) => n.component)));
+      validateClassifiedComponents(this.ruleset.components, classifiedComponents);
       validateRuleComponentRefs(this.ruleset.rules, this.ruleset.components);
       validateHostRules(this.ruleset.rules, new Set(this.hostPredicates.keys()));
     } catch (err) {
@@ -124,6 +128,7 @@ export class GateOrchestrator {
         gates,
         advisories: [...buildUncertaintyAdvisories(graph.uncertain), ...movedAdvisories(securityMoves)],
         scannedAt,
+        ungroundedComponents: [],
       };
     }
 
@@ -149,6 +154,7 @@ export class GateOrchestrator {
         gates,
         advisories: [...buildUncertaintyAdvisories(graph.uncertain), ...movedAdvisories(securityMoves)],
         scannedAt,
+        ungroundedComponents: [],
       };
     }
 
@@ -181,7 +187,11 @@ export class GateOrchestrator {
 
     const gates = [parseGate, architectureGate, securityGate];
     const verdict = deriveVerdict(gates);
-    return { verdict, gates, advisories, scannedAt };
+    // R1 (greenfield mode): computed once the guard step above has proven every component name
+    // is trustworthy — reuses the same classification set `validateClassifiedComponents` just
+    // validated against, no second pass over the graph.
+    const ungroundedComponents = findUngroundedComponents(this.ruleset.components, classifiedComponents);
+    return { verdict, gates, advisories, scannedAt, ungroundedComponents };
   }
 
   /**

@@ -195,6 +195,88 @@ describe('align check — empty-component false-green guard (ADR 003 empty-selec
   });
 });
 
+describe('align check — R1 ungrounded-component surfacing (greenfield mode)', () => {
+  async function readHuman(run: () => Promise<number>): Promise<{ code: number; text: string }> {
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = ((...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    }) as typeof console.log;
+    let code: number;
+    try {
+      code = await run();
+    } finally {
+      console.log = originalLog;
+    }
+    return { code, text: logs.join('\n') };
+  }
+
+  function writeUntilPopulatedConfig(dir: string): void {
+    // `api` declared BEFORE the `src/**` catch-all `app` — classification is first-match-wins
+    // (ADR 003), so the more specific selector must come first or `app` would shadow every file
+    // that would otherwise classify as `api`, same convention align's own align.config.ts uses.
+    fs.writeFileSync(
+      path.join(dir, 'align.config.ts'),
+      `import { defineProject } from '@spikedpunch/align-core/dsl';\n\n` +
+        `export default defineProject({\n` +
+        `  components: { api: { pattern: 'src/api/**', empty: 'until-populated' }, app: 'src/**' },\n` +
+        `  rules: (c) => [c.arch.layer(c.app).cannotDependOn(c.api)],\n` +
+        `});\n`,
+      'utf8',
+    );
+  }
+
+  it("green-but-ungrounded is visible as a distinct line near the verdict — not indistinguishable from clean green", async () => {
+    tmpDir = copyFixture('simple-app');
+    writeUntilPopulatedConfig(tmpDir);
+    const { code, text } = await readHuman(() => runCheck(tmpDir, { json: false }));
+    expect(code).toBe(0);
+    expect(text).toContain('verdict: green');
+    expect(text).toMatch(/matched no files \(ungrounded, provisionally green\).*api/);
+  });
+
+  it('a clean, fully-grounded green run has no ungrounded line at all', async () => {
+    tmpDir = copyFixture('simple-app');
+    const { code, text } = await readHuman(() => runCheck(tmpDir, { json: false }));
+    expect(code).toBe(0);
+    expect(text).not.toContain('ungrounded');
+  });
+
+  it('--json exposes ungroundedComponents as a structured {name, selector, policy} array', async () => {
+    tmpDir = copyFixture('simple-app');
+    writeUntilPopulatedConfig(tmpDir);
+    const logs: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string) => {
+      logs.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      await runCheck(tmpDir, { json: true });
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+    const payload = JSON.parse(logs.join('')) as {
+      verdict: string;
+      ungroundedComponents: { name: string; selector: string; policy: string }[];
+    };
+    expect(payload.verdict).toBe('green');
+    expect(payload.ungroundedComponents).toEqual([{ name: 'api', selector: 'src/api/**', policy: 'until-populated' }]);
+  });
+
+  it('the ungrounded surfacing disappears once the component is populated (auto-arm, R2)', async () => {
+    tmpDir = copyFixture('simple-app');
+    writeUntilPopulatedConfig(tmpDir);
+    fs.mkdirSync(path.join(tmpDir, 'src/api'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'src/api/index.ts'), `export function handler(): string {\n  return 'ok';\n}\n`, 'utf8');
+
+    const { code, text } = await readHuman(() => runCheck(tmpDir, { json: false }));
+    expect(code).toBe(0);
+    expect(text).not.toContain('ungrounded');
+    expect(text).toContain('verdict: green');
+  });
+});
+
 describe('align baseline', () => {
   it('accept seeds the baseline and turns check green; prune removes it once fixed', async () => {
     tmpDir = copyFixture('simple-app-violation');

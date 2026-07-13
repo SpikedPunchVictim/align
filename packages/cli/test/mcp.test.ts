@@ -64,6 +64,41 @@ describe('align mcp — align_check', () => {
     const approxTokens = text.length / 4;
     expect(approxTokens).toBeLessThan(1000);
   });
+
+  // R1 (greenfield mode, IMPLEMENTATION_PLAN.md Design Reserve): the MCP payload is built by the
+  // same `buildMcpCheckPayload` the CLI's `--json` uses, so `ungroundedComponents` must show up
+  // here too — an agent driving align exclusively through MCP (no CLI) must see the same
+  // green-but-ungrounded signal a human running `align check` in a terminal would.
+  it('exposes ungroundedComponents on an otherwise-green run with an until-populated component', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-mcp-greenfield-test-'));
+    try {
+      fs.mkdirSync(path.join(dir, 'src', 'app'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'src/app/index.ts'), `export const x = 1;\n`, 'utf8');
+      fs.writeFileSync(
+        path.join(dir, 'tsconfig.json'),
+        JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext' } }),
+        'utf8',
+      );
+      fs.writeFileSync(
+        path.join(dir, 'align.config.ts'),
+        `import { defineProject } from '@spikedpunch/align-core/dsl';\n` +
+          `export default defineProject({ components: { api: { pattern: 'src/api/**', empty: 'until-populated' }, app: 'src/app/**' } });\n`,
+        'utf8',
+      );
+      fs.symlinkSync(path.join(process.cwd(), 'node_modules'), path.join(dir, 'node_modules'), 'dir');
+
+      const client = await connectedClient(dir);
+      const result = await client.callTool({ name: 'align_check', arguments: {} });
+      const payload = JSON.parse(textOf(result)) as {
+        verdict: string;
+        ungroundedComponents: { name: string; selector: string; policy: string }[];
+      };
+      expect(payload.verdict).toBe('green');
+      expect(payload.ungroundedComponents).toEqual([{ name: 'api', selector: 'src/api/**', policy: 'until-populated' }]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('align mcp — align_violations', () => {

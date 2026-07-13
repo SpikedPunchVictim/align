@@ -25,7 +25,7 @@ function violation(ruleId: string, n: number): Violation {
   };
 }
 
-function runWith(violations: Violation[]): CheckRun {
+function runWith(violations: Violation[], overrides: Partial<CheckRun> = {}): CheckRun {
   return {
     verdict: violations.length > 0 ? 'red' : 'green',
     gates: [
@@ -42,6 +42,8 @@ function runWith(violations: Violation[]): CheckRun {
     ],
     advisories: [],
     scannedAt: Date.now(),
+    ungroundedComponents: [],
+    ...overrides,
   };
 }
 
@@ -71,5 +73,22 @@ describe('buildMcpCheckPayload', () => {
     expect(payload.violations).toHaveLength(2);
     expect(payload.pagination?.hasMore).toBe(true);
     expect(payload.pagination?.cursor).toBeDefined();
+  });
+
+  describe('ungroundedComponents (R1: greenfield mode)', () => {
+    it('is empty when the run reports no ungrounded components', () => {
+      const payload = buildMcpCheckPayload(runWith([]));
+      expect(payload.ungroundedComponents).toEqual([]);
+    });
+
+    it('passes the structured {name, selector, policy} list straight through, even on an otherwise-green run', () => {
+      const ungrounded = [
+        { name: toComponentName('api'), selector: 'src/api/**', policy: 'until-populated' as const },
+        { name: toComponentName('storage'), selector: 'src/storage/**', policy: 'allow' as const },
+      ];
+      const payload = buildMcpCheckPayload(runWith([], { ungroundedComponents: ungrounded }));
+      expect(payload.verdict).toBe('green');
+      expect(payload.ungroundedComponents).toEqual(ungrounded);
+    });
   });
 });
