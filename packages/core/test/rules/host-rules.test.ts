@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertNoCustomHostRules,
   evaluateCustomHost,
   HostPredicateExecutionError,
   UnknownHostRuleError,
+  UntrustedCustomHostRuleError,
   validateHostRules,
   type HostPredicate,
   type HostPredicateRegistry,
@@ -57,6 +59,49 @@ describe('validateHostRules', () => {
       { kind: 'custom.host', id: 'custom.host:route-thinness', hostRuleName: 'route-thinness', portable: false, provenance: {} } satisfies CustomHostRule,
     ];
     expect(() => validateHostRules(rules, new Set(['route-thinness']))).not.toThrow();
+  });
+});
+
+describe('assertNoCustomHostRules (ADR 014, --untrusted pre-flight guard)', () => {
+  it('does not throw when the ruleset has no custom.host rules', () => {
+    const rules: RuleIR[] = [
+      { kind: 'arch.no-dependency', id: 'r1', from: 'api', to: 'ui', provenance: {} },
+      { kind: 'arch.no-cycles', id: 'r2', scope: 'repo', includeTypeOnly: false, provenance: {} },
+    ];
+    expect(() => assertNoCustomHostRules(rules)).not.toThrow();
+  });
+
+  it('throws UntrustedCustomHostRuleError naming every custom.host rule id, not just the first', () => {
+    const rules: RuleIR[] = [
+      { kind: 'custom.host', id: 'custom.host:a', hostRuleName: 'a', portable: false, provenance: {} },
+      { kind: 'arch.no-cycles', id: 'r2', scope: 'repo', includeTypeOnly: false, provenance: {} },
+      { kind: 'custom.host', id: 'custom.host:b', hostRuleName: 'b', portable: false, provenance: {} },
+    ];
+    try {
+      assertNoCustomHostRules(rules);
+      expect.fail('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(UntrustedCustomHostRuleError);
+      const e = err as UntrustedCustomHostRuleError;
+      expect(e.ruleIds).toEqual(['custom.host:a', 'custom.host:b']);
+      expect(e.message).toContain('custom.host:a');
+      expect(e.message).toContain('custom.host:b');
+      expect(e.message).toContain('--untrusted');
+    }
+  });
+
+  it('is a distinct error type/message from UnknownHostRuleError — this is not a fixable registration bug', () => {
+    const rules: RuleIR[] = [
+      { kind: 'custom.host', id: 'custom.host:a', hostRuleName: 'a', portable: false, provenance: {} },
+    ];
+    try {
+      assertNoCustomHostRules(rules);
+      expect.fail('expected throw');
+    } catch (err) {
+      expect(err).not.toBeInstanceOf(UnknownHostRuleError);
+      expect((err as Error).message).not.toContain('typo');
+      expect((err as Error).message).toContain('never imported');
+    }
   });
 });
 
