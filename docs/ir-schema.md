@@ -366,6 +366,38 @@ populated only for rules produced by `align build` (ADR 011, Stage 4) — DSL-au
 `undefined`. All four fields feed the same terminal-output/IDE-hover/fix-prompt rendering path; none is
 duplicated elsewhere in the IR.
 
+## Security: `.align/ruleset-ir.json` — the untrusted-mode artifact (ADR 014)
+
+`align check --untrusted` (alias `--ir-only`) never dynamically imports `align.config.ts` and never invokes a
+`hostRules` predicate — it loads the ruleset from a committed JSON artifact instead, written once in a trusted
+context by `align export-ir`. This is possible with no new IR shape because the ruleset was already portable
+(ADR 002, locked decision #1): `align export-ir` simply wraps the existing `RulesetIR` (`components` + `rules`,
+above) with the scan-time metadata an untrusted scan additionally needs:
+
+```ts
+interface ExportedRuleset {
+  irVersion: '1';
+  exportedAt: number;    // epoch ms, Date.now() at export time — a snapshot marker, not a cache key
+  excludes: string[];    // scan-time excludes (align.config.ts's separate `excludes` named export,
+                          // same ADR 002 deviation as this doc's "components map" note above — plain
+                          // string data, not code, safe to carry across the trust boundary)
+  ruleset: RulesetIR;    // exactly the schema above — no new fields, no relaxed validation
+}
+```
+
+Zod-validated as `exportedRulesetSchema` (`packages/core/src/build/schema.ts`), parsed once at the
+`--untrusted` read boundary (`readRulesetIr`, `packages/cli/src/align-dir.ts`) — same parse-don't-validate
+discipline as every other artifact in this document. **Deliberately excludes `hostRules`**: predicate
+functions cannot survive a JSON boundary (this was already true of `RulesetIR` itself, ADR 002's amendment),
+so `custom.host` rules are structurally unevaluatable under `--untrusted` regardless of what this artifact
+contains — see `custom.host`'s entry above and ADR 014 for the refuse-outright (never silently skip) decision.
+
+`align check --untrusted` refuses — never falls back to executing `align.config.ts` — when this file is
+missing, fails to parse as JSON, or fails `exportedRulesetSchema` validation. A corrupted artifact is treated
+identically to a missing one, never to "zero rules": silently evaluating an empty ruleset would be the same
+false-green class the reference-validity invariant (ADR 008's amendment) already forbids for dangling
+references, just triggered by artifact corruption instead of a stale rename.
+
 ## Reserved discriminants (growth path — name only, not specified here)
 
 `arch.naming` (demoted at sign-off review — not spike-exercised; promoted when a real repo demands it) ·

@@ -429,6 +429,51 @@ function evaluateCustomHost(
 // unattributed crash (ADR 008 amendment, "the reference-validity invariant"'s sibling).
 ```
 
+## Security: untrusted-mode surface (ADR 014)
+
+`align check --untrusted` never dynamically imports `align.config.ts` and never invokes a `hostRules`
+predicate — it is the mitigation for the fact that trusted-mode `align check` is, structurally, code
+execution against repo-controlled input (`loadConfig`'s `import()`, and every `custom.host` predicate above).
+Two small, pure, core-owned pieces make the untrusted CLI surface possible without touching
+`GateOrchestrator`'s evaluation logic at all — it already only ever consumed a `RulesetIR` value, never a
+config path:
+
+```ts
+// packages/core/src/build/schema.ts + build/export-ir.ts — the untrusted-mode data source. `ruleset` is
+// exactly RulesetIR (above) — no new/relaxed fields, no function-valued members, `hostRules` never
+// included (predicates can't survive a JSON boundary and are unconditionally unavailable under
+// --untrusted regardless — see assertNoCustomHostRules below).
+interface ExportedRuleset {
+  readonly irVersion: '1';
+  readonly exportedAt: number;
+  readonly excludes: readonly string[];
+  readonly ruleset: RulesetIR;
+}
+function buildExportedRuleset(
+  ruleset: RulesetIR,
+  excludes: readonly string[],
+  exportedAt?: number,           // defaults to Date.now()
+): ExportedRuleset;               // pure, no I/O — the CLI's `export-ir` command does the fs write
+
+// packages/core/src/rules/host-rules.ts — --untrusted's pre-flight guard, called by the CLI before
+// GateOrchestrator is even constructed. A ruleset containing custom.host rules is refused outright,
+// never silently skipped (ADR 008 amendment's false-green doctrine, same shape as
+// UnknownHostRuleError/HostPredicateExecutionError above) — distinct error type/message because this
+// isn't a fixable registration bug: align.config.ts's hostRules export is never read under
+// --untrusted at all, so there is nothing to register a predicate against.
+class UntrustedCustomHostRuleError extends Error {
+  readonly ruleIds: readonly string[];
+}
+function assertNoCustomHostRules(rules: readonly RuleIR[]): void; // throws UntrustedCustomHostRuleError
+```
+
+The CLI composition root (`packages/cli/src/commands/check.ts`'s `runUntrustedCheck`, `align-dir.ts`'s
+`readRulesetIr`/`writeRulesetIr`) reads/writes the `.align/ruleset-ir.json` artifact and wires the resulting
+`RulesetIR` into `GateOrchestrator` with an empty `HostPredicateRegistry` — safe unconditionally, since
+`assertNoCustomHostRules` already refused any ruleset that would have needed a non-empty one. Core never
+touches the filesystem or the config-loading mechanism itself; see ADR 014 and `docs/ir-schema.md`'s
+"`.align/ruleset-ir.json`" section for the full artifact shape and refuse-don't-fallback contract.
+
 ## Gate model
 
 ```ts
