@@ -12,7 +12,9 @@ connected) after any structural code change — new imports, moved files, restru
 
 **A red \`align check\` is blocking.** Do not consider a structural change complete while
 \`align check\` reports red. Run \`align explain <ruleId>\` (or the \`align_explain_rule\` MCP tool)
-to understand why a rule fired before proposing a fix.`;
+to understand why a rule fired before proposing a fix.
+
+For full rule-authoring guidance run \`align skill --topic authoring\`.`;
 
 function block(): string {
   return `${START_MARKER}\n${BLOCK_BODY}\n${END_MARKER}`;

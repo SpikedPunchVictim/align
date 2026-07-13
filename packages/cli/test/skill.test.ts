@@ -1,0 +1,94 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { runSkill } from '../src/commands/skill.js';
+import { renderSkillMarkdown } from '../src/skill/render.js';
+import { renderCondensedFixingSkill } from '../src/skill/condensed.js';
+import { buildProgram } from '../src/program.js';
+
+describe('align skill — topic filtering', () => {
+  it('--topic authoring includes rule kinds / DSL verbs / bullet grammar, omits the fix-loop protocol', () => {
+    const md = renderSkillMarkdown('authoring', buildProgram());
+    expect(md).toContain('## Rule kinds');
+    expect(md).toContain('## DSL verbs');
+    expect(md).toContain('## Tier-2 bullet grammar');
+    expect(md).not.toContain('## Fix-loop protocol');
+  });
+
+  it('--topic fixing includes the fix-loop protocol / baseline consent doctrine, omits rule kinds', () => {
+    const md = renderSkillMarkdown('fixing', buildProgram());
+    expect(md).toContain('## Fix-loop protocol');
+    expect(md).toContain('## Baseline consent doctrine');
+    expect(md).not.toContain('## Rule kinds');
+  });
+
+  it('--topic all includes every section', () => {
+    const md = renderSkillMarkdown('all', buildProgram());
+    for (const heading of ['## Rule kinds', '## DSL verbs', '## Tier-2 bullet grammar', '## Fix-loop protocol', '## Baseline consent doctrine', '## Gates', '## CLI commands']) {
+      expect(md).toContain(heading);
+    }
+  });
+
+  it('gates and CLI commands appear regardless of topic', () => {
+    for (const topic of ['authoring', 'fixing'] as const) {
+      const md = renderSkillMarkdown(topic, buildProgram());
+      expect(md).toContain('## Gates');
+      expect(md).toContain('## CLI commands');
+      expect(md).toContain('`align check [options]`');
+      expect(md).toContain('`align skill [options]`');
+    }
+  });
+});
+
+describe('align skill — CLI command inventory reflects the real program', () => {
+  it('lists every top-level command, including itself', () => {
+    const md = renderSkillMarkdown('all', buildProgram());
+    for (const cmd of ['init', 'check', 'baseline', 'explain', 'doctor', 'build', 'agent', 'mcp', 'skill']) {
+      expect(md).toContain(`align ${cmd}`);
+    }
+  });
+});
+
+describe('align skill --install', () => {
+  it('writes an idempotent .claude/skills/align/SKILL.md with proper frontmatter', async () => {
+    const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-skill-install-test-'));
+    try {
+      const code = await runSkill(rootDir, { topic: 'all', install: true }, buildProgram());
+      expect(code).toBe(0);
+      const filePath = path.join(rootDir, '.claude', 'skills', 'align', 'SKILL.md');
+      expect(fs.existsSync(filePath)).toBe(true);
+      const content = fs.readFileSync(filePath, 'utf8');
+      expect(content.startsWith('---\nname: align\n')).toBe(true);
+      expect(content).toContain('description:');
+      expect(content).toContain('<!-- align:start -->');
+      expect(content).toContain('<!-- align:end -->');
+      expect(content).toContain('## Rule kinds');
+
+      // Re-running is idempotent — no duplication of the block or the frontmatter.
+      await runSkill(rootDir, { topic: 'authoring', install: true }, buildProgram());
+      const second = fs.readFileSync(filePath, 'utf8');
+      expect(second.match(/<!-- align:start -->/g)).toHaveLength(1);
+      expect(second.match(/^---$/gm)).toHaveLength(2);
+      // Installed artifact is always the full guide, independent of the invocation's --topic.
+      expect(second).toContain('## Fix-loop protocol');
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('align skill — MCP condensed instructions share the fix-loop-protocol source', () => {
+  it('every condensed summary line also appears in the full fixing-topic markdown', () => {
+    const condensed = renderCondensedFixingSkill();
+    const full = renderSkillMarkdown('fixing', buildProgram());
+    const summaryLines = condensed
+      .split('\n')
+      .filter((l) => l.startsWith('- '))
+      .map((l) => l.slice(2));
+    expect(summaryLines.length).toBeGreaterThan(0);
+    for (const summary of summaryLines) {
+      expect(full).toContain(summary);
+    }
+  });
+});

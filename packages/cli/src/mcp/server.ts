@@ -18,6 +18,7 @@ import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, writeBaseline } from '../align-dir.js';
 import { buildExplainPayload } from '../commands/explain.js';
 import { DEFAULT_DOC_PATH, proposeFromClientSubmission, writeBuildArtifacts, type DryRunResult } from '../commands/build.js';
+import { renderCondensedFixingSkill } from '../skill/condensed.js';
 
 /** Shared by `align_check`/`align_violations`: runs a fresh check and persists any move-transfer
  * (ADR 006) the run performed, so a renamed file's baselined violation doesn't need a separate
@@ -36,7 +37,11 @@ async function freshCheck(rootDir: string): Promise<CheckRun> {
  * `startMcpServer` so tests can connect it to an in-process `InMemoryTransport` instead of stdio
  * (MCP contract tests via the SDK's own client, per the Stage 1 plan). */
 export function createMcpServer(rootDir: string): McpServer {
-  const server = new McpServer({ name: 'align', version: '0.1.0' });
+  // `instructions` (Stage 5, IMPLEMENTATION_PLAN.md "Elevated first items"): the condensed
+  // fixing-topic skill, token-budgeted (~30 lines), rendered from the same source module the full
+  // `align skill --topic fixing` markdown expands (packages/cli/src/skill/fix-loop-protocol.ts) —
+  // not a second hand-written copy of the protocol.
+  const server = new McpServer({ name: 'align', version: '0.1.0' }, { instructions: renderCondensedFixingSkill() });
 
   server.registerTool(
     'align_check',

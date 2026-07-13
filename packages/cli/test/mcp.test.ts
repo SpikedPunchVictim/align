@@ -252,3 +252,16 @@ describe('align mcp — align_propose_rules (ADR 011 two-pass clarification)', (
     }
   });
 });
+
+describe('align mcp — server instructions (Stage 5, condensed fixing skill)', () => {
+  it('declares non-empty instructions within the ~30-line MCP budget, mentioning the fix-loop protocol', async () => {
+    const client = await connectedClient(path.join(fixturesDir, 'simple-app'));
+    const instructions = client.getInstructions();
+    expect(instructions).toBeDefined();
+    expect(instructions).not.toHaveLength(0);
+    const lineCount = (instructions ?? '').split('\n').length;
+    expect(lineCount).toBeLessThanOrEqual(30);
+    expect(instructions).toContain('align_check');
+    expect(instructions).toMatch(/red/i);
+  });
+});
