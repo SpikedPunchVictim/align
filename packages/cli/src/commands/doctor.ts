@@ -9,6 +9,13 @@ const UNMAPPED_EXAMPLES = 5;
  * thousands of uncertain specifiers can't blow up the payload (ADR 007 discipline extended to
  * doctor's own output). */
 const UNCERTAINTY_DETAIL_CAP = 50;
+/** Stage 5 polish, evidence: `RULESET_REPORT.md` (kluster ruleset exercise) logged 47
+ * orphaned-package advisories and 34 dead-alias hits as DX friction in the human-readable
+ * `align doctor` output — a wall of near-identical lines with no way to see "how many kinds of
+ * problem do I have" at a glance. Human output now shows the first N per kind + a "and M more"
+ * pointer to `--json`, which stays complete (uncapped except for the pre-existing per-specifier
+ * uncertainty detail cap above). */
+const DOCTOR_HUMAN_DISPLAY_CAP = 10;
 
 export interface DoctorOptions {
   readonly json: boolean;
@@ -129,6 +136,9 @@ function printReport(advisories: readonly Advisory[]): void {
   }
   for (const [kind, list] of byKind) {
     console.log(`  ${kind} (${list.length}):`);
-    for (const a of list) console.log(`    - ${a.message}`);
+    for (const a of list.slice(0, DOCTOR_HUMAN_DISPLAY_CAP)) console.log(`    - ${a.message}`);
+    if (list.length > DOCTOR_HUMAN_DISPLAY_CAP) {
+      console.log(`    ... and ${list.length - DOCTOR_HUMAN_DISPLAY_CAP} more (use --json for all)`);
+    }
   }
 }

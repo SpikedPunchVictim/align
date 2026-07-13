@@ -177,7 +177,12 @@ describe('align build — diff minimization', () => {
     );
 
     const result = await dryRunBuild(tmpDir, DOC);
-    expect(result.diff.changed.map((c) => c.after.id)).toEqual(['arch.no-cycles:repo']);
+    // Whitespace-only reformatting of the fenced block changes the captured `sourceQuote`
+    // (provenance) but not the rule's structural fields (kind/scope) — this is a provenance-only
+    // change (Stage 5 infra fix, `build/diff.ts`'s `RuleDiff.provenanceOnlyChanged`), not a
+    // structural one. Zero rules land in `changed`; the other section is fully unaffected.
+    expect(result.diff.changed).toHaveLength(0);
+    expect(result.diff.provenanceOnlyChanged.map((c) => c.after.id)).toEqual(['arch.no-cycles:repo']);
     expect(result.diff.unchanged.map((r) => r.id)).toEqual(['arch.no-dependency:api->ui']);
   });
 
@@ -190,6 +195,25 @@ describe('align build — diff minimization', () => {
     expect(result.diff.removed).toHaveLength(0);
     expect(result.diff.changed).toHaveLength(0);
     expect(result.diff.unchanged).toHaveLength(2);
+    expect(result.diff.provenanceOnlyChanged).toHaveLength(0);
+  });
+
+  it('writeBuildArtifacts reports provenance-only updates separately from structural changes in its message', async () => {
+    tmpDir = copyFixture('build-app');
+    await runBuild(tmpDir, { apply: true, ifChanged: false, verify: false, acceptNewIntoBaseline: false });
+
+    const docText = fs.readFileSync(path.join(tmpDir, DOC), 'utf8');
+    fs.writeFileSync(
+      path.join(tmpDir, DOC),
+      docText.replace('{"kind":"arch.no-cycles","scope":"repo"}', '{"kind": "arch.no-cycles", "scope": "repo"}'),
+      'utf8',
+    );
+
+    const result = await dryRunBuild(tmpDir, DOC);
+    const applied = writeBuildArtifacts(tmpDir, result, { acceptNewIntoBaseline: false });
+    expect(applied.ok).toBe(true);
+    expect(applied.message).toContain('0 changed');
+    expect(applied.message).toContain('1 unchanged (provenance-only updates)');
   });
 });
 

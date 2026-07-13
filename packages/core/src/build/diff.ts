@@ -3,8 +3,18 @@ import type { RuleIR } from '../types/ir.js';
 export interface RuleDiff {
   readonly added: readonly RuleIR[];
   readonly removed: readonly RuleIR[];
+  // Structural changes only (kind/target/params differ) — see `provenanceOnlyChanged` below for
+  // the sibling bucket this field used to (incorrectly) include.
   readonly changed: readonly { readonly before: RuleIR; readonly after: RuleIR }[];
-  readonly unchanged: readonly RuleIR[];
+  readonly unchanged: readonly RuleIR[]; // byte-identical, including provenance — unchanged meaning
+  // Live-session finding (IMPLEMENTATION_PLAN.md Stage 3 log): an agent-attached `.because()` text
+  // made 10 byte-identical rules show up under `changed`, even though nothing about what the rules
+  // DO differs — provenance/because is metadata about a rule, not the rule's evaluated behavior.
+  // Split out so callers can report "N unchanged (provenance-only updates)" separately from a
+  // genuine structural change, and so impact-delta re-evaluation (which is unaffected either way,
+  // since violation fingerprints never depend on provenance — see this module's test suite) isn't
+  // miscounted as having touched more rules than it did.
+  readonly provenanceOnlyChanged: readonly { readonly before: RuleIR; readonly after: RuleIR }[];
 }
 
 /** Canonical (sorted-key) JSON serialization, so two objects built with different property
@@ -24,6 +34,16 @@ function canonical(value: unknown): string {
   });
 }
 
+/** Same "everything except provenance" structural view `build/propose.ts`'s local
+ * `structurallyEqual` uses for conflict detection — kept as a separate, private helper here
+ * (rather than a shared export) since the two call sites compare for different reasons (dedup
+ * candidates vs. classifying a diff) and a shared abstraction would be a premature one for two
+ * call sites doing the same one-line `delete provenance` (CODING_BEST_PRACTICES.md's rule-of-three). */
+function withoutProvenance(rule: RuleIR): unknown {
+  const { provenance: _provenance, ...rest } = rule;
+  return rest;
+}
+
 /**
  * Rule-level diff minimization (ADR 011): because rule ids are content-addressed (`ground.ts`),
  * an IR-identical re-proposal always keeps the same id, so this diff is a plain set comparison by
@@ -36,6 +56,7 @@ export function diffGeneratedRules(existing: readonly RuleIR[], proposed: readon
 
   const added: RuleIR[] = [];
   const changed: { before: RuleIR; after: RuleIR }[] = [];
+  const provenanceOnlyChanged: { before: RuleIR; after: RuleIR }[] = [];
   const unchanged: RuleIR[] = [];
 
   for (const [id, after] of proposedById) {
@@ -44,6 +65,8 @@ export function diffGeneratedRules(existing: readonly RuleIR[], proposed: readon
       added.push(after);
     } else if (canonical(before) === canonical(after)) {
       unchanged.push(after);
+    } else if (canonical(withoutProvenance(before)) === canonical(withoutProvenance(after))) {
+      provenanceOnlyChanged.push({ before, after });
     } else {
       changed.push({ before, after });
     }
@@ -54,5 +77,5 @@ export function diffGeneratedRules(existing: readonly RuleIR[], proposed: readon
     if (!proposedById.has(id)) removed.push(before);
   }
 
-  return { added, removed, changed, unchanged };
+  return { added, removed, changed, unchanged, provenanceOnlyChanged };
 }

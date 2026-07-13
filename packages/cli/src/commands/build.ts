@@ -262,8 +262,19 @@ export function writeBuildArtifacts(
     message:
       `Wrote .align/generated-rules.json (${result.proposal.rules.length} rule(s)), .align/rules.lock.json, ` +
       `and .align/last-build-report.md. Diff: ${result.diff.added.length} added, ${result.diff.changed.length} changed, ` +
-      `${result.diff.removed.length} removed, ${result.diff.unchanged.length} unchanged.${flaggedNote}${baselineNote}`,
+      `${result.diff.removed.length} removed, ${result.diff.unchanged.length} unchanged${provenanceOnlyNote(result.diff)}.` +
+      `${flaggedNote}${baselineNote}`,
   };
+}
+
+/** Provenance-only changes (a `.because()`/source-quote edit with no structural difference) are
+ * reported separately from `unchanged`/`changed` — see `build/diff.ts`'s `RuleDiff.
+ * provenanceOnlyChanged` doc comment for the live-session bug this fixes (agent-attached rationale
+ * text made 10 byte-identical rules show up as "changed"). Renders nothing when there are none, so
+ * the common case (no provenance churn) doesn't add noise to every build's output. */
+function provenanceOnlyNote(diff: RuleDiff): string {
+  if (diff.provenanceOnlyChanged.length === 0) return '';
+  return `, ${diff.provenanceOnlyChanged.length} unchanged (provenance-only updates)`;
 }
 
 export interface VerifyResult {
@@ -390,12 +401,16 @@ function printDryRunReport(result: DryRunResult): void {
     console.log(`\n  ~ ${result.diff.changed.length} changed:`);
     for (const c of result.diff.changed) console.log(`      ${c.after.id}  ${quoteOf(c.after)}`);
   }
+  if (result.diff.provenanceOnlyChanged.length > 0) {
+    console.log(`\n  ${result.diff.provenanceOnlyChanged.length} unchanged (provenance-only updates — because/source text differs, nothing structural):`);
+    for (const c of result.diff.provenanceOnlyChanged) console.log(`      ${c.after.id}  ${quoteOf(c.after)}`);
+  }
   if (result.diff.removed.length > 0) {
     console.log(`\n  - ${result.diff.removed.length} removed:`);
     for (const r of result.diff.removed) console.log(`      ${r.id}`);
   }
   if (result.diff.added.length + result.diff.changed.length + result.diff.removed.length === 0) {
-    console.log(`\n  no rule changes (empty diff).`);
+    console.log(`\n  no structural rule changes (empty diff)${result.diff.provenanceOnlyChanged.length > 0 ? ' — provenance-only updates above' : ''}.`);
   }
 
   if (result.proposal.flagged.length > 0) {
