@@ -1,0 +1,81 @@
+name: Release
+
+# Publishes all four packages to npm when a `v*` tag is pushed.
+#
+# PREREQUISITE: each package must ALREADY exist on npm *and* have this repo's
+# release.yml registered as a Trusted Publisher (npm package settings → Publishing
+# access → Trusted Publisher). Until that one-time setup is done, publish the first
+# version locally — see RELEASING.md. Trusted Publishing needs no NPM_TOKEN secret;
+# the OIDC token below authenticates the publish and attaches provenance.
+#
+# Typical flow:
+#   pnpm release:version 0.2.0
+#   pnpm install --lockfile-only
+#   git commit -am "release: v0.2.0"
+#   git tag v0.2.0 && git push --follow-tags
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# id-token: write is what lets npm exchange a short-lived OIDC token for publish
+# credentials (Trusted Publishing) and sign provenance attestations.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  release:
+    name: build, verify, publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Keep pinned in lockstep with package.json's "packageManager" field.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.8.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      # Fail fast if someone tagged v1.2.3 but forgot `pnpm release:version 1.2.3`.
+      - name: Verify tag matches package version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./packages/core/package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag v$tag does not match packages/core version $pkg — run 'pnpm release:version $tag' and re-tag"
+            exit 1
+          fi
+          echo "Releasing v$pkg"
+
+      # Full gate set, same as CI — a release must clear everything a PR does.
+      - name: Build all packages
+        run: pnpm -r build
+
+      - name: Typecheck all packages
+        run: pnpm -r typecheck
+
+      - name: Test all packages
+        run: pnpm -r test
+
+      - name: align check (self-dogfood)
+        run: pnpm check
+
+      # pnpm publishes in topological order (core → plugin-typescript/agent → cli)
+      # and rewrites `workspace:*` deps to the concrete version being published.
+      # --no-git-checks: the tag checkout is a detached HEAD.
+      # --provenance: attach a signed build-provenance attestation (needs id-token).
+      - name: Publish to npm (Trusted Publishing + provenance)
+        run: pnpm -r publish --access public --no-git-checks --provenance

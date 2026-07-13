@@ -79,7 +79,27 @@ detection is on the roadmap (see [How align treats trust](#how-align-treats-trus
 
 ## Quickstart
 
-align is not published to a registry yet — install it locally from this monorepo.
+Install the CLI from npm:
+
+```bash
+npm i -g @spikedpunch/align-cli    # or: pnpm add -g @spikedpunch/align-cli
+align --version
+# ...or run it without a global install:
+npx @spikedpunch/align-cli --version
+```
+
+`align.config.ts` imports the DSL directly from `@spikedpunch/align-core` (`import { defineProject }
+from '@spikedpunch/align-core/dsl'`), so a repo you point align at also needs that package resolvable
+through normal Node module resolution. Add both as dev dependencies of the repo you want to check —
+this matters under pnpm's strict `node_modules`, where a transitive dependency is not directly
+importable:
+
+```bash
+pnpm add -D @spikedpunch/align-cli @spikedpunch/align-core   # in the repo you want to check
+```
+
+<details>
+<summary><strong>Build from source instead</strong> — for contributing to align, or running an unreleased revision</summary>
 
 ```bash
 # 1. Install workspace dependencies and build every package.
@@ -94,16 +114,16 @@ cd packages/cli && npm link && cd -     # links via npm's global bin instead
 align --version
 ```
 
-`align.config.ts` also imports directly from `@spikedpunch/align-core` (`import { defineProject }
-from '@spikedpunch/align-core/dsl'`), so a target repo needs that package resolvable through
-normal Node module resolution too. A repo nested inside this monorepo's tree (as `test-apps/*` is,
-for dogfooding) inherits `@spikedpunch/align-core` for free by walking up to this repo's
-`node_modules`. For a genuinely external repo, link it explicitly:
+A repo nested inside this monorepo's tree (as `test-apps/*` is, for dogfooding) inherits
+`@spikedpunch/align-core` for free by walking up to this repo's `node_modules`. For a genuinely
+external repo linked against a source checkout, link it explicitly:
 
 ```bash
 cd /path/to/align/packages/core && npm link
 cd /path/to/your/repo && npm link @spikedpunch/align-core
 ```
+
+</details>
 
 > **Security note**: `align check` executes `align.config.ts` and any `custom.host` predicates it
 > registers — do not run it against a repository whose config you have not reviewed. Cloning an

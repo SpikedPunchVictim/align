@@ -55,11 +55,12 @@ jobs:
         run: pnpm check
 
 # ---------------------------------------------------------------------------
-# Downstream usage example (documentation only — align is not published to a
-# registry yet, so this is not a runnable job in this repo's own CI).
+# Downstream usage example (documentation only — this repo dogfoods align via
+# the `pnpm check` step above, checking itself from source rather than the
+# published package, so this is not a runnable job here).
 #
-# Once `@spikedpunch/align-cli` is published, a consumer repo would add a job like this
-# to gate PRs on architecture conformance:
+# A CONSUMER repo would add a job like this to gate PRs on architecture
+# conformance against the published `@spikedpunch/align-cli`:
 #
 #   pr-check:
 #     name: align check

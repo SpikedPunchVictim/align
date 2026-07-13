@@ -15,7 +15,8 @@
     "build": "pnpm -r --filter=./packages/* run build",
     "test": "pnpm -r --filter=./packages/* run test",
     "typecheck": "pnpm -r --filter=./packages/* run typecheck",
-    "check": "node packages/cli/dist/index.js check"
+    "check": "node packages/cli/dist/index.js check",
+    "release:version": "node scripts/bump-version.mjs"
   },
   "devDependencies": {
     "typescript": "^5.6.3",
