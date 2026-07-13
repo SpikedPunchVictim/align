@@ -113,4 +113,66 @@ describe('extractStructuredBullets', () => {
     expect(errors).toHaveLength(1);
     expect(errors[0]?.reason).toBe('unparsed-bullet');
   });
+
+  // R5 (precision-ladder gap, GREENFIELD_TRIAD_REPORT.md §1): a trailing "Because <rationale>."
+  // clause parses into the fragment's `because` field — previously only fenced ```align blocks
+  // (tier 1) could carry an authored rationale; tier-2 bullets had no field for it at all.
+  describe('trailing "Because ..." rationale clause (R5)', () => {
+    it('parses the doc\'s own worked example into a fragment with `because` set', () => {
+      const doc = [
+        '## API layering',
+        '',
+        '- **Rule**: api may only depend on core. Because the API layer must stay headless.',
+        '',
+      ].join('\n');
+      const { sections } = parseMarkdownDoc(doc);
+      const section = sections[0];
+      if (section === undefined) throw new Error('unreachable');
+      const { bullets, errors } = extractStructuredBullets(doc.split('\n'), section, docPath);
+      expect(errors).toHaveLength(0);
+      expect(bullets).toHaveLength(1);
+      expect(bullets[0]?.fragment).toEqual({
+        kind: 'arch.layers',
+        layers: [{ layer: 'api', canDependOn: ['core'] }],
+        because: 'the API layer must stay headless',
+      });
+    });
+
+    it('a bullet with no "Because" clause parses with `because` left unset (unchanged behavior)', () => {
+      const doc = ['## Constraints', '', '- **Rule**: api must not depend on ui.', ''].join('\n');
+      const { sections } = parseMarkdownDoc(doc);
+      const section = sections[0];
+      if (section === undefined) throw new Error('unreachable');
+      const { bullets } = extractStructuredBullets(doc.split('\n'), section, docPath);
+      expect(bullets[0]?.fragment).toEqual({ kind: 'arch.no-dependency', from: 'api', to: 'ui' });
+    });
+
+    it('works for a bare no-cycles bullet too (rationale is orthogonal to which rule kind matched)', () => {
+      const doc = ['## Constraints', '', '- **Rule**: no cycles. Because circular imports hide real dependency direction.', ''].join('\n');
+      const { sections } = parseMarkdownDoc(doc);
+      const section = sections[0];
+      if (section === undefined) throw new Error('unreachable');
+      const { bullets, errors } = extractStructuredBullets(doc.split('\n'), section, docPath);
+      expect(errors).toHaveLength(0);
+      expect(bullets[0]?.fragment).toEqual({
+        kind: 'arch.no-cycles',
+        scope: 'repo',
+        because: 'circular imports hide real dependency direction',
+      });
+    });
+
+    it('a bare mid-sentence "because" without the period boundary is left unsplit (deterministic — no NLP)', () => {
+      // No sentence-ending period before "Because", so this doesn't match the grammar at all —
+      // the whole thing is passed to parseBulletSentence as one string, which rejects it. This is
+      // the deliberate boundary condition: the separator is mechanical, not semantic.
+      const doc = ['## Constraints', '', '- **Rule**: the system should be modular because it helps.', ''].join('\n');
+      const { sections } = parseMarkdownDoc(doc);
+      const section = sections[0];
+      if (section === undefined) throw new Error('unreachable');
+      const { bullets, errors } = extractStructuredBullets(doc.split('\n'), section, docPath);
+      expect(bullets).toHaveLength(0);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]?.reason).toBe('unparsed-bullet');
+    });
+  });
 });

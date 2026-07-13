@@ -39,6 +39,34 @@ function splitTokens(clause: string): string[] {
 }
 
 /**
+ * R5 (precision-ladder gap, GREENFIELD_TRIAD_REPORT.md §1): tier-2 bullets had no field for an
+ * authored rationale — only fenced-JSON blocks (tier 1) could carry `.because()` text, capping the
+ * greenfield demo's `.because()` coverage at 75% for no reason other than which tier a rule was
+ * authored in. Splits an optional trailing "Because <rationale>." clause off a bullet's rule
+ * sentence: "api may only depend on core. Because the API layer must stay headless." -> sentence
+ * "api may only depend on core", because "the API layer must stay headless". The result flows
+ * straight into `RuleFragment.because` (every fragment variant already has this optional field,
+ * `schema.ts` — the same field a tier-1 fenced block's own `"because"` JSON key populates), so
+ * `groundFragment`/`buildProvenance` (`ground.ts`/`provenance.ts`) need no changes at all: an
+ * authored tier-2 rationale is prepended to the auto-generated "Enforced by <doc>:<line>: '<quote>'"
+ * phrase exactly like a tier-1 fragment's `because` is.
+ *
+ * The literal period-then-"Because" boundary is the deterministic separator — no NLP, and no
+ * ambiguity with a rule sentence that happens to use the word "because" without that boundary
+ * (which simply isn't matched, and flows through unsplit, same as today).
+ */
+const TRAILING_BECAUSE_RE = /^(.*?)\.\s+Because\s+(.+?)\s*\.?$/i;
+
+function splitBecauseClause(raw: string): { readonly sentence: string; readonly because: string | undefined } {
+  const trimmed = raw.trim();
+  const match = TRAILING_BECAUSE_RE.exec(trimmed);
+  if (match?.[1] !== undefined && match[2] !== undefined && match[2].length > 0) {
+    return { sentence: match[1].trim(), because: match[2].trim() };
+  }
+  return { sentence: trimmed.replace(/\.$/, '').trim(), because: undefined };
+}
+
+/**
  * Parses one bullet's sentence into a `RuleFragment` per ADR 011's constrained grammar: component
  * names, "must not depend on", "no cycles", "layers," "must stay under N lines" (`arch.metric`,
  * max-LOC only). Returns `undefined` for a sentence that
@@ -116,23 +144,40 @@ export interface BulletGrammarForm {
   readonly example: string;
 }
 
+/** Appended to every pattern below (R5): any bullet may carry an optional trailing rationale
+ * clause, parsed into the rule's `.because()` provenance — a period then the literal word
+ * "Because" is the deterministic boundary between the rule sentence and the rationale. */
+const BECAUSE_SUFFIX = ' Optionally followed by " Because <rationale>." to record why (e.g. "... Because the API layer must stay headless.") — parsed into the rule\'s .because() provenance.';
+
 export const BULLET_GRAMMAR_FORMS: readonly BulletGrammarForm[] = [
-  { ruleKind: 'arch.no-dependency', pattern: '<component> must not depend on <component>.', example: 'api must not depend on ui.' },
+  {
+    ruleKind: 'arch.no-dependency',
+    pattern: `<component> must not depend on <component>.${BECAUSE_SUFFIX}`,
+    example: 'api must not depend on ui.',
+  },
   {
     ruleKind: 'arch.layers',
-    pattern: '<component> may|can only depend on <component>[, <component> and/or <component>...].',
+    pattern: `<component> may|can only depend on <component>[, <component> and/or <component>...].${BECAUSE_SUFFIX}`,
     example: 'api may only depend on core.',
   },
-  { ruleKind: 'arch.no-cycles', pattern: 'no cycles. | no cycles within|in|for <scope>. | <scope> must have no cycles.', example: 'no cycles.' },
-  { ruleKind: 'arch.metric', pattern: 'files in <component> must stay under <N> lines.', example: 'files in core must stay under 500 lines.' },
+  {
+    ruleKind: 'arch.no-cycles',
+    pattern: `no cycles. | no cycles within|in|for <scope>. | <scope> must have no cycles.${BECAUSE_SUFFIX}`,
+    example: 'no cycles.',
+  },
+  {
+    ruleKind: 'arch.metric',
+    pattern: `files in <component> must stay under <N> lines.${BECAUSE_SUFFIX}`,
+    example: 'files in core must stay under 500 lines.',
+  },
   {
     ruleKind: 'security.manifest.source-hygiene',
-    pattern: 'dependency|dependencies (sources) must be (sourced from the) registry(-only).',
+    pattern: `dependency|dependencies (sources) must be (sourced from the) registry(-only).${BECAUSE_SUFFIX}`,
     example: 'dependency sources must be registry-only.',
   },
   {
     ruleKind: 'security.manifest.new-dependency',
-    pattern: 'new dependency|dependencies requires|needs baseline approval|acceptance.',
+    pattern: `new dependency|dependencies requires|needs baseline approval|acceptance.${BECAUSE_SUFFIX}`,
     example: 'new dependency requires baseline approval.',
   },
 ];
@@ -158,7 +203,7 @@ export function extractStructuredBullets(
     const match = BULLET_RE.exec(line);
     if (match?.[1] === undefined) continue;
 
-    const sentence = match[1].replace(/\.$/, '').trim();
+    const { sentence, because } = splitBecauseClause(match[1]);
     const range: SourceRange = { startLine: i + 1, endLine: i + 1 };
     const fragment = parseBulletSentence(sentence);
     if (fragment === undefined) {
@@ -172,7 +217,11 @@ export function extractStructuredBullets(
       });
       continue;
     }
-    bullets.push({ fragment, sourceLineRange: range, sourceQuote: line.trim() });
+    bullets.push({
+      fragment: because === undefined ? fragment : ({ ...fragment, because } as RuleFragment),
+      sourceLineRange: range,
+      sourceQuote: line.trim(),
+    });
   }
 
   return { bullets, errors };
