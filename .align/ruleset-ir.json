@@ -1,0 +1,193 @@
+{
+  "irVersion": "1",
+  "exportedAt": 1783925913228,
+  "excludes": [
+    "test-apps",
+    "spike",
+    "packages/core/test/fixtures",
+    "packages/plugin-typescript/test/fixtures",
+    "packages/cli/test/fixtures",
+    "packages/agent/test/fixtures"
+  ],
+  "ruleset": {
+    "irVersion": "1",
+    "components": {
+      "core": {
+        "name": "core",
+        "selector": {
+          "kind": "glob",
+          "patterns": [
+            "packages/core/**"
+          ]
+        },
+        "allowEmpty": false
+      },
+      "pluginTypescript": {
+        "name": "pluginTypescript",
+        "selector": {
+          "kind": "glob",
+          "patterns": [
+            "packages/plugin-typescript/**"
+          ]
+        },
+        "allowEmpty": false
+      },
+      "cli": {
+        "name": "cli",
+        "selector": {
+          "kind": "glob",
+          "patterns": [
+            "packages/cli/**"
+          ]
+        },
+        "allowEmpty": false
+      },
+      "agent": {
+        "name": "agent",
+        "selector": {
+          "kind": "glob",
+          "patterns": [
+            "packages/agent/**"
+          ]
+        },
+        "allowEmpty": false
+      }
+    },
+    "rules": [
+      {
+        "kind": "arch.no-cycles",
+        "id": "arch.no-cycles:repo",
+        "scope": "repo",
+        "includeTypeOnly": false,
+        "provenance": {
+          "because": "Enforced by docs/ARCHITECTURE-RULES.md:14: '{\"kind\":\"arch.no-cycles\",\"scope\":\"repo\"}'",
+          "sourceFile": "docs/ARCHITECTURE-RULES.md",
+          "sourceLineRange": {
+            "startLine": 14,
+            "endLine": 14
+          },
+          "sourceQuote": "{\"kind\":\"arch.no-cycles\",\"scope\":\"repo\"}"
+        }
+      },
+      {
+        "kind": "arch.no-dependency",
+        "id": "arch.no-dependency:core->pluginTypescript",
+        "from": "core",
+        "to": "pluginTypescript",
+        "provenance": {
+          "because": "@align/core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5). Enforced by docs/ARCHITECTURE-RULES.md:19: '- **Rule**: `core` must not depend on `pluginTypescript`.'",
+          "sourceFile": "docs/ARCHITECTURE-RULES.md",
+          "sourceLineRange": {
+            "startLine": 19,
+            "endLine": 19
+          },
+          "sourceQuote": "- **Rule**: `core` must not depend on `pluginTypescript`."
+        }
+      },
+      {
+        "kind": "arch.no-dependency",
+        "id": "arch.no-dependency:core->cli",
+        "from": "core",
+        "to": "cli",
+        "provenance": {
+          "because": "@align/core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5). Enforced by docs/ARCHITECTURE-RULES.md:23: '- **Rule**: `core` must not depend on `cli`.'",
+          "sourceFile": "docs/ARCHITECTURE-RULES.md",
+          "sourceLineRange": {
+            "startLine": 23,
+            "endLine": 23
+          },
+          "sourceQuote": "- **Rule**: `core` must not depend on `cli`."
+        }
+      },
+      {
+        "kind": "arch.metric",
+        "id": "arch.metric:loc:cli",
+        "target": "cli",
+        "metric": "loc",
+        "max": 500,
+        "provenance": {
+          "because": "Enforced by docs/ARCHITECTURE-RULES.md:36: '- **Rule**: files in `cli` must stay under 500 lines.'",
+          "sourceFile": "docs/ARCHITECTURE-RULES.md",
+          "sourceLineRange": {
+            "startLine": 36,
+            "endLine": 36
+          },
+          "sourceQuote": "- **Rule**: files in `cli` must stay under 500 lines."
+        }
+      },
+      {
+        "kind": "arch.no-dependency",
+        "id": "arch.no-dependency:core->agent",
+        "from": "core",
+        "to": "agent",
+        "provenance": {
+          "because": "@align/core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5)."
+        }
+      },
+      {
+        "kind": "arch.layers",
+        "id": "arch.layers:cli",
+        "layers": [
+          {
+            "layer": "cli",
+            "canDependOn": [
+              "core",
+              "pluginTypescript",
+              "agent"
+            ]
+          }
+        ],
+        "provenance": {
+          "because": "cli is the composition root — the only package that imports a concrete LanguagePlugin/FixProvider and wires it together (ARCHITECTURE.md §5)."
+        }
+      },
+      {
+        "kind": "arch.layers",
+        "id": "arch.layers:agent",
+        "layers": [
+          {
+            "layer": "agent",
+            "canDependOn": [
+              "core"
+            ]
+          }
+        ],
+        "provenance": {
+          "because": "@align/agent (Stage 4 BYOK fix loop, ADR 010) depends only on @align/core + @anthropic-ai/sdk — it never imports plugin-typescript or cli; the CLI composition root wires concrete effects (git, fs, the TS scanner) into it, not the reverse (IMPLEMENTATION_PLAN.md Stage 4)."
+        }
+      },
+      {
+        "kind": "custom.host",
+        "id": "custom.host:typesLayerIsLeaf",
+        "hostRuleName": "typesLayerIsLeaf",
+        "portable": false,
+        "provenance": {
+          "because": "packages/core/src/types/ is align's foundation layer (branded types, IR zod schema, Violation model) and must not acquire a dependency on any sibling subdirectory of packages/core/src/ — a sub-path-scoped invariant arch.layers/arch.no-dependency can't express at core's whole-component granularity (docs/proposals/rule-expansion-evaluation.md §A.2.2). Predicate registered in this file's hostRules export."
+        }
+      },
+      {
+        "kind": "custom.host",
+        "id": "custom.host:no-child-process-outside-git-rails",
+        "hostRuleName": "no-child-process-outside-git-rails",
+        "portable": false,
+        "provenance": {
+          "because": "node:child_process shell-outs in PRODUCTION code must stay confined to the two audited, execFile-only rails (packages/agent/src/git.ts, packages/agent/src/format.ts) — everywhere else, a child_process import is an unaudited shell-injection/supply-chain surface (test files are exempt; e2e-git.test.ts and packaging.test.ts have legitimate, reviewed test-time shell-outs). Only expressible since Stage 5's external-package retention gave custom.host predicates visibility into external edges (docs/proposals/rule-expansion-evaluation.md correction #2); predicate registered in this file's hostRules export."
+        }
+      },
+      {
+        "kind": "security.manifest.source-hygiene",
+        "id": "security.manifest.source-hygiene",
+        "provenance": {
+          "because": "Non-registry dependency sources need explicit human sign-off before they enter the tree (spike/MANIFEST_PROBE_REPORT.md Rule 1)."
+        }
+      },
+      {
+        "kind": "security.manifest.new-dependency",
+        "id": "security.manifest.new-dependency",
+        "provenance": {
+          "because": "A newly added dependency is a genuinely new, externally-sourced surface worth a deliberate look before it merges (spike/MANIFEST_PROBE_REPORT.md Rule 7 — real historical catch: @anthropic-ai/sdk entering this repo in Stage 4)."
+        }
+      }
+    ]
+  }
+}
