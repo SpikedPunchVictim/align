@@ -75,14 +75,15 @@ the baseline contract (locked decision #1, `IMPLEMENTATION_PLAN.md`).
     },
     "componentDefinition": {
       "type": "object",
-      "required": ["name", "selector", "allowEmpty"],
+      "required": ["name", "selector", "empty"],
       "additionalProperties": false,
       "properties": {
         "name": { "$ref": "#/$defs/componentName" },
         "selector": { "$ref": "#/$defs/fileSelector" },
-        "allowEmpty": {
-          "type": "boolean",
-          "description": "Opt-out of empty-selector-fails-by-default (ADR 003)."
+        "empty": {
+          "enum": ["fail", "allow", "until-populated"],
+          "default": "fail",
+          "description": "Empty-selector policy (ADR 003 + its greenfield-mode amendment; replaces the boolean allowEmpty as of the greenfield-mode change — the DSL's `allowEmpty: true` remains a deprecated alias for 'allow', dsl/index.ts). 'fail' (default): a component matching zero files is a load-time error, unchanged empty-selector-fails-by-default safety. 'allow': empty tolerated permanently, surfaced as an `ungrounded-component` in `CheckRun.ungroundedComponents` (ADR 008 amendment) instead of silently. 'until-populated': same surfacing while empty, but self-heals — once the component has >=1 classified file the empty-check simply stops firing (no separate armed state) and its rules evaluate normally."
         }
       }
     },
@@ -240,8 +241,12 @@ A `ComponentDefinition` binds a stable `ComponentName` to a `FileSelector` (`glo
 against the resolved workspace inventory at load time (ADR 003 — spike: 13 workspace-orphaned packages a
 package-name-only model would have missed, plus one dead tsconfig alias). **Empty-selector behavior**: a
 component whose selector resolves to zero files is a load-time error pointing at the component definition,
-unless `allowEmpty: true` is set. Rules never reference raw globs — every selector in a `RuleIR` is a
-`ComponentRef` (a `ComponentName`) resolved through this map.
+unless `empty: 'allow'` or `empty: 'until-populated'` is set (greenfield mode, ADR 003 amendment; the
+DSL's `allowEmpty: true` is a deprecated alias for `empty: 'allow'`) — either opt-out is then surfaced as
+an `ungrounded-component` entry in `CheckRun.ungroundedComponents` rather than silently, and
+`'until-populated'` additionally self-heals once the component has real files (ADR 008 amendment). Rules
+never reference raw globs — every selector in a `RuleIR` is a `ComponentRef` (a `ComponentName`) resolved
+through this map.
 
 ### `arch.no-dependency`
 

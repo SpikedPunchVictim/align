@@ -146,10 +146,29 @@ type FileSelector =
   | { readonly kind: 'glob'; readonly patterns: readonly string[] }
   | { readonly kind: 'package'; readonly packageNames: readonly string[] };
 
+// Greenfield mode (ADR 003 amendment): 3-state empty-selector policy, replacing the boolean
+// `allowEmpty`. 'fail' (default) is unchanged ADR 003 safety; 'allow' is the old allowEmpty:true
+// behavior; 'until-populated' additionally self-heals (auto-arms) once the component has real
+// files. Both non-'fail' policies surface as `ungrounded-component` entries in
+// `CheckRun.ungroundedComponents` (ADR 008 amendment) instead of silently. The DSL's
+// `allowEmpty: true` (dsl/index.ts's `ComponentDeclaration`) is a deprecated alias for
+// `empty: 'allow'` — kept working unchanged for back-compat.
+type EmptyPolicy = 'fail' | 'allow' | 'until-populated';
+
 interface ComponentDefinitionIR {
   readonly name: ComponentName;
   readonly selector: FileSelector;
-  readonly allowEmpty: boolean;      // opt-out of empty-selector-fails-by-default (ADR 003)
+  readonly empty: EmptyPolicy;
+}
+
+// R1 (greenfield mode): a component that's green only because it currently matches zero files
+// (empty: 'allow' | 'until-populated'). `findUngroundedComponents` (components/registry.ts)
+// computes this from the same classified-components set the reference-validity guard step
+// already built; `GateOrchestrator.check` threads the result onto `CheckRun.ungroundedComponents`.
+interface UngroundedComponent {
+  readonly name: ComponentName;
+  readonly selector: string;         // human-readable selector description, e.g. 'src/api/**'
+  readonly policy: 'allow' | 'until-populated';
 }
 
 type ComponentRef = ComponentName;   // rules reference components by name, never raw globs (ADR 003)
@@ -502,6 +521,11 @@ interface CheckRun {
   readonly gates: readonly GateResult[];
   readonly advisories: readonly Advisory[];    // included even when verdict is green
   readonly scannedAt: number;
+  // R1 (greenfield mode): every component that's green only because it matched zero files this
+  // scan — surfaced here (not just `align explain`/`doctor`) so a check-agent's own loop sees
+  // "green because compliant" and "green because empty" as distinguishable states. Always []
+  // when the architecture gate didn't fully evaluate (parse/guard-step error).
+  readonly ungroundedComponents: readonly UngroundedComponent[];
 }
 ```
 

@@ -81,3 +81,47 @@ Kluster's layout produced three findings that changed the design from the plan's
   (probe 4) — the package-name mode's positive case.
 - Cross-component edge matrix confirmed real layering: `bt-nodes→bt-core` 194 edges, `api-app→bt-core` 61,
   etc., all directionally consistent with intended architecture (spike Q5).
+
+## Amendment (2026-07-13): greenfield mode — the empty policy becomes a 3-state discriminant
+
+The ADR-003-prototype triad exercise (`test-apps/GREENFIELD_TRIAD_REPORT.md`) authored architecture rules
+and components BEFORE any code existed — the validated "architecture-first" workflow this ADR's
+empty-selector-fails-by-default doctrine did not anticipate. Every component matches zero files at Stage
+0 by definition; `allowEmpty: true` unblocks `align check`, but the report's own finding (quoting this
+file's `validateClassifiedComponents` doc comment, `packages/core/src/components/registry.ts:100-102`) is
+that the result is `verdict: green` **indistinguishable from real compliance** — "the same false-green
+class as an unknown ComponentRef." A team has to know to run `align explain` per rule and notice
+`exampleFiles: []` to tell the difference; an agent under pressure to reach green has no reason to.
+
+**Decision**: the boolean `allowEmpty` becomes a 3-state `empty: 'fail' | 'allow' | 'until-populated'` on
+`ComponentDefinitionIR` (`docs/ir-schema.md`, `docs/core-interfaces.md`).
+
+- `'fail'` (default): unchanged — a component matching zero files is a load-time error. This ADR's
+  original safety is not weakened.
+- `'allow'`: the old `allowEmpty: true` behavior — empty tolerated permanently. **Now additionally
+  surfaced**, not silent: `findUngroundedComponents` (`registry.ts`) reports it, and `GateOrchestrator`
+  threads the result onto `CheckRun.ungroundedComponents` (ADR 008 amendment below), visible in `align
+  check`'s human output, `--json`, and the MCP `align_check` payload.
+- `'until-populated'`: the greenfield-mode addition — same surfacing while empty, but **self-heals**:
+  once the component has ≥1 classified file, the empty-check simply stops firing for it (no separate
+  "armed" flag to track or forget to flip) and its rules evaluate normally. Documents intent ("this WILL
+  be built") rather than "this is permanently optional," so a stale glob that never populates stays
+  visible as ungrounded rather than being permanently excused the way `'allow'` would excuse it.
+
+**Back-compat**: the DSL's `allowEmpty: true` (`dsl/index.ts`'s `ComponentDeclaration`) is kept working,
+unchanged, as a deprecated alias for `empty: 'allow'` — align's own config history and external adopters
+(kluster's `sdd` component, `test-apps/kluster/align.config.ts`) already authored it; `empty` wins if both
+are present on the same declaration.
+
+**Why not just document the difference and leave `allowEmpty` alone**: the report's sharpest finding is
+that the exposure isn't hypothetical — a real greenfield build runs vacuously green on most of its
+components for as long as they take to land (weeks, on a non-toy project), with zero signal in the
+verdict line. A flag that's silent by construction will eventually be forgotten regardless of how well
+it's documented; the fix has to change what the verdict itself says, not just what the docs say about it.
+
+## Evidence (amendment)
+
+- `test-apps/GREENFIELD_TRIAD_REPORT.md` §3 ("The greenfield grounding finding"): a live triad-prototype
+  build (ADR + plan + align rules doc, written before any code) hit exactly this false-green exposure on
+  its first `align check`, named all four greenfield-mode requirements this amendment and its siblings
+  (R1–R4, `IMPLEMENTATION_PLAN.md` Design Reserve) implement.

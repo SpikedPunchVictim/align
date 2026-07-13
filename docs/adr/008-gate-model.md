@@ -98,3 +98,20 @@ at check time, or the check reports gate `status: 'error'` (never green, never a
 is validated in the orchestrator's pre-evaluation guard step, plugin-independently, so no future language
 plugin or rule kind can reintroduce the class. New rule kinds MUST extend the exhaustive reference-validation
 switch (the compiler enforces this — see `validateRuleComponentRefs`).
+
+## Amendment (2026-07-13): the sanctioned exception becomes visible, not silent
+
+ADR 003's `empty: 'allow'`/`'until-populated'` (the ADR 003 greenfield-mode amendment, formerly the
+boolean `allowEmpty: true`) is this invariant's one deliberate, sanctioned exception: a component that
+matches zero files evaluates every rule referencing it vacuously true, by design, for a component that's
+legitimately allowed to be empty. That is still correct — the point of the reference-validity invariant
+is dangling/unregistered *references*, not intentionally-empty *components* — but `test-apps/
+GREENFIELD_TRIAD_REPORT.md` §3 found the exception had no visibility of its own: `verdict: green` reads
+identically whether every component is populated and compliant, or every component is empty and the
+ruleset is running in vacuous-green mode. That gap is closed (ADR 003 amendment, R1,
+`IMPLEMENTATION_PLAN.md` Design Reserve): `CheckRun.ungroundedComponents` — computed by
+`findUngroundedComponents` (`components/registry.ts`), threaded through the orchestrator's check-time
+guard step alongside the reference-validity checks this amendment already lives next to — names every
+component currently relying on the exception, surfaced in `align check`'s human output, `--json`, and the
+MCP `align_check` payload. The exception itself is unchanged; what's new is that it can no longer hide
+inside an ordinary `green`.
