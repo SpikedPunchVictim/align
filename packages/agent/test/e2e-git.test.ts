@@ -102,7 +102,7 @@ describe('E2E — real git repo, scripted violations, FakeFixProvider', () => {
     const effects: AgentEffects = {
       fixProvider: fake,
       runCheck,
-      scanGraph: async () => ({ nodes: [], edges: [], uncertain: [], scannedAt: 0 }),
+      scanGraph: async () => ({ nodes: [], edges: [], externalNodes: [], externalEdges: [], uncertain: [], scannedAt: 0 }),
       readFile: async (p) => fs.readFileSync(path.join(tmpDir, p), 'utf8'),
       writeFile: async (p, content) => fs.writeFileSync(path.join(tmpDir, p), content, 'utf8'),
       formatIfAvailable: async () => undefined,
@@ -151,7 +151,7 @@ describe('E2E — real git repo, scripted violations, FakeFixProvider', () => {
     const effects: AgentEffects = {
       fixProvider: fake,
       runCheck: scriptedRunCheck([checkRun([])]),
-      scanGraph: async () => ({ nodes: [], edges: [], uncertain: [], scannedAt: 0 }),
+      scanGraph: async () => ({ nodes: [], edges: [], externalNodes: [], externalEdges: [], uncertain: [], scannedAt: 0 }),
       readFile: async (p) => fs.readFileSync(path.join(tmpDir, p), 'utf8'),
       writeFile: async (p, content) => fs.writeFileSync(path.join(tmpDir, p), content, 'utf8'),
       formatIfAvailable: async () => undefined,

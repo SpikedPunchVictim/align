@@ -3,7 +3,7 @@ import { evaluateLayers, evaluateMetric, evaluateNoCycles, evaluateNoDependency,
 import { UnknownHostRuleError } from '../src/rules/host-rules.js';
 import type { HostPredicate } from '../src/rules/host-rules.js';
 import type { ArchLayersRule, ArchMetricRule, ArchNoCyclesRule, ArchNoDependencyRule, CustomHostRule } from '../src/types/ir.js';
-import { edge, graph, node } from './helpers.js';
+import { edge, externalEdge, externalNode, graph, node } from './helpers.js';
 
 describe('evaluateNoDependency', () => {
   it('flags an edge from the forbidden component to the target component', () => {
@@ -255,5 +255,64 @@ describe('evaluateRule — custom.host dispatch', () => {
     const noDep: ArchNoDependencyRule = { kind: 'arch.no-dependency', id: 'r1', from: 'api', to: 'ui', provenance: {} };
     const violations = evaluateRule(noDep, g, {}, new Map([['unrelated', (): [] => []]]));
     expect(violations).toHaveLength(1);
+  });
+});
+
+/**
+ * External-package retention (Stage 5 infra): `arch.*` evaluators only ever read `graph.nodes`/
+ * `graph.edges` (file-to-file) — external nodes/edges live in separate arrays by construction, so
+ * these tests assert component classification, cycles, layers, and metrics are byte-identical
+ * whether or not the same graph also carries external data. This is the regression test backing
+ * the report's "rule counts on kluster/n8n identical before/after" claim at unit-test scale.
+ */
+describe('external-package retention does not change arch.* evaluator semantics', () => {
+  const externals = {
+    nodes: [externalNode('child_process', true), externalNode('lodash')],
+    edges: [externalEdge('api/a.ts', 'child_process', { isBuiltin: true }), externalEdge('api/a.ts', 'lodash')],
+  };
+
+  it('evaluateNoDependency ignores external edges entirely — a rule targeting an external "component" name matches nothing', () => {
+    const gWithout = graph([node('api/a.ts', 'api'), node('ui/b.ts', 'ui')], [edge('api/a.ts', 'ui/b.ts')]);
+    const gWith = graph([node('api/a.ts', 'api'), node('ui/b.ts', 'ui')], [edge('api/a.ts', 'ui/b.ts')], externals);
+    const rule: ArchNoDependencyRule = { kind: 'arch.no-dependency', id: 'r1', from: 'api', to: 'ui', provenance: {} };
+    expect(evaluateNoDependency(rule, gWith, {})).toEqual(evaluateNoDependency(rule, gWithout, {}));
+  });
+
+  it('evaluateNoCycles finds the same cycles whether or not external edges are present', () => {
+    const nodes = [node('a.ts', 'core'), node('b.ts', 'core')];
+    const edges = [edge('a.ts', 'b.ts', { specifier: './b' }), edge('b.ts', 'a.ts', { specifier: './a' })];
+    const rule: ArchNoCyclesRule = { kind: 'arch.no-cycles', id: 'r1', scope: 'repo', includeTypeOnly: false, provenance: {} };
+    expect(evaluateNoCycles(rule, graph(nodes, edges, externals), {})).toEqual(evaluateNoCycles(rule, graph(nodes, edges), {}));
+  });
+
+  it('evaluateLayers is unaffected — an external package can never satisfy or violate a layer rule', () => {
+    const nodes = [node('cli/a.ts', 'cli'), node('core/b.ts', 'core')];
+    const edges = [edge('cli/a.ts', 'core/b.ts')];
+    const rule: ArchLayersRule = { kind: 'arch.layers', id: 'r1', layers: [{ layer: 'cli', canDependOn: [] }], provenance: {} };
+    expect(evaluateLayers(rule, graph(nodes, edges, externals), {})).toEqual(evaluateLayers(rule, graph(nodes, edges), {}));
+  });
+
+  it('evaluateMetric (file LOC) is unaffected — externals never become DependencyGraphNodes', () => {
+    const nodes = [node('api/big.ts', 'api', 900)];
+    const rule: ArchMetricRule = { kind: 'arch.metric', id: 'r1', target: 'api', metric: 'loc', max: 800, provenance: {} };
+    expect(evaluateMetric(rule, graph(nodes, [], externals), {})).toEqual(evaluateMetric(rule, graph(nodes, []), {}));
+  });
+
+  it('a custom.host predicate CAN see external edges via ctx.graph — the dogfood-motivating capability', () => {
+    const g = graph([node('packages/agent/src/git.ts', 'agent'), node('packages/core/src/index.ts', 'core')], [], {
+      nodes: [externalNode('child_process', true)],
+      edges: [
+        externalEdge('packages/agent/src/git.ts', 'child_process', { isBuiltin: true }),
+        externalEdge('packages/core/src/index.ts', 'child_process', { isBuiltin: true }),
+      ],
+    });
+    const rule: CustomHostRule = { kind: 'custom.host', id: 'custom.host:no-cp', hostRuleName: 'no-cp', portable: false, provenance: {} };
+    const predicate: HostPredicate = (ctx) =>
+      ctx.graph.externalEdges
+        .filter((e) => e.to === 'external:node:child_process' && e.from !== 'packages/agent/src/git.ts')
+        .map((e) => ({ file: e.from, range: { startLine: e.line, endLine: e.line }, message: `${e.from} imports child_process` }));
+    const violations = evaluateRule(rule, g, {}, new Map([['no-cp', predicate]]));
+    expect(violations).toHaveLength(1);
+    expect(violations[0]?.file).toBe('packages/core/src/index.ts');
   });
 });

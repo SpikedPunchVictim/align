@@ -91,7 +91,7 @@ export interface FakeEffectsHandle {
 export function createFakeEffects(fixProvider: FixProvider, initialFiles: Record<string, string>): FakeEffectsHandle {
   const fs = new Map<RepoRelativePath, string>(Object.entries(initialFiles) as [RepoRelativePath, string][]);
   const git = new FakeGitEffects(fs);
-  let graph: DependencyGraph = { nodes: [], edges: [], uncertain: [], scannedAt: 0 };
+  let graph: DependencyGraph = { nodes: [], edges: [], externalNodes: [], externalEdges: [], uncertain: [], scannedAt: 0 };
   let checkRuns: CheckRun[] = [];
   let checkIndex = 0;
   const formatCalls: RepoRelativePath[][] = [];

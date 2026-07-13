@@ -263,9 +263,16 @@ export class GateOrchestrator {
       if (only === undefined) throw new Error('unreachable: graphs.length === 1');
       return only;
     }
+    // Dedup external nodes by id across plugins (Stage 5 infra) — two plugins could both see an
+    // import of the same external package name; the same `id`-keyed-Map dedup the scanner itself
+    // uses within one scan.
+    const externalNodesById = new Map<string, DependencyGraph['externalNodes'][number]>();
+    for (const g of graphs) for (const n of g.externalNodes) externalNodesById.set(n.id, n);
     return {
       nodes: graphs.flatMap((g) => g.nodes),
       edges: graphs.flatMap((g) => g.edges),
+      externalNodes: [...externalNodesById.values()],
+      externalEdges: graphs.flatMap((g) => g.externalEdges),
       uncertain: graphs.flatMap((g) => g.uncertain),
       scannedAt: Math.min(...graphs.map((g) => g.scannedAt)),
     };

@@ -21,7 +21,7 @@ export function edge(
 }
 
 export function graph(nodes: DependencyGraphNode[], edges: DependencyGraphEdge[]): DependencyGraph {
-  return { nodes, edges, uncertain: [], scannedAt: Date.now() };
+  return { nodes, edges, externalNodes: [], externalEdges: [], uncertain: [], scannedAt: Date.now() };
 }
 
 export function violation(overrides: Partial<Violation> & { id: string; ruleId: string; file: string }): Violation {

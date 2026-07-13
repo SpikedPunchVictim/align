@@ -32,6 +32,35 @@ export interface DependencyGraphEdge {
   readonly snippet: string;
 }
 
+// External-package graph members (Stage 5 infra, docs/proposals/rule-expansion-evaluation.md's
+// top-of-document correction #2 + the custom.host `no-child-process-outside-git-rails` dogfood
+// finding in IMPLEMENTATION_PLAN.md): the scanner used to resolve+classify every external
+// specifier and then discard it (`case 'external': return;`). Retained now as name-level nodes —
+// one node per distinct package, not per import site — so a `custom.host` predicate can see
+// "who imports what external package" via `ctx.graph` without a scanner change of its own.
+// Deliberately a SEPARATE pair of arrays from `nodes`/`edges`, not merged in:
+// `arch.no-dependency`/`arch.no-cycles`/`arch.layers`/`arch.metric` only ever read `nodes`/`edges`
+// (file-to-file), so their semantics are unchanged by construction — no evaluator needed to be
+// touched, and this is asserted by a same-count regression test on kluster/n8n rule output.
+export interface ExternalPackageNode {
+  // Name-level id, not per-import-site: 'external:node:child_process' for a Node builtin (the
+  // `node:` prefix is normalized in regardless of whether the source used a bare or `node:`-
+  // prefixed specifier) or 'external:lodash' for an npm package — stable, dedupable, and safe to
+  // use directly as a Map key or an edge's `to` field.
+  readonly id: string;
+  readonly packageName: string; // 'child_process' | 'lodash' | '@scope/pkg'
+  readonly isBuiltin: boolean;
+}
+
+export interface ExternalDependencyEdge {
+  readonly from: RepoRelativePath;
+  readonly to: string; // ExternalPackageNode.id
+  readonly specifier: string; // the exact source specifier, e.g. 'node:child_process' or 'lodash/fp'
+  readonly line: number;
+  readonly kind: EdgeKind; // preserved exactly like internal edges (import/type-only/dynamic/reexport)
+  readonly snippet: string;
+}
+
 export type UncertaintyReason =
   | 'non-literal-dynamic-specifier' // spike: 1 in 456K LOC, 15 in 3.23M LOC
   | 'unresolvable-specifier'
@@ -49,6 +78,11 @@ export interface UncertaintyMarker {
 export interface DependencyGraph {
   readonly nodes: readonly DependencyGraphNode[];
   readonly edges: readonly DependencyGraphEdge[];
+  // External-package retention (Stage 5 infra amendment to ADR 004): name-level nodes/edges,
+  // excluded from every `arch.*` evaluator by construction (they only read `nodes`/`edges` above).
+  // `custom.host` predicates see them via `ctx.graph.externalNodes`/`externalEdges`.
+  readonly externalNodes: readonly ExternalPackageNode[];
+  readonly externalEdges: readonly ExternalDependencyEdge[];
   readonly uncertain: readonly UncertaintyMarker[];
   readonly scannedAt: number; // epoch ms — the freshness proof underlying ADR 005
 }

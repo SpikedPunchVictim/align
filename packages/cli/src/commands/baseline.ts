@@ -29,7 +29,7 @@ export async function baselinePrune(rootDir: string): Promise<number> {
   const run = await orchestrator.check({ rootDir, excludes });
   const allViolations = run.gates.flatMap((g) => g.violations);
   const result = store.prune(
-    { nodes: [], edges: [], uncertain: [], scannedAt: Date.now() },
+    { nodes: [], edges: [], externalNodes: [], externalEdges: [], uncertain: [], scannedAt: Date.now() },
     allViolations,
   );
   writeBaseline(rootDir, store.snapshot());

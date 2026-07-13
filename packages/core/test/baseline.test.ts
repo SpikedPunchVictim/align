@@ -70,7 +70,7 @@ describe('InMemoryBaselineStore', () => {
     const store = new InMemoryBaselineStore();
     const v1 = makeViolation({ id: computeFingerprint(['a']) });
     store.accept([v1], 'manual');
-    const result = store.prune({ nodes: [], edges: [], uncertain: [], scannedAt: Date.now() }, []);
+    const result = store.prune({ nodes: [], edges: [], externalNodes: [], externalEdges: [], uncertain: [], scannedAt: Date.now() }, []);
     expect(result.removed).toEqual([v1.id]);
     expect(store.isBaselined(v1.id)).toBe(false);
   });
@@ -86,7 +86,7 @@ describe('InMemoryBaselineStore', () => {
 });
 
 describe('baseline move-transfer (ADR 006)', () => {
-  const emptyGraph = { nodes: [], edges: [], uncertain: [], scannedAt: Date.now() };
+  const emptyGraph = { nodes: [], edges: [], externalNodes: [], externalEdges: [], uncertain: [], scannedAt: Date.now() };
 
   it('reconcileMoves transfers an orphaned entry to a same-snippet violation in a different file', () => {
     const store = new InMemoryBaselineStore();
