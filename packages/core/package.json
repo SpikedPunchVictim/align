@@ -1,7 +1,24 @@
 {
   "name": "@align/core",
   "version": "0.1.0",
-  "private": true,
+  "description": "Zero-dependency architecture-conformance rule engine for align: the DSL, JSON IR schema, gate stack, and baseline.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SpikedPunchVictim/align",
+    "directory": "packages/core"
+  },
+  "keywords": [
+    "align",
+    "architecture",
+    "conformance",
+    "dependency-graph",
+    "dependency-direction",
+    "import-cycle",
+    "static-analysis",
+    "dsl",
+    "typescript"
+  ],
   "type": "module",
   "exports": {
     ".": {
@@ -16,6 +33,15 @@
       "types": "./dist/fix/index.d.ts",
       "default": "./dist/fix/index.js"
     }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

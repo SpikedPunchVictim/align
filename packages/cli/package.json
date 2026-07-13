@@ -1,7 +1,23 @@
 {
   "name": "@align/cli",
   "version": "0.1.0",
-  "private": true,
+  "description": "align CLI — an architecture-conformance verification oracle for LLM coding agents, with a built-in MCP server.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SpikedPunchVictim/align",
+    "directory": "packages/cli"
+  },
+  "keywords": [
+    "align",
+    "architecture",
+    "conformance",
+    "cli",
+    "mcp",
+    "model-context-protocol",
+    "dependency-graph",
+    "static-analysis"
+  ],
   "type": "module",
   "bin": {
     "align": "./dist/index.js"
@@ -11,6 +27,15 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

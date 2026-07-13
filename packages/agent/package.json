@@ -1,13 +1,38 @@
 {
   "name": "@align/agent",
   "version": "0.1.0",
-  "private": true,
+  "description": "Built-in BYOK LLM fix loop for align architecture-conformance violations (align agent run).",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SpikedPunchVictim/align",
+    "directory": "packages/agent"
+  },
+  "keywords": [
+    "align",
+    "architecture",
+    "conformance",
+    "agent",
+    "llm",
+    "fix-loop",
+    "anthropic",
+    "mcp"
+  ],
   "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

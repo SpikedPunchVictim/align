@@ -1,13 +1,38 @@
 {
   "name": "@align/plugin-typescript",
   "version": "0.1.0",
-  "private": true,
+  "description": "TypeScript/JavaScript dependency-graph plugin for align — ts-morph-based scanning and language adapters.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SpikedPunchVictim/align",
+    "directory": "packages/plugin-typescript"
+  },
+  "keywords": [
+    "align",
+    "architecture",
+    "conformance",
+    "typescript",
+    "javascript",
+    "ts-morph",
+    "dependency-graph",
+    "plugin"
+  ],
   "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
