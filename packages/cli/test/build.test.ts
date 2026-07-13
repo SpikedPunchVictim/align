@@ -42,6 +42,64 @@ describe('align build — dry run', () => {
   });
 });
 
+// R3 (greenfield mode, IMPLEMENTATION_PLAN.md Design Reserve): `align build` used to throw the
+// same `ComponentValidationError` `align check` catches cleanly, but unhandled — a raw Node stack
+// trace (GREENFIELD_TRIAD_REPORT.md §3). `runBuild` now catches it the same way `align check`
+// does. These tests assert `runBuild` RESOLVES with a clean exit code either way — if the fix
+// regressed, the promise would reject and vitest would report an uncaught exception instead of a
+// normal test failure, which is exactly the "raw stack trace" symptom being guarded against.
+describe('align build — graceful-fail parity with `align check` on an empty component (R3)', () => {
+  function addGhostComponent(dir: string, empty?: "'until-populated'" | "'allow'"): void {
+    const suffix = empty === undefined ? '' : `, empty: ${empty}`;
+    fs.writeFileSync(
+      path.join(dir, 'align.config.ts'),
+      `import { defineProject } from '@spikedpunch/align-core/dsl';\n\n` +
+        `export default defineProject({\n` +
+        `  components: { api: 'src/api/**', ui: 'src/ui/**', ghost: { pattern: 'src/ghost/**'${suffix} } },\n` +
+        `});\n`,
+      'utf8',
+    );
+  }
+
+  it("empty: 'fail' (default): a zero-file component produces a clean error — same condition align check already handles, no raw stack trace", async () => {
+    tmpDir = copyFixture('build-app');
+    addGhostComponent(tmpDir);
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = ((...args: unknown[]) => {
+      errors.push(args.map(String).join(' '));
+    }) as typeof console.error;
+    let code: number;
+    try {
+      code = await runBuild(tmpDir, { apply: false, ifChanged: false, verify: false, acceptNewIntoBaseline: false });
+    } finally {
+      console.error = originalError;
+    }
+    expect(code).toBe(1);
+    expect(errors.join('\n')).toContain("'ghost'");
+    expect(errors.join('\n')).toContain('matches zero files');
+    // No stack-trace leakage: align's own clean error message, not Node's default uncaught-error
+    // rendering (which would include "at " stack frames from build.js/scanner.js internals).
+    expect(errors.join('\n')).not.toContain('    at ');
+  });
+
+  it("empty: 'until-populated': the same zero-file component builds successfully — no crash, no error", async () => {
+    tmpDir = copyFixture('build-app');
+    addGhostComponent(tmpDir, "'until-populated'");
+    const result = await dryRunBuild(tmpDir, DOC);
+    expect(result.proposal.flagged).toHaveLength(0);
+    const code = await runBuild(tmpDir, { apply: false, ifChanged: false, verify: false, acceptNewIntoBaseline: false });
+    expect(code).toBe(0);
+  });
+
+  it("empty: 'allow': the same zero-file component builds successfully — no crash, no error", async () => {
+    tmpDir = copyFixture('build-app');
+    addGhostComponent(tmpDir, "'allow'");
+    const code = await runBuild(tmpDir, { apply: false, ifChanged: false, verify: false, acceptNewIntoBaseline: false });
+    expect(code).toBe(0);
+  });
+});
+
 describe('align build --apply', () => {
   it('writes generated-rules.json, rules.lock.json, and the audit report; check stays green', async () => {
     tmpDir = copyFixture('build-app');

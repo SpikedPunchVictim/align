@@ -1,4 +1,4 @@
-import { buildUncertaintyAdvisories, toComponentName, type Advisory, type UncertaintyMarker } from '@spikedpunch/align-core';
+import { buildUncertaintyAdvisories, findUngroundedComponents, toComponentName, type Advisory, type UncertaintyMarker } from '@spikedpunch/align-core';
 import { TypeScriptPlugin, UNMAPPED_COMPONENT, findDeadAliases, findOrphanedPackages } from '@spikedpunch/align-plugin-typescript';
 import { loadConfig } from '../config.js';
 
@@ -70,13 +70,33 @@ async function collectDoctorReport(rootDir: string): Promise<DoctorReport> {
       }
 
       const seenComponents = new Set(graph.nodes.map((n) => n.component));
-      const emptyComponents = Object.keys(ruleset.components).filter(
-        (name) => !seenComponents.has(toComponentName(name)),
-      );
-      if (emptyComponents.length > 0) {
+
+      // R4 (greenfield mode, IMPLEMENTATION_PLAN.md Design Reserve): ungrounded components (empty
+      // policy `'allow'`/`'until-populated'`, currently zero classified files) get a
+      // policy-specific suggestion — `doctor` is the proactive advisory surface (R1's `align
+      // check` line is the always-visible one; this is the "what do I do about it" detail).
+      for (const ungrounded of findUngroundedComponents(ruleset.components, seenComponents)) {
+        const suggestion =
+          ungrounded.policy === 'until-populated'
+            ? 'expected for architecture-first authoring — rules load now and enforce automatically once files land under this selector; if that never happens, double-check the glob.'
+            : "permanently tolerated (empty: 'allow') — if this component was meant to be populated by now, check the selector, or switch to empty: 'until-populated' so doctor flags the transition.";
         advisories.push({
-          kind: 'empty-component',
-          message: `${emptyComponents.length} component(s) matched zero files (allowEmpty): ${emptyComponents.join(', ')}.`,
+          kind: 'ungrounded-component',
+          message: `Component '${ungrounded.name}' (selector: ${ungrounded.selector}, empty: '${ungrounded.policy}') matched zero files — ${suggestion}`,
+        });
+      }
+
+      // The auto-arm/populated half of R2: a `'until-populated'` component that now HAS files no
+      // longer needs the marker — the empty-check has already stopped firing for it (nothing to
+      // fix functionally), but the marker itself is stale documentation an author should clean up.
+      for (const name of Object.keys(ruleset.components)) {
+        const def = ruleset.components[toComponentName(name)];
+        if (def === undefined || def.empty !== 'until-populated') continue;
+        if (!seenComponents.has(toComponentName(name))) continue; // still empty — not this advisory
+        const fileCount = graph.nodes.filter((n) => n.component === toComponentName(name)).length;
+        advisories.push({
+          kind: 'until-populated-now-populated',
+          message: `Component '${name}' is now populated (${fileCount} file(s) classified) — remove its empty: 'until-populated' marker, it's no longer needed.`,
         });
       }
     }

@@ -174,4 +174,77 @@ describe('align doctor', () => {
       expect(logs.join('\n')).not.toContain('more (use --json for all)');
     });
   });
+
+  // R4 (greenfield mode, IMPLEMENTATION_PLAN.md Design Reserve): doctor lists ungrounded
+  // components with policy + suggestion, and separately flags an until-populated component that
+  // now has files as a "remove the marker" advisory.
+  describe('ungrounded-component / until-populated-now-populated advisories (R4)', () => {
+    function makeRepo(configComponents: string): string {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-doctor-greenfield-test-'));
+      fs.mkdirSync(path.join(dir, 'src', 'app'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'src/app/index.ts'), `export const x = 1;\n`, 'utf8');
+      writeTsconfig(dir, { compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext' } });
+      fs.writeFileSync(
+        path.join(dir, 'align.config.ts'),
+        `import { defineProject } from '@spikedpunch/align-core/dsl';\nexport default defineProject({ components: ${configComponents} });\n`,
+        'utf8',
+      );
+      fs.symlinkSync(path.join(process.cwd(), 'node_modules'), path.join(dir, 'node_modules'), 'dir');
+      return dir;
+    }
+
+    async function jsonReport(dir: string): Promise<{ advisories: { kind: string; message: string }[] }> {
+      const jsonLogs: string[] = [];
+      const originalWrite = process.stdout.write.bind(process.stdout);
+      process.stdout.write = ((chunk: string) => {
+        jsonLogs.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write;
+      try {
+        await runDoctor(dir, { json: true });
+      } finally {
+        process.stdout.write = originalWrite;
+      }
+      return JSON.parse(jsonLogs.join('')) as { advisories: { kind: string; message: string }[] };
+    }
+
+    it("reports an ungrounded-component advisory for an 'until-populated' component with zero files, naming the policy and suggestion", async () => {
+      tmpDir = makeRepo(`{ app: 'src/app/**', api: { pattern: 'src/api/**', empty: 'until-populated' } }`);
+      const payload = await jsonReport(tmpDir);
+      const advisory = payload.advisories.find((a) => a.kind === 'ungrounded-component');
+      expect(advisory?.message).toContain("'api'");
+      expect(advisory?.message).toContain('src/api/**');
+      expect(advisory?.message).toContain("empty: 'until-populated'");
+      expect(advisory?.message).toContain('architecture-first');
+    });
+
+    it("reports an ungrounded-component advisory for an 'allow' component with zero files, with a different (permanent) suggestion", async () => {
+      tmpDir = makeRepo(`{ app: 'src/app/**', plugins: { pattern: 'src/plugins/**', empty: 'allow' } }`);
+      const payload = await jsonReport(tmpDir);
+      const advisory = payload.advisories.find((a) => a.kind === 'ungrounded-component');
+      expect(advisory?.message).toContain("'plugins'");
+      expect(advisory?.message).toContain("empty: 'allow'");
+      expect(advisory?.message).toContain('permanently tolerated');
+    });
+
+    it("reports until-populated-now-populated once a previously-empty 'until-populated' component gets files, suggesting the marker be removed", async () => {
+      tmpDir = makeRepo(`{ api: { pattern: 'src/api/**', empty: 'until-populated' }, app: 'src/app/**' }`);
+      fs.mkdirSync(path.join(tmpDir, 'src', 'api'), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, 'src/api/index.ts'), `export function handler(): string {\n  return 'ok';\n}\n`, 'utf8');
+
+      const payload = await jsonReport(tmpDir);
+      expect(payload.advisories.some((a) => a.kind === 'ungrounded-component')).toBe(false);
+      const advisory = payload.advisories.find((a) => a.kind === 'until-populated-now-populated');
+      expect(advisory?.message).toContain("'api'");
+      expect(advisory?.message).toContain('remove');
+      expect(advisory?.message).toContain("until-populated");
+    });
+
+    it('reports neither advisory for a fully-grounded repo with no empty components', async () => {
+      tmpDir = makeRepo(`{ app: 'src/app/**' }`);
+      const payload = await jsonReport(tmpDir);
+      expect(payload.advisories.some((a) => a.kind === 'ungrounded-component')).toBe(false);
+      expect(payload.advisories.some((a) => a.kind === 'until-populated-now-populated')).toBe(false);
+    });
+  });
 });

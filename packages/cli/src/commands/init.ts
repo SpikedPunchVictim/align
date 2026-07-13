@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline/promises';
 import { defineProject, type ComponentsInput } from '@spikedpunch/align-core/dsl';
+import { toComponentName } from '@spikedpunch/align-core';
 import { TypeScriptPlugin } from '@spikedpunch/align-plugin-typescript';
 import { detectComponents } from '../init/detect-components.js';
 import { suggestLayers } from '../init/suggest-layers.js';
@@ -15,6 +16,13 @@ import { writeBaseline, ensureAlignDir } from '../align-dir.js';
 export interface InitOptions {
   readonly acceptExisting: boolean;
   readonly nonInteractive?: boolean; // test hook; defaults to !process.stdin.isTTY
+  /** R4 (greenfield mode, IMPLEMENTATION_PLAN.md Design Reserve): force every detected component
+   * to `empty: 'until-populated'` regardless of today's file count — for a repo that's
+   * architecture-first from commit zero (components declared, zero files under any of them yet).
+   * Without this flag, `runInit` still auto-detects per-component zero-file matches and marks
+   * only those — this flag is for the "every component is empty right now" case auto-detection
+   * alone already covers, made explicit for a human who wants to say so up front. */
+  readonly greenfield?: boolean;
 }
 
 export async function runInit(rootDir: string, options: InitOptions): Promise<number> {
@@ -26,14 +34,36 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     console.log(`Detected ${detected.length} component(s): ${detected.map((c) => c.name).join(', ')}`);
 
     // Scan once with components-only (no rules yet) to derive layer suggestions from real edges.
-    const componentsInput: ComponentsInput = Object.fromEntries(detected.map((c) => [c.name, c.pattern]));
+    // `empty: 'allow'` here (not the default 'fail') so the probe scan never crashes on a
+    // greenfield repo before we've even had a chance to decide which components need the
+    // until-populated marker below — this is a throwaway probe ruleset, never written to disk.
+    const componentsInput: ComponentsInput = Object.fromEntries(
+      detected.map((c) => [c.name, { pattern: c.pattern, empty: 'allow' as const }]),
+    );
     const probeRuleset = defineProject({ components: componentsInput });
     const plugin = new TypeScriptPlugin();
     const graph = await plugin.scanner.scan({ rootDir, components: probeRuleset.components, excludes: [] });
     const layers = suggestLayers(graph);
 
-    fs.writeFileSync(configPath, renderConfig(detected, layers), 'utf8');
+    // R4: components matching zero files right now (or every component, under --greenfield) get
+    // `empty: 'until-populated'` instead of the default fail-on-empty — architecture-first
+    // authoring (rules declared before code) works out of the box instead of hitting
+    // `ComponentValidationError` on the very first `align check`.
+    const populatedNames = new Set(graph.nodes.map((n) => n.component));
+    const greenfieldComponents = new Set(
+      detected.filter((c) => options.greenfield === true || !populatedNames.has(toComponentName(c.name))).map((c) => c.name),
+    );
+
+    fs.writeFileSync(configPath, renderConfig(detected, layers, greenfieldComponents), 'utf8');
     console.log(`Wrote ${CONFIG_FILENAME} (cycles-first starter ruleset; ${layers.length} layer suggestion(s) commented out).`);
+    if (greenfieldComponents.size > 0) {
+      const reason = options.greenfield === true ? '--greenfield' : 'matched zero files';
+      console.log(
+        `${greenfieldComponents.size} component(s) (${reason}) set to empty: 'until-populated' ` +
+          `(architecture-first authoring: rules load now, enforcement auto-arms once files land): ` +
+          `${[...greenfieldComponents].join(', ')}.`,
+      );
+    }
   } else {
     console.log(`${CONFIG_FILENAME} already exists — leaving it as-is.`);
   }

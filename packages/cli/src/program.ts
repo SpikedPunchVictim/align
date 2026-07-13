@@ -29,8 +29,13 @@ export function buildProgram(): Command {
     .command('init')
     .description('Detect components, write a starter align.config.ts, and seed the baseline.')
     .option('--accept-existing', 'seed the baseline non-interactively with all pre-existing violations', false)
-    .action(async (opts: { acceptExisting: boolean }) => {
-      const code = await runInit(process.cwd(), { acceptExisting: opts.acceptExisting });
+    .option(
+      '--greenfield',
+      "force every detected component to empty: 'until-populated' regardless of today's file count (architecture-first authoring)",
+      false,
+    )
+    .action(async (opts: { acceptExisting: boolean; greenfield: boolean }) => {
+      const code = await runInit(process.cwd(), { acceptExisting: opts.acceptExisting, greenfield: opts.greenfield });
       process.exitCode = code;
     });
 
