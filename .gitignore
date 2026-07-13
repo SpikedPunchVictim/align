@@ -2,6 +2,8 @@ node_modules/
 dist/
 out/
 .align/cache/
+.align/telemetry.jsonl
+.align/telemetry-state.json
 test-apps/
 spike/out/
 *.tsbuildinfo

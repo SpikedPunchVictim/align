@@ -406,6 +406,40 @@ Because it never fails, it's safe to run on any repo, any time, purely for infor
 dead tsconfig alias and 13 workspace-orphaned packages on a real target repo the first time it ran
 against it.
 
+## Telemetry (opt-in, local-only)
+
+align can log its own usage to a local, append-only file — **never a network call, ever** (ADR 015,
+the same trust posture the untrusted-mode/security gate already holds itself to). It's off by
+default; turn it on with any of:
+
+```bash
+ALIGN_TELEMETRY=1 align check   # env var
+align check --telemetry         # per-invocation flag (check, baseline accept/prune, build, agent run)
+```
+
+or add `telemetry: true` as a named export in `align.config.ts`. `--no-telemetry` overrides all
+three for one invocation, regardless of env/config. Enabled, every `check`/`baseline accept`/
+`baseline prune`/`build`/`agent run` appends one JSON line to `.align/telemetry.jsonl` — verdicts,
+gate counts, wall-clock latency, which rules fired, baseline accept/prune counts, doc-build impact
+deltas, and (for `align agent run`) attempt/convergence counts plus token usage when the provider
+surfaces it. **Paths and rule ids only, never file contents.** Both `.align/telemetry.jsonl` and
+`.align/telemetry-state.json` (a small cache used to correlate a violation's appear→resolve
+lifecycle across separate runs) are gitignored by default — `align init` adds both entries to your
+repo's `.gitignore` automatically.
+
+```bash
+align telemetry               # human-readable summary
+align telemetry --json        # structured summary
+align telemetry --file <path> # read a JSONL file from somewhere other than .align/telemetry.jsonl
+```
+
+The summary turns the raw log into the report that actually informs the next round of rule tuning:
+check-latency percentiles (p50/p90/p99), which rules fire most, **time-to-green per rule**
+(how long a violation typically stays red before it's fixed — the fastest way to tell a useful rule
+from noise), **dead rules** (declared but never fired — candidates for removal), the baseline-vs-fix
+ratio, and a friction ranking of `error` events by kind. This is local analysis of your own repo's
+history — nothing here is ever sent anywhere.
+
 ## How align treats trust
 
 - **Every check is a fresh scan.** There is no result cache in the verification path and no
@@ -429,6 +463,10 @@ against it.
   and unresolved-specifier handling are still config-time human judgment, not machine-verified, so
   a badly configured exclude can hide a real edge as effectively as a stale cache — just without a
   stale cache's false confidence.
+- **Telemetry, when enabled, never leaves your machine.** Opt-in, local-file-only (ADR 015) — the
+  same no-network-calls discipline `--untrusted` holds align's own config execution to, applied to
+  usage logging. Asserted by a dedicated test, not just documented: nothing under align's telemetry
+  code path imports a network primitive.
 - **JS/TS only, today.** pnpm workspaces are first-class (package-name and glob component
   selectors both validated against the real workspace). npm/yarn workspace detection is a known gap
   on the roadmap — running against an npm workspace repo today under-detects components (in one

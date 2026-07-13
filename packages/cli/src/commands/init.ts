@@ -9,6 +9,7 @@ import { suggestLayers } from '../init/suggest-layers.js';
 import { renderConfig } from '../init/render-config.js';
 import { writeAgentInstructions } from '../init/claude-md.js';
 import { writeGeneratedRulesNote } from '../init/config-comment.js';
+import { ensureTelemetryGitignored } from '../init/gitignore.js';
 import { createOrchestrator } from '../composition-root.js';
 import { CONFIG_FILENAME, loadConfig } from '../config.js';
 import { writeBaseline, ensureAlignDir } from '../align-dir.js';
@@ -71,6 +72,10 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   writeGeneratedRulesNote(configPath);
   writeAgentInstructions(rootDir);
   console.log('Wrote/updated CLAUDE.md agent-instructions block.');
+
+  if (ensureTelemetryGitignored(rootDir)) {
+    console.log('Wrote/updated .gitignore (excluded .align/telemetry.jsonl + .align/telemetry-state.json — opt-in, local-only).');
+  }
 
   const { ruleset, excludes, hostRules } = await loadConfig(rootDir);
   const { orchestrator } = createOrchestrator(ruleset, [], hostRules);

@@ -649,6 +649,81 @@ interface FailureContext {
 }
 ```
 
+## Telemetry (local-only, opt-in, ADR 015)
+
+```ts
+// packages/core/src/telemetry/types.ts — pure types only, no fs/Date.now()/network primitive
+// anywhere in this module (asserted by a dedicated network-abstinence test).
+
+type TelemetrySchemaVersion = 1;
+
+interface TelemetryEnvelope<E extends TelemetryEvent = TelemetryEvent> {
+  readonly schemaVersion: TelemetrySchemaVersion;
+  readonly sessionId: string;         // one per CLI process, injected — never crypto.randomUUID() in core
+  readonly alignVersion: string;
+  readonly rulesetIrHash?: string;    // sha256Hex(JSON.stringify(ruleset)) — same hash fn as rules.lock.json
+  readonly ts: number;                // injected — never Date.now() in core
+  readonly command: string;           // e.g. 'check', 'baseline accept', 'agent run'
+  readonly event: E;
+}
+
+type CheckScope = 'all' | 'changed' | 'files';   // v1 only ever emits 'all' (ADR 005: full scan, no scoping yet)
+
+interface GateSummary {
+  readonly gate: GateKind;
+  readonly status: GateStatus;
+  readonly newCount: number;          // GateResult.violations.length — new, post-baseline
+  readonly baselinedCount: number;
+  readonly passCount: number;
+}
+
+type TelemetryEvent =
+  | { readonly kind: 'check'; readonly verdict: CheckRun['verdict']; readonly gates: readonly GateSummary[];
+      readonly wallMs: number; readonly scope: CheckScope; readonly ungroundedComponentCount: number;
+      readonly advisoryCounts: readonly { readonly kind: string; readonly count: number }[] }
+  | { readonly kind: 'violation-appeared' | 'violation-resolved'; readonly ruleId: string;
+      readonly component?: string; readonly file: string; readonly violationFingerprint: string }
+  | { readonly kind: 'baseline'; readonly action: 'accept' | 'prune'; readonly ruleScope?: string;
+      readonly counts: { readonly accepted?: number; readonly removed?: number; readonly moved?: number } }
+  | { readonly kind: 'build'; readonly doc: string; readonly structuralChanges: number;
+      readonly provenanceOnlyChanges: number;
+      readonly impactDelta: { readonly newViolations: number; readonly maskedBaselined: number } }
+  | { readonly kind: 'error'; readonly errorKind: 'gate-error' | 'exception' | 'untrusted-refusal' |
+      'unknown-host-rule' | 'ungrounded-fail' | 'unknown'; readonly message: string; readonly command: string }
+  | { readonly kind: 'agent'; readonly attempts: number; readonly converged: boolean; readonly iterations: number;
+      readonly escalated: boolean; readonly escalationReason?: string;
+      readonly usage?: { readonly inputTokens: number; readonly outputTokens: number } };
+
+// packages/core/src/telemetry/serialize.ts — pure event -> single JSON-line string
+function serializeTelemetryEvent(envelope: TelemetryEnvelope): string;
+
+// packages/core/src/telemetry/diff.ts — pure violation-fingerprint diff (drives appear/resolve events)
+interface TelemetryStateEntry {
+  readonly fingerprint: string;       // Violation.id (ADR 006: snippet-hash, stable under unrelated edits)
+  readonly ruleId: string;
+  readonly file: string;
+  readonly component?: string;
+}
+interface TelemetryState { readonly violations: readonly TelemetryStateEntry[]; }
+function componentOfViolation(v: Violation): string | undefined;
+function telemetryStateEntryOf(v: Violation): TelemetryStateEntry;
+function diffViolationState(
+  previous: readonly TelemetryStateEntry[],
+  current: readonly TelemetryStateEntry[],
+): { readonly appeared: readonly TelemetryStateEntry[]; readonly resolved: readonly TelemetryStateEntry[] };
+```
+
+The CLI (`packages/cli/src/telemetry/`) owns every side effect: `resolveTelemetryPreConfig`/
+`resolveTelemetryEnabled` implement the enable precedence (`--telemetry`/`--no-telemetry` >
+`ALIGN_TELEMETRY=1` > `align.config.ts`'s `telemetry` export > off), `TelemetryRecorder` is the one
+class that builds an envelope and appends a line to `.align/telemetry.jsonl`
+(`align-dir.ts`'s `appendTelemetryLine`), and `readTelemetryState`/`writeTelemetryState`
+(`align-dir.ts`) persist `TelemetryState` to `.align/telemetry-state.json` — a missing OR corrupt
+state file is treated identically as empty (deliberately looser than `readGeneratedRules`'/
+`readRulesetIr`'s "corrupted is never absent" discipline: this is a self-healing best-effort cache,
+not a portable ruleset artifact whose silent loss would under-enforce a rule). See ADR 015 for the
+full design and `docs/adr/015-telemetry.md`'s Decision section for the network-abstinence guarantee.
+
 ## Notes on what is deliberately absent from this document
 
 - No `CacheStore` interface — v1 has no cache (ADR 005); `GateResult.cacheHits` exists as a stub field, not
