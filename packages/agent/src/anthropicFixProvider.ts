@@ -65,6 +65,14 @@ export interface AnthropicFixProviderOptions {
   readonly schemaRetries?: number;
 }
 
+/** Telemetry's `agent` event usage field (IMPLEMENTATION_PLAN.md's telemetry spec, closing the
+ * Kimi-flagged observability gap): "capture whatever `@anthropic-ai/sdk` returns in
+ * `response.usage`; if absent, omit the field, don't fabricate." */
+export interface AnthropicUsageTotals {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+}
+
 function renderInputPrompt(input: FixProviderInput, correction?: string): string {
   const parts: string[] = [];
 
@@ -125,12 +133,33 @@ export class AnthropicFixProvider implements FixProvider {
   private readonly model: string;
   private readonly maxTokens: number;
   private readonly schemaRetries: number;
+  // `undefined` until the first response actually surfaces `usage` — telemetry's `agent.usage`
+  // field must be omittable, never a fabricated `{ inputTokens: 0, outputTokens: 0 }` for a
+  // provider instance that was never actually called (e.g. `nothing-to-fix`, ADR-consistent with
+  // every other "if absent, omit" field in this codebase).
+  private usageTotals: { inputTokens: number; outputTokens: number } | undefined;
 
   constructor(options: AnthropicFixProviderOptions = {}) {
     this.client = options.apiKey !== undefined ? new Anthropic({ apiKey: options.apiKey }) : new Anthropic();
     this.model = options.model ?? process.env['ALIGN_AGENT_MODEL'] ?? DEFAULT_MODEL;
     this.maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
     this.schemaRetries = options.schemaRetries ?? DEFAULT_SCHEMA_RETRIES;
+  }
+
+  /** Accumulated `input_tokens`/`output_tokens` across every real API call this instance made
+   * (schema-retry attempts included — a retry is still real spend). Read by
+   * `packages/cli/src/commands/agent.ts` after `runAgentLoop` completes to populate the `agent`
+   * telemetry event's optional `usage` field. */
+  getUsageTotals(): AnthropicUsageTotals | undefined {
+    return this.usageTotals;
+  }
+
+  private accumulateUsage(usage: Anthropic.Messages.Usage | undefined): void {
+    if (usage === undefined) return;
+    const inputTokens = typeof usage.input_tokens === 'number' ? usage.input_tokens : 0;
+    const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0;
+    const previous = this.usageTotals ?? { inputTokens: 0, outputTokens: 0 };
+    this.usageTotals = { inputTokens: previous.inputTokens + inputTokens, outputTokens: previous.outputTokens + outputTokens };
   }
 
   async proposeFix(input: FixProviderInput): Promise<FixProposal> {
@@ -150,6 +179,7 @@ export class AnthropicFixProvider implements FixProvider {
         tool_choice: { type: 'tool', name: TOOL_NAME },
         messages: [{ role: 'user', content: renderInputPrompt(input, correction) }],
       });
+      this.accumulateUsage(message.usage);
 
       if (message.stop_reason === 'refusal') {
         throw new Error('AnthropicFixProvider: model refused the request');

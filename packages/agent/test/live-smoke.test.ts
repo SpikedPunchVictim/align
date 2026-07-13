@@ -43,5 +43,13 @@ describe.skipIf(!shouldRun)('AnthropicFixProvider — live smoke (ALIGN_LIVE_SMO
 
     expect(proposal.files.length).toBeGreaterThan(0);
     expect(typeof proposal.rationale).toBe('string');
+
+    // Telemetry's `agent.usage` field (IMPLEMENTATION_PLAN.md's telemetry spec): a real call must
+    // have populated real, non-fabricated token counts — the one place this can be verified
+    // against an actual `@anthropic-ai/sdk` response rather than a fake.
+    const usage = provider.getUsageTotals();
+    expect(usage).toBeDefined();
+    expect(usage?.inputTokens).toBeGreaterThan(0);
+    expect(usage?.outputTokens).toBeGreaterThan(0);
   }, 60_000);
 });

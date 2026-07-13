@@ -8,7 +8,20 @@ import { runDoctor } from './commands/doctor.js';
 import { runBuild, DEFAULT_DOC_PATH } from './commands/build.js';
 import { runAgentCommand } from './commands/agent.js';
 import { runSkill, type SkillTopic } from './commands/skill.js';
+import { runTelemetryReport, DEFAULT_TELEMETRY_FILE } from './commands/telemetry.js';
 import { startMcpServer } from './mcp/server.js';
+import { ALIGN_VERSION, resolveTelemetryPreConfig } from './telemetry/index.js';
+
+/** `--telemetry` / `--no-telemetry` (IMPLEMENTATION_PLAN.md's telemetry spec) share commander's
+ * negatable-option pairing on every command that can emit telemetry: neither flag passed leaves
+ * `opts.telemetry` `undefined` ("defer to `ALIGN_TELEMETRY`/`align.config.ts`"), `--telemetry`
+ * forces `true`, `--no-telemetry` forces `false` and overrides env/config (verified directly
+ * against commander's own option-merging behavior, not assumed). */
+function addTelemetryOptions(cmd: Command): Command {
+  return cmd
+    .option('--telemetry', 'force-enable the local-only telemetry log for this run (see also ALIGN_TELEMETRY=1 / align.config.ts telemetry:true)')
+    .option('--no-telemetry', 'disable telemetry for this run — overrides ALIGN_TELEMETRY / align.config.ts telemetry:true');
+}
 
 /**
  * Builds the `align` commander program without invoking `parseAsync` — split out of `index.ts`
@@ -23,7 +36,7 @@ export function buildProgram(): Command {
   program
     .name('align')
     .description('Architecture-conformance verification oracle for LLM coding agents.')
-    .version('0.1.0', '-v, --version', 'print the align CLI version');
+    .version(ALIGN_VERSION, '-v, --version', 'print the align CLI version');
 
   program
     .command('init')
@@ -39,29 +52,34 @@ export function buildProgram(): Command {
       process.exitCode = code;
     });
 
-  program
-    .command('check')
-    .description('Run architecture rules against a fresh scan of the repo. Exit 0 iff green.')
-    .option('--json', 'print the structured check payload as JSON', false)
-    .option('--frozen-rules', 'also fail if a doc-built ruleset has drifted from its lockfile (ADR 011)', false)
-    .option(
-      '--untrusted',
-      'never execute align.config.ts (or any hostRules predicate) — load the ruleset from ' +
-        '.align/ruleset-ir.json instead (ADR 014). Refuses if that file is missing or contains a ' +
-        'custom.host rule; run `align export-ir` in a trusted checkout first.',
-      false,
-    )
-    .option('--ir-only', 'alias for --untrusted', false)
-    .option('--ir <path>', 'override the .align/ruleset-ir.json path --untrusted/--ir-only reads from')
-    .action(async (opts: { json: boolean; frozenRules: boolean; untrusted: boolean; irOnly: boolean; ir?: string }) => {
+  addTelemetryOptions(
+    program
+      .command('check')
+      .description('Run architecture rules against a fresh scan of the repo. Exit 0 iff green.')
+      .option('--json', 'print the structured check payload as JSON', false)
+      .option('--frozen-rules', 'also fail if a doc-built ruleset has drifted from its lockfile (ADR 011)', false)
+      .option(
+        '--untrusted',
+        'never execute align.config.ts (or any hostRules predicate) — load the ruleset from ' +
+          '.align/ruleset-ir.json instead (ADR 014). Refuses if that file is missing or contains a ' +
+          'custom.host rule; run `align export-ir` in a trusted checkout first.',
+        false,
+      )
+      .option('--ir-only', 'alias for --untrusted', false)
+      .option('--ir <path>', 'override the .align/ruleset-ir.json path --untrusted/--ir-only reads from'),
+  ).action(
+    async (opts: { json: boolean; frozenRules: boolean; untrusted: boolean; irOnly: boolean; ir?: string; telemetry?: boolean }) => {
+      const telemetryPreConfig = resolveTelemetryPreConfig({ telemetry: opts.telemetry });
       const code = await runCheck(process.cwd(), {
         json: opts.json,
         frozenRules: opts.frozenRules,
         untrusted: opts.untrusted || opts.irOnly,
         ...(opts.ir !== undefined ? { ir: opts.ir } : {}),
+        ...(telemetryPreConfig !== undefined ? { telemetryPreConfig } : {}),
       });
       process.exitCode = code;
-    });
+    },
+  );
 
   program
     .command('export-ir')
@@ -78,20 +96,22 @@ export function buildProgram(): Command {
 
   const baseline = program.command('baseline').description('Manage the violation baseline (tolerated debt).');
 
-  baseline
-    .command('accept')
-    .description('Accept current violations into the baseline (optionally scoped to one rule).')
-    .option('--rule <ruleId>', 'only accept violations of this rule')
-    .action(async (opts: { rule?: string }) => {
-      process.exitCode = await baselineAccept(process.cwd(), opts.rule);
-    });
+  addTelemetryOptions(
+    baseline
+      .command('accept')
+      .description('Accept current violations into the baseline (optionally scoped to one rule).')
+      .option('--rule <ruleId>', 'only accept violations of this rule'),
+  ).action(async (opts: { rule?: string; telemetry?: boolean }) => {
+    const telemetryPreConfig = resolveTelemetryPreConfig({ telemetry: opts.telemetry });
+    process.exitCode = await baselineAccept(process.cwd(), opts.rule, telemetryPreConfig);
+  });
 
-  baseline
-    .command('prune')
-    .description('Remove baseline entries for violations that no longer exist; report moved entries.')
-    .action(async () => {
-      process.exitCode = await baselinePrune(process.cwd());
-    });
+  addTelemetryOptions(
+    baseline.command('prune').description('Remove baseline entries for violations that no longer exist; report moved entries.'),
+  ).action(async (opts: { telemetry?: boolean }) => {
+    const telemetryPreConfig = resolveTelemetryPreConfig({ telemetry: opts.telemetry });
+    process.exitCode = await baselinePrune(process.cwd(), telemetryPreConfig);
+  });
 
   baseline
     .command('show')
@@ -125,67 +145,76 @@ export function buildProgram(): Command {
       process.exitCode = await runDoctor(process.cwd(), { json: opts.json });
     });
 
-  program
-    .command('build')
-    .description(
-      'Compile a markdown architecture doc into the ruleset (ADR 011): fenced ```align blocks + ' +
-        'structured `- **Rule**:` bullets, zero LLM. Default is dry-run (prints the proposal diff + ' +
-        'impact delta, writes nothing).',
-    )
-    .option('--doc <path>', 'doc to build (default docs/ARCHITECTURE-RULES.md)', DEFAULT_DOC_PATH)
-    .option('--apply', 'write .align/generated-rules.json, rules.lock.json, and the audit report', false)
-    .option('--if-changed', 'exit 0 immediately if the doc is unchanged since the last build', false)
-    .option('--verify', 'exit red if the doc or generated-rules.json has drifted from the lockfile (ADR 011)', false)
-    .option('--accept-new-into-baseline', 'seed any new violations the proposal adds into the baseline', false)
-    .action(async (opts: { doc: string; apply: boolean; ifChanged: boolean; verify: boolean; acceptNewIntoBaseline: boolean }) => {
+  addTelemetryOptions(
+    program
+      .command('build')
+      .description(
+        'Compile a markdown architecture doc into the ruleset (ADR 011): fenced ```align blocks + ' +
+          'structured `- **Rule**:` bullets, zero LLM. Default is dry-run (prints the proposal diff + ' +
+          'impact delta, writes nothing).',
+      )
+      .option('--doc <path>', 'doc to build (default docs/ARCHITECTURE-RULES.md)', DEFAULT_DOC_PATH)
+      .option('--apply', 'write .align/generated-rules.json, rules.lock.json, and the audit report', false)
+      .option('--if-changed', 'exit 0 immediately if the doc is unchanged since the last build', false)
+      .option('--verify', 'exit red if the doc or generated-rules.json has drifted from the lockfile (ADR 011)', false)
+      .option('--accept-new-into-baseline', 'seed any new violations the proposal adds into the baseline', false),
+  ).action(
+    async (opts: { doc: string; apply: boolean; ifChanged: boolean; verify: boolean; acceptNewIntoBaseline: boolean; telemetry?: boolean }) => {
+      const telemetryPreConfig = resolveTelemetryPreConfig({ telemetry: opts.telemetry });
       const code = await runBuild(process.cwd(), {
         doc: opts.doc,
         apply: opts.apply,
         ifChanged: opts.ifChanged,
         verify: opts.verify,
         acceptNewIntoBaseline: opts.acceptNewIntoBaseline,
+        ...(telemetryPreConfig !== undefined ? { telemetryPreConfig } : {}),
       });
       process.exitCode = code;
-    });
+    },
+  );
 
   const agent = program.command('agent').description('Built-in BYOK LLM fix loop (Stage 4, ADR 010). Requires ANTHROPIC_API_KEY.');
 
-  agent
-    .command('run')
-    .description(
-      'DISCOVER -> GROUP -> PLAN+FIX -> APPLY -> VERIFY -> REPAIR -> ESCALATE -> DONE -> TERMINAL MERGE. ' +
-        'Refuses a dirty worktree; every apply is a commit on a fresh align/fixes-<date> branch; never ' +
-        'touches align.config.ts or .align/**.',
-    )
-    .option('--max-attempts <n>', 'max REPAIR attempts per file group', (v) => Number.parseInt(v, 10), 3)
-    .option('--pr', 'push the work branch and open a draft PR (default)', true)
-    .option('--auto-merge', 'fast-forward merge into the base branch and delete the work branch instead of opening a PR', false)
-    .option('--allow-untested', 'allow PLAN+FIX on files with zero detected test coverage (default: refuse)', false)
-    .option('--allow-symbol-removals', 'allow a fix that deletes an exported symbol to commit (default: escalate)', false)
-    .option('--model <id>', 'override the FixProvider model id (default: config/env ALIGN_AGENT_MODEL, else claude-sonnet-5)')
-    .option('--dry-run', 'DISCOVER+GROUP+PLAN only — print proposed edits without applying or committing', false)
-    .action(
-      async (opts: {
-        maxAttempts: number;
-        pr: boolean;
-        autoMerge: boolean;
-        allowUntested: boolean;
-        allowSymbolRemovals: boolean;
-        model?: string;
-        dryRun: boolean;
-      }) => {
-        const code = await runAgentCommand(process.cwd(), {
-          maxAttempts: opts.maxAttempts,
-          pr: opts.pr,
-          autoMerge: opts.autoMerge,
-          allowUntested: opts.allowUntested,
-          allowSymbolRemovals: opts.allowSymbolRemovals,
-          ...(opts.model !== undefined ? { model: opts.model } : {}),
-          dryRun: opts.dryRun,
-        });
-        process.exitCode = code;
-      },
-    );
+  addTelemetryOptions(
+    agent
+      .command('run')
+      .description(
+        'DISCOVER -> GROUP -> PLAN+FIX -> APPLY -> VERIFY -> REPAIR -> ESCALATE -> DONE -> TERMINAL MERGE. ' +
+          'Refuses a dirty worktree; every apply is a commit on a fresh align/fixes-<date> branch; never ' +
+          'touches align.config.ts or .align/**.',
+      )
+      .option('--max-attempts <n>', 'max REPAIR attempts per file group', (v) => Number.parseInt(v, 10), 3)
+      .option('--pr', 'push the work branch and open a draft PR (default)', true)
+      .option('--auto-merge', 'fast-forward merge into the base branch and delete the work branch instead of opening a PR', false)
+      .option('--allow-untested', 'allow PLAN+FIX on files with zero detected test coverage (default: refuse)', false)
+      .option('--allow-symbol-removals', 'allow a fix that deletes an exported symbol to commit (default: escalate)', false)
+      .option('--model <id>', 'override the FixProvider model id (default: config/env ALIGN_AGENT_MODEL, else claude-sonnet-5)')
+      .option('--dry-run', 'DISCOVER+GROUP+PLAN only — print proposed edits without applying or committing', false),
+  ).action(
+    async (opts: {
+      maxAttempts: number;
+      pr: boolean;
+      autoMerge: boolean;
+      allowUntested: boolean;
+      allowSymbolRemovals: boolean;
+      model?: string;
+      dryRun: boolean;
+      telemetry?: boolean;
+    }) => {
+      const telemetryPreConfig = resolveTelemetryPreConfig({ telemetry: opts.telemetry });
+      const code = await runAgentCommand(process.cwd(), {
+        maxAttempts: opts.maxAttempts,
+        pr: opts.pr,
+        autoMerge: opts.autoMerge,
+        allowUntested: opts.allowUntested,
+        allowSymbolRemovals: opts.allowSymbolRemovals,
+        ...(opts.model !== undefined ? { model: opts.model } : {}),
+        dryRun: opts.dryRun,
+        ...(telemetryPreConfig !== undefined ? { telemetryPreConfig } : {}),
+      });
+      process.exitCode = code;
+    },
+  );
 
   program
     .command('mcp')
@@ -211,6 +240,19 @@ export function buildProgram(): Command {
         return;
       }
       process.exitCode = await runSkill(process.cwd(), { topic, install: opts.install }, program);
+    });
+
+  program
+    .command('telemetry')
+    .description(
+      'Summarize .align/telemetry.jsonl (opt-in, local-only — see ALIGN_TELEMETRY/--telemetry): check-latency ' +
+        'percentiles, top-firing rules, time-to-green per rule, dead rules, baseline-vs-fix ratio, and ' +
+        'friction ranking by error kind. The report the coordinator/user reads after a dogfood session.',
+    )
+    .option('--file <path>', `JSONL file to read (default ${DEFAULT_TELEMETRY_FILE})`)
+    .option('--json', 'print the structured summary as JSON', false)
+    .action(async (opts: { file?: string; json: boolean }) => {
+      process.exitCode = await runTelemetryReport(process.cwd(), { json: opts.json, ...(opts.file !== undefined ? { file: opts.file } : {}) });
     });
 
   return program;

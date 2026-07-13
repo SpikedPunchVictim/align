@@ -23,6 +23,7 @@ import {
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline } from '../align-dir.js';
+import { computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
 
 export interface AgentRunCliOptions {
   readonly maxAttempts: number;
@@ -32,6 +33,7 @@ export interface AgentRunCliOptions {
   readonly allowSymbolRemovals: boolean;
   readonly model?: string;
   readonly dryRun: boolean;
+  readonly telemetryPreConfig?: boolean;
 }
 
 function buildEffects(
@@ -40,12 +42,11 @@ function buildEffects(
   excludes: readonly string[],
   hostRules: HostPredicateRegistry,
   options: AgentRunCliOptions,
+  fixProvider: MemoizingFixProvider,
 ): AgentEffects {
   const plugin = new TypeScriptPlugin();
   return {
-    fixProvider: new MemoizingFixProvider(
-      options.model !== undefined ? new AnthropicFixProvider({ model: options.model }) : new AnthropicFixProvider(),
-    ),
+    fixProvider,
     runCheck: async () => {
       const { orchestrator } = createOrchestrator(ruleset, readBaseline(rootDir), hostRules);
       return orchestrator.check({ rootDir, excludes });
@@ -60,6 +61,44 @@ function buildEffects(
     git: createNodeGitEffects(rootDir),
     now: () => Date.now(),
   };
+}
+
+/**
+ * `agent` telemetry (IMPLEMENTATION_PLAN.md's telemetry spec): `attempts` is the count of real
+ * `FixProvider` calls this run made (`MemoizingFixProvider.providerCallCount` — a REPAIR retry
+ * that re-invokes the model IS an attempt; a memoized cache hit for identical state is not, since
+ * no actual model call happened); `iterations` is the number of file GROUPs DISCOVER+GROUP
+ * produced (the macro-level loop count). `converged` covers both "fixed everything" and "there was
+ * nothing to fix" — a `dry-run`/`refused`/`partial-escalated` verdict did not converge.
+ */
+function recordAgentTelemetry(
+  rootDir: string,
+  result: AgentRunResult,
+  memoizingProvider: MemoizingFixProvider,
+  anthropicProvider: AnthropicFixProvider,
+  ruleset: Awaited<ReturnType<typeof loadConfig>>['ruleset'],
+  telemetryPreConfig: boolean | undefined,
+  configTelemetry: boolean | undefined,
+): void {
+  const recorder = createTelemetryRecorder(rootDir, 'agent run', telemetryPreConfig, configTelemetry);
+  if (!recorder.enabled) return;
+
+  const escalatedGroups = result.groups.filter((g) => g.status === 'escalated');
+  const converged = result.verdict === 'done' || result.verdict === 'nothing-to-fix';
+  const usage = anthropicProvider.getUsageTotals();
+
+  recorder.record(
+    {
+      kind: 'agent',
+      attempts: memoizingProvider.providerCallCount,
+      converged,
+      iterations: result.groups.length,
+      escalated: escalatedGroups.length > 0,
+      ...(escalatedGroups.length > 0 ? { escalationReason: escalatedGroups.map((g) => g.reason).join('; ').slice(0, 200) } : {}),
+      ...(usage !== undefined ? { usage } : {}),
+    },
+    { rulesetIrHash: computeRulesetIrHash(ruleset) },
+  );
 }
 
 function printResult(result: AgentRunResult): void {
@@ -120,8 +159,10 @@ function exitCodeFor(result: AgentRunResult): number {
 }
 
 export async function runAgentCommand(rootDir: string, options: AgentRunCliOptions): Promise<number> {
-  const { ruleset, excludes, hostRules } = await loadConfig(rootDir);
-  const effects = buildEffects(rootDir, ruleset, excludes, hostRules, options);
+  const { ruleset, excludes, hostRules, telemetry } = await loadConfig(rootDir);
+  const anthropicProvider = options.model !== undefined ? new AnthropicFixProvider({ model: options.model }) : new AnthropicFixProvider();
+  const memoizingProvider = new MemoizingFixProvider(anthropicProvider);
+  const effects = buildEffects(rootDir, ruleset, excludes, hostRules, options, memoizingProvider);
 
   const baseBranch = await effects.git.currentBranch();
   const runOptions: AgentRunOptions = {
@@ -136,6 +177,7 @@ export async function runAgentCommand(rootDir: string, options: AgentRunCliOptio
 
   const result = await runAgentLoop(effects, ruleset, runOptions);
   printResult(result);
+  recordAgentTelemetry(rootDir, result, memoizingProvider, anthropicProvider, ruleset, options.telemetryPreConfig, telemetry);
   return exitCodeFor(result);
 }
 

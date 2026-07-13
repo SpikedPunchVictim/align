@@ -42,6 +42,7 @@ import {
   writeLastBuildReport,
   writeRulesLock,
 } from '../align-dir.js';
+import { computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
 
 export const DEFAULT_DOC_PATH = 'docs/ARCHITECTURE-RULES.md';
 
@@ -52,6 +53,27 @@ export interface BuildOptions {
   readonly verify: boolean;
   readonly acceptNewIntoBaseline: boolean;
   readonly nonInteractive?: boolean; // test hook; defaults to !process.stdin.isTTY, same as `init`
+  readonly telemetryPreConfig?: boolean;
+}
+
+/** `build` telemetry (IMPLEMENTATION_PLAN.md's telemetry spec): recorded once per successful
+ * `dryRunBuild`/`proposeFromClientSubmission` — dry-run and `--apply` both compute the same
+ * `DryRunResult`, so one call covers both; `--verify` and an `--if-changed` no-op never reach a
+ * `DryRunResult` at all and so never emit (nothing was actually built/diffed to report). */
+async function recordBuildTelemetry(rootDir: string, docRelPath: string, result: DryRunResult, telemetryPreConfig?: boolean): Promise<void> {
+  const { ruleset, telemetry } = await loadConfig(rootDir);
+  const recorder = createTelemetryRecorder(rootDir, 'build', telemetryPreConfig, telemetry);
+  if (!recorder.enabled) return;
+  recorder.record(
+    {
+      kind: 'build',
+      doc: docRelPath,
+      structuralChanges: result.diff.added.length + result.diff.changed.length + result.diff.removed.length,
+      provenanceOnlyChanges: result.diff.provenanceOnlyChanged.length,
+      impactDelta: { newViolations: result.impact.addedNew.length, maskedBaselined: result.impact.maskedBaselined.length },
+    },
+    { rulesetIrHash: computeRulesetIrHash(ruleset) },
+  );
 }
 
 export interface DryRunResult {
@@ -372,6 +394,7 @@ export async function runBuild(rootDir: string, options: BuildOptions): Promise<
     throw err;
   }
   printDryRunReport(result);
+  await recordBuildTelemetry(rootDir, docRelPath, result, options.telemetryPreConfig);
 
   if (!options.apply) {
     console.log('\nDry run only — nothing written. Re-run with --apply to write generated-rules.json.');

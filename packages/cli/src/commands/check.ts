@@ -10,6 +10,7 @@ import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, readGeneratedRules, readRulesetIr, readRulesLock, writeBaseline } from '../align-dir.js';
 import { verifyFrozenRules } from './build.js';
+import { buildCheckEvent, computeAndPersistViolationTransitions, computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
 
 /** Carried Stage 3 affordance (approved ahead of Stage 4): when generated rules are active
  * (`.align/generated-rules.json` + `.align/rules.lock.json` both present, ADR 011), surface a
@@ -41,6 +42,10 @@ export interface CheckOptions {
   readonly untrusted?: boolean;
   /** Overrides the default `.align/ruleset-ir.json` location `--untrusted` reads from. */
   readonly ir?: string;
+  /** The CLI-flag/env half of the telemetry enable precedence, already resolved by `program.ts`
+   * (`resolveTelemetryPreConfig`) — `undefined` means "flags/env didn't decide, defer to
+   * `align.config.ts`'s `telemetry` export" (never read under `--untrusted`, ADR 014). */
+  readonly telemetryPreConfig?: boolean;
 }
 
 /**
@@ -66,10 +71,15 @@ export async function runCheck(rootDir: string, options: CheckOptions): Promise<
 }
 
 async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<number> {
-  const { ruleset, excludes, hostRules } = await loadConfig(rootDir);
+  const { ruleset, excludes, hostRules, telemetry } = await loadConfig(rootDir);
   const { orchestrator, baselineStore } = createOrchestrator(ruleset, readBaseline(rootDir), hostRules);
 
+  const recorder = createTelemetryRecorder(rootDir, 'check', options.telemetryPreConfig, telemetry);
+  const rulesetIrHash = computeRulesetIrHash(ruleset);
+
+  const wallStart = performance.now();
   const run = await orchestrator.check({ rootDir, excludes });
+  const wallMs = performance.now() - wallStart;
   persistMovedBaseline(rootDir, run, baselineStore);
 
   let effectiveRun = run;
@@ -86,7 +96,54 @@ async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<
     };
   }
 
+  recordCheckTelemetry(rootDir, recorder, effectiveRun, wallMs, rulesetIrHash, 'check');
+
   return emit(effectiveRun, options, generatedRulesSummary(rootDir));
+}
+
+/**
+ * The one place `check`'s telemetry gets recorded (both trusted and `--untrusted` paths funnel
+ * through this) — a `check` event unconditionally, plus one `violation-appeared`/
+ * `violation-resolved` event per fingerprint transition against `.align/telemetry-state.json`
+ * (only computed/persisted when the recorder is actually enabled — an OFF run must never touch
+ * that file, IMPLEMENTATION_PLAN.md's telemetry spec). An `error`/`gate-error` event replaces the
+ * `check` event when the verdict itself is `'error'` (a gate genuinely couldn't produce a
+ * trustworthy result — ADR 008), since a latency/violation-count number for a run that didn't
+ * really complete would misrepresent the distribution the summarizer command computes.
+ */
+function recordCheckTelemetry(
+  rootDir: string,
+  recorder: ReturnType<typeof createTelemetryRecorder>,
+  run: CheckRun,
+  wallMs: number,
+  rulesetIrHash: string | undefined,
+  command: string,
+): void {
+  if (!recorder.enabled) return;
+
+  if (run.verdict === 'error') {
+    const errorGate = run.gates.find((g) => g.status === 'error');
+    recorder.record(
+      { kind: 'error', errorKind: 'gate-error', message: shortMessage(errorGate?.errorMessage ?? 'unknown gate error'), command },
+      { ...(rulesetIrHash !== undefined ? { rulesetIrHash } : {}) },
+    );
+    return;
+  }
+
+  recorder.record(buildCheckEvent(run, wallMs), { ...(rulesetIrHash !== undefined ? { rulesetIrHash } : {}) });
+
+  const violations = run.gates.flatMap((g) => g.violations);
+  for (const event of computeAndPersistViolationTransitions(rootDir, violations)) {
+    recorder.record(event, { ...(rulesetIrHash !== undefined ? { rulesetIrHash } : {}) });
+  }
+}
+
+/** SHORT message only — no secrets, no file contents (IMPLEMENTATION_PLAN.md's telemetry spec).
+ * `errorMessage` on a `GateResult` is already environmental/plain-string (never LLM-facing prose
+ * embedding source text, `gates/types.ts`), but is truncated defensively here anyway since it can
+ * originate from an arbitrary thrown `Error`'s `.message`. */
+function shortMessage(message: string, maxLength = 200): string {
+  return message.length > maxLength ? `${message.slice(0, maxLength)}…` : message;
 }
 
 /**
@@ -97,38 +154,51 @@ async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<
  * because `assertNoCustomHostRules` below already refused any ruleset that would have needed one.
  */
 async function runUntrustedCheck(rootDir: string, options: CheckOptions): Promise<number> {
+  // Built before the IR artifact is even read, from flags/`ALIGN_TELEMETRY` only — `--untrusted`
+  // never calls `loadConfig` (ADR 014), so `align.config.ts`'s `telemetry` export can never
+  // contribute to this decision under this mode, by the same design that keeps `hostRules` out of
+  // reach here. This lets a refusal itself be recorded (`untrusted-refusal`) below.
+  const recorder = createTelemetryRecorder(rootDir, 'check --untrusted', options.telemetryPreConfig, undefined);
+
   let exported: ExportedRuleset | undefined;
   try {
     exported = readRulesetIr(rootDir, options.ir);
   } catch (err) {
-    console.error(
-      `align check --untrusted: ${err instanceof Error ? err.message : String(err)} — refusing to run. ` +
-        'A corrupted or hand-edited IR artifact is never treated as absent (that would silently drop ' +
-        'rules); re-run `align export-ir` in a trusted checkout to regenerate it.',
-    );
+    const message = `${err instanceof Error ? err.message : String(err)} — refusing to run. A corrupted or ` +
+      'hand-edited IR artifact is never treated as absent (that would silently drop rules); re-run ' +
+      '`align export-ir` in a trusted checkout to regenerate it.';
+    console.error(`align check --untrusted: ${message}`);
+    recorder.record({ kind: 'error', errorKind: 'untrusted-refusal', message: shortMessage(message), command: 'check --untrusted' });
     return 1;
   }
   if (exported === undefined) {
     const path = options.ir ?? '.align/ruleset-ir.json';
-    console.error(
-      `align check --untrusted: no committed IR ruleset found at ${path}. --untrusted cannot execute ` +
-        'align.config.ts, so there is nothing to check it against. Run `align export-ir` in a trusted ' +
-        'checkout to produce it, or run `align check` without --untrusted only on repos you trust to ' +
-        'execute code.',
-    );
+    const message =
+      `no committed IR ruleset found at ${path}. --untrusted cannot execute align.config.ts, so there is ` +
+      'nothing to check it against. Run `align export-ir` in a trusted checkout to produce it, or run ' +
+      '`align check` without --untrusted only on repos you trust to execute code.';
+    console.error(`align check --untrusted: ${message}`);
+    recorder.record({ kind: 'error', errorKind: 'untrusted-refusal', message: shortMessage(message), command: 'check --untrusted' });
     return 1;
   }
 
   try {
     assertNoCustomHostRules(exported.ruleset.rules);
   } catch (err) {
-    console.error(`align check --untrusted: ${err instanceof Error ? err.message : String(err)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`align check --untrusted: ${message}`);
+    recorder.record({ kind: 'error', errorKind: 'untrusted-refusal', message: shortMessage(message), command: 'check --untrusted' });
     return 1;
   }
 
+  const rulesetIrHash = computeRulesetIrHash(exported.ruleset);
   const { orchestrator, baselineStore } = createOrchestrator(exported.ruleset, readBaseline(rootDir), new Map());
+  const wallStart = performance.now();
   const run = await orchestrator.check({ rootDir, excludes: exported.excludes });
+  const wallMs = performance.now() - wallStart;
   persistMovedBaseline(rootDir, run, baselineStore);
+
+  recordCheckTelemetry(rootDir, recorder, run, wallMs, rulesetIrHash, 'check --untrusted');
 
   return emit(run, options, undefined);
 }

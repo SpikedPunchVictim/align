@@ -17,6 +17,13 @@ export interface LoadedConfig {
   // `GateOrchestrator` and `groundFragment` actually consume (docs/proposals/rule-expansion-
   // evaluation.md §B.0).
   readonly hostRules: HostPredicateRegistry;
+  // Same shape of deviation as `excludes`/`hostRules` above — `telemetry: true` (IMPLEMENTATION_PLAN.md's
+  // telemetry Design Reserve entry) is a scan-time/CLI-behavior toggle, not a rule-evaluation
+  // concern, so it doesn't belong in the portable `RulesetIR` either. Read from an optional named
+  // `telemetry` export; `undefined` when absent (never defaulted here — `resolveTelemetryEnabled`,
+  // `telemetry/resolve.ts`, treats "config didn't say" as "no" only after `--telemetry`/
+  // `--no-telemetry`/`ALIGN_TELEMETRY` have all already been checked).
+  readonly telemetry?: boolean;
 }
 
 function toHostPredicateRegistry(hostRules: Record<string, HostPredicate> | undefined): HostPredicateRegistry {
@@ -54,18 +61,20 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
     default?: RulesetIR;
     excludes?: readonly string[];
     hostRules?: Record<string, HostPredicate>;
+    telemetry?: boolean;
   };
   if (mod.default === undefined) {
     throw new Error(`${CONFIG_FILENAME} must have a default export (the result of defineProject(...)).`);
   }
   const excludes = mod.excludes ?? [];
   const hostRules = toHostPredicateRegistry(mod.hostRules);
+  const telemetry = mod.telemetry !== undefined ? { telemetry: mod.telemetry } : {};
 
-  if (!includeGenerated) return { ruleset: mod.default, excludes, hostRules };
+  if (!includeGenerated) return { ruleset: mod.default, excludes, hostRules, ...telemetry };
 
   const generated = readGeneratedRules(rootDir);
-  if (generated === undefined) return { ruleset: mod.default, excludes, hostRules };
+  if (generated === undefined) return { ruleset: mod.default, excludes, hostRules, ...telemetry };
 
   const mergedRules = mergeGeneratedRules(mod.default.rules, generated.rules);
-  return { ruleset: { ...mod.default, rules: [...mergedRules] }, excludes, hostRules };
+  return { ruleset: { ...mod.default, rules: [...mergedRules] }, excludes, hostRules, ...telemetry };
 }

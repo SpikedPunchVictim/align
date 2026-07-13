@@ -12,6 +12,7 @@ import {
   type ExportedRuleset,
   type GeneratedRulesFile,
   type RulesLock,
+  type TelemetryState,
 } from '@spikedpunch/align-core';
 
 export const ALIGN_DIR = '.align';
@@ -22,6 +23,11 @@ const LAST_BUILD_REPORT_FILENAME = 'last-build-report.md';
 // Default location for `align export-ir`'s output / `align check --untrusted`'s input (ADR 014).
 // Overridable per-invocation via `align export-ir --out <path>` / `align check --ir <path>`.
 const RULESET_IR_FILENAME = 'ruleset-ir.json';
+// Telemetry (IMPLEMENTATION_PLAN.md's telemetry Design Reserve entry, ADR 015): append-only, opt-in,
+// local-file-only. Both are gitignored by default (align's own .gitignore, and `align init` adds
+// the same two entries to the target repo's) — neither is a portable artifact meant to be committed.
+const TELEMETRY_JSONL_FILENAME = 'telemetry.jsonl';
+const TELEMETRY_STATE_FILENAME = 'telemetry-state.json';
 
 export function alignDirPath(rootDir: string): string {
   return path.join(rootDir, ALIGN_DIR);
@@ -149,4 +155,49 @@ export function writeRulesetIr(rootDir: string, data: ExportedRuleset, override?
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
   return file;
+}
+
+export function telemetryJsonlPath(rootDir: string, override?: string): string {
+  if (override !== undefined) return path.isAbsolute(override) ? override : path.join(rootDir, override);
+  return path.join(alignDirPath(rootDir), TELEMETRY_JSONL_FILENAME);
+}
+
+function telemetryStatePath(rootDir: string): string {
+  return path.join(alignDirPath(rootDir), TELEMETRY_STATE_FILENAME);
+}
+
+/** Appends one already-serialized JSON line (`serializeTelemetryEvent`, `@spikedpunch/align-core`) to
+ * `.align/telemetry.jsonl` — the only fs-append call in this codebase's telemetry surface. Callers
+ * are expected to have already checked telemetry is enabled; this function does no gating itself
+ * so it stays a single, easily-audited "yes, this really does write to disk" primitive. */
+export function appendTelemetryLine(rootDir: string, line: string, override?: string): void {
+  const file = telemetryJsonlPath(rootDir, override);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, `${line}\n`, 'utf8');
+}
+
+/** Reads `.align/telemetry-state.json` (the previous check's violation-fingerprint set, used for
+ * appear/resolve diffing). A missing OR corrupt file is treated identically — the empty state —
+ * deliberately different from `readGeneratedRules`'/`readRulesetIr`'s "corrupted is never treated
+ * as absent" discipline above: this file is a soft, regenerable cache of the last-seen violation
+ * set (IMPLEMENTATION_PLAN.md's telemetry spec: "cheap and robust to a missing/corrupt state
+ * file"), not a portable ruleset artifact whose silent loss would under-enforce a rule. Worst case
+ * on corruption: one check's worth of appear/resolve events look like everything just appeared. */
+export function readTelemetryState(rootDir: string): TelemetryState {
+  const file = telemetryStatePath(rootDir);
+  if (!fs.existsSync(file)) return { violations: [] };
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
+    if (raw !== null && typeof raw === 'object' && Array.isArray((raw as { violations?: unknown }).violations)) {
+      return raw as TelemetryState;
+    }
+    return { violations: [] };
+  } catch {
+    return { violations: [] };
+  }
+}
+
+export function writeTelemetryState(rootDir: string, state: TelemetryState): void {
+  ensureAlignDir(rootDir);
+  fs.writeFileSync(telemetryStatePath(rootDir), `${JSON.stringify(state, null, 2)}\n`, 'utf8');
 }
