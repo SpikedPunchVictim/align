@@ -1,5 +1,5 @@
 import { defineProject } from '@align/core/dsl';
-import type { HostPredicate, HostRuleContext, HostViolation } from '@align/core';
+import { toRepoRelativePath, type HostPredicate, type HostRuleContext, type HostViolation, type RepoRelativePath } from '@align/core';
 
 // align dogfoods itself (IMPLEMENTATION_PLAN.md Stage 1 success criteria): core never imports
 // plugin-typescript or cli, and the whole repo stays cycle-free. Hand-refined from `align init`'s
@@ -33,13 +33,55 @@ export const excludes = [
 // from any sibling subdirectory of `packages/core/src/`. That's a real, already-true invariant
 // worth protecting from regression, not a fabricated violation to manufacture a "finding."
 //
-// (The originally-considered `no-child-process-outside-git-rails` rule turned out to be
-// inexpressible with today's `DependencyGraph`: the scanner classifies every `node:*`/builtin
-// specifier as `external` and discards it before an edge is ever recorded
-// (`packages/plugin-typescript/src/tsconfig-resolver.ts:30`), so a predicate operating on
-// `ctx.graph` alone has zero visibility into `child_process` imports — independently confirming
-// the evaluation doc's own top-of-document correction #2 from the predicate-authoring side.)
+// `no-child-process-outside-git-rails` dogfood (Stage 5 infra, docs/proposals/
+// rule-expansion-evaluation.md correction #2 + the earlier coordinator misstatement it corrects):
+// the scanner used to classify every `node:*`/builtin specifier as `external` and discard it
+// before an edge was ever recorded (`packages/plugin-typescript/src/tsconfig-resolver.ts:30`,
+// pre-Stage-5), so this predicate was genuinely inexpressible — `ctx.graph` had zero visibility
+// into `child_process` imports. External-package retention (DependencyGraph.externalEdges) closes
+// that gap; this is the first predicate to exercise it.
+//
+// Scoped to what's actually true, verified against the real import graph before writing this rule
+// (not assumed from the task brief, which proposed "git.ts + the CLI composition root"). The
+// PRODUCTION-code importers are exactly two — `packages/agent/src/git.ts` (git/gh shell-out,
+// execFile-only, no shell string) and `packages/agent/src/format.ts` (mechanical prettier
+// invocation against the TARGET repo being fixed, same execFile discipline); the CLI composition
+// root has zero `child_process` importers today, so the brief's assumed scope was corrected to
+// match reality. The first real run of this predicate also found two TEST-time importers —
+// `packages/agent/test/e2e-git.test.ts` (spawns real git for E2E verification) and
+// `packages/cli/test/packaging.test.ts` (spawns the real built binary to test packaging) — both
+// legitimate, reviewed shell-outs that exist only at test time and are never shipped. Rather than
+// hardcode an ever-growing per-file allowlist for future e2e tests, the predicate exempts test
+// files by path convention (`**/test/**`, this repo's one test-directory convention, confirmed
+// against every package) — the rule's actual concern is the PRODUCTION shell-out surface.
+const CHILD_PROCESS_ALLOWED_FILES: ReadonlySet<RepoRelativePath> = new Set([
+  toRepoRelativePath('packages/agent/src/git.ts'),
+  toRepoRelativePath('packages/agent/src/format.ts'),
+]);
+
+function isTestFile(file: RepoRelativePath): boolean {
+  return file.split('/').includes('test');
+}
+
 export const hostRules: Record<string, HostPredicate> = {
+  'no-child-process-outside-git-rails': (ctx: HostRuleContext): HostViolation[] => {
+    const violations: HostViolation[] = [];
+    for (const edge of ctx.graph.externalEdges) {
+      if (edge.to !== 'external:node:child_process') continue;
+      if (CHILD_PROCESS_ALLOWED_FILES.has(edge.from)) continue;
+      if (isTestFile(edge.from)) continue;
+      violations.push({
+        file: edge.from,
+        range: { startLine: edge.line, endLine: edge.line },
+        snippet: edge.snippet,
+        message:
+          `Only packages/agent/src/git.ts and packages/agent/src/format.ts (align's production ` +
+          `shell-out rails) may import node:child_process outside test files — '${edge.from}' ` +
+          `imports it via '${edge.specifier}'.`,
+      });
+    }
+    return violations;
+  },
   typesLayerIsLeaf: (ctx: HostRuleContext): HostViolation[] => {
     const violations: HostViolation[] = [];
     for (const edge of ctx.graph.edges) {
@@ -83,6 +125,9 @@ export default defineProject({
     c.custom
       .host('typesLayerIsLeaf')
       .because("packages/core/src/types/ is align's foundation layer (branded types, IR zod schema, Violation model) and must not acquire a dependency on any sibling subdirectory of packages/core/src/ — a sub-path-scoped invariant arch.layers/arch.no-dependency can't express at core's whole-component granularity (docs/proposals/rule-expansion-evaluation.md §A.2.2). Predicate registered in this file's hostRules export."),
+    c.custom
+      .host('no-child-process-outside-git-rails')
+      .because('node:child_process shell-outs in PRODUCTION code must stay confined to the two audited, execFile-only rails (packages/agent/src/git.ts, packages/agent/src/format.ts) — everywhere else, a child_process import is an unaudited shell-injection/supply-chain surface (test files are exempt; e2e-git.test.ts and packaging.test.ts have legitimate, reviewed test-time shell-outs). Only expressible since Stage 5\'s external-package retention gave custom.host predicates visibility into external edges (docs/proposals/rule-expansion-evaluation.md correction #2); predicate registered in this file\'s hostRules export.'),
     // security.manifest gate dogfood (ADR 013, promoted 2026-07-12 on spike/MANIFEST_PROBE_REPORT.md
     // probe evidence): align adopts its own two rules. `newDependencyGate` fingerprints every
     // current runtime/dev dependency across root + every workspace member's package.json —

@@ -84,9 +84,12 @@ describe('proposeRulesFromDoc', () => {
     const diff = diffGeneratedRules(original.rules, changedDoc.rules);
     expect(diff.added).toHaveLength(0);
     expect(diff.removed).toHaveLength(0);
-    // Only the reworded section's own rule shows up as changed (its provenance line moved); the
-    // other two rules — from sections the edit didn't touch or shift — are untouched.
-    expect(diff.changed.map((c) => c.after.id)).toEqual(['arch.no-cycles:repo']);
+    // The reworded section's own rule has a moved provenance line (sourceLineRange) but the same
+    // structural fields (kind/scope/includeTypeOnly) — that's a provenance-only change (Stage 5
+    // infra fix, `build/diff.ts`'s `RuleDiff.provenanceOnlyChanged`), not a structural one. The
+    // other two rules — from sections the edit didn't touch or shift — are fully unchanged.
+    expect(diff.changed).toHaveLength(0);
+    expect(diff.provenanceOnlyChanged.map((c) => c.after.id)).toEqual(['arch.no-cycles:repo']);
     expect(diff.unchanged.map((r) => r.id).sort()).toEqual(['arch.layers:pluginTypescript', 'arch.no-dependency:core->cli']);
   });
 
