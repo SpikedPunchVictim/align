@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref so PR pushes don't queue stale jobs.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: build, typecheck, test, check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Pinned to the exact version in package.json's "packageManager" field —
+      # keep these in sync (do not float to a range here).
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.8.0
+
+      # Pinned to the major version implied by package.json's "engines.node"
+      # (">=20") and this repo's actual dev/runtime target (Node 24) — do not
+      # use a floating tag like "lts/*".
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build all packages
+        run: pnpm -r build
+
+      - name: Typecheck all packages
+        run: pnpm -r typecheck
+
+      - name: Test all packages
+        run: pnpm -r test
+
+      # The dogfood that matters: align checking itself. This runs the real
+      # `align` binary produced by the build step above (root "check" script
+      # is `node packages/cli/dist/index.js check`) — align enforcing its own
+      # architecture in CI, not a mock or a stub.
+      - name: align check (self-dogfood)
+        run: pnpm check
+
+# ---------------------------------------------------------------------------
+# Downstream usage example (documentation only — align is not published to a
+# registry yet, so this is not a runnable job in this repo's own CI).
+#
+# Once `@align/cli` is published, a consumer repo would add a job like this
+# to gate PRs on architecture conformance:
+#
+#   pr-check:
+#     name: align check
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: pnpm/action-setup@v4
+#         with:
+#           version: <pin to the consumer repo's packageManager version>
+#       - uses: actions/setup-node@v4
+#         with:
+#           node-version: <pin to the consumer repo's engines.node>
+#           cache: pnpm
+#       - run: pnpm install --frozen-lockfile
+#       - run: pnpm add -D @align/cli   # or install globally / via npx
+#       # --frozen-rules additionally fails the build if a doc-built ruleset
+#       # (`align build`) has drifted from its lockfile since the last
+#       # `align build --apply` — keeps docs-as-rules honest in CI.
+#       - run: pnpm exec align check --frozen-rules
+# ---------------------------------------------------------------------------
