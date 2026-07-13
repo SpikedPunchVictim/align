@@ -103,6 +103,41 @@ export function parseBulletSentence(sentence: string): RuleFragment | undefined 
 }
 
 /**
+ * Human-readable grammar-form catalog (Stage 5, IMPLEMENTATION_PLAN.md) — the single source
+ * `align skill`'s generated bullet-grammar section reads (`packages/cli/src/skill/bullet-
+ * grammar.ts`). Each `example` is asserted against the real `parseBulletSentence` in
+ * `test/build-tier2-grammar-catalog.test.ts`: if a regex above changes shape and an example stops
+ * matching (or starts producing a different rule kind), that test fails — the catalog cannot
+ * silently drift from the parser it describes.
+ */
+export interface BulletGrammarForm {
+  readonly ruleKind: RuleFragment['kind'];
+  readonly pattern: string;
+  readonly example: string;
+}
+
+export const BULLET_GRAMMAR_FORMS: readonly BulletGrammarForm[] = [
+  { ruleKind: 'arch.no-dependency', pattern: '<component> must not depend on <component>.', example: 'api must not depend on ui.' },
+  {
+    ruleKind: 'arch.layers',
+    pattern: '<component> may|can only depend on <component>[, <component> and/or <component>...].',
+    example: 'api may only depend on core.',
+  },
+  { ruleKind: 'arch.no-cycles', pattern: 'no cycles. | no cycles within|in|for <scope>. | <scope> must have no cycles.', example: 'no cycles.' },
+  { ruleKind: 'arch.metric', pattern: 'files in <component> must stay under <N> lines.', example: 'files in core must stay under 500 lines.' },
+  {
+    ruleKind: 'security.manifest.source-hygiene',
+    pattern: 'dependency|dependencies (sources) must be (sourced from the) registry(-only).',
+    example: 'dependency sources must be registry-only.',
+  },
+  {
+    ruleKind: 'security.manifest.new-dependency',
+    pattern: 'new dependency|dependencies requires|needs baseline approval|acceptance.',
+    example: 'new dependency requires baseline approval.',
+  },
+];
+
+/**
  * Tier 2 of the precision ladder (ADR 011): structured `- **Rule**: ...` bullets parse
  * deterministically. Pure — no I/O.
  */

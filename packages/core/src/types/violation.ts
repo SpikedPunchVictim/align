@@ -1,8 +1,15 @@
 import type { ComponentName, RepoRelativePath, RuleId, ViolationId } from './branded.js';
 
-// v1 populates 'architecture' only; the union is fixed now so ADR 007/008's priority ordering
-// and GateResult shape don't change when later gates add categories.
-export type Category = 'architecture' | 'security' | 'types' | 'lint' | 'format';
+// v1 executes 'architecture' and 'security' gates only ('types'/'lint'/'format' are the Stage 5
+// tool-wrapping growth path, IMPLEMENTATION_PLAN.md); the union is fixed now so ADR 007/008's
+// priority ordering and GateResult shape don't change when later gates add categories.
+// CATEGORIES is the single source of truth (CODING_BEST_PRACTICES.md §12 "parse, don't
+// validate" applied to a const-derived union instead of a zod schema) — `Category` is *derived*
+// from the array, never hand-duplicated, so anything enumerating categories at runtime (e.g.
+// `align skill`'s generated gate-list section, packages/cli/src/skill/gates.ts) reads the same
+// array the type itself is built from and cannot silently drift from it.
+export const CATEGORIES = ['architecture', 'security', 'types', 'lint', 'format'] as const;
+export type Category = (typeof CATEGORIES)[number];
 
 export type Severity = 'error' | 'warning' | 'info';
 
