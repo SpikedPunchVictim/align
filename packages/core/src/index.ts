@@ -13,3 +13,4 @@ export * from './payload/builder.js';
 export * from './payload/mermaid.js';
 export * from './build/index.js';
 export * from './fix/index.js';
+export * from './telemetry/index.js';
