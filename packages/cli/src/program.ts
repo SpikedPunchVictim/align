@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { runCheck } from './commands/check.js';
+import { runExportIr } from './commands/export-ir.js';
 import { runInit } from './commands/init.js';
 import { baselineAccept, baselinePrune, baselineShow } from './commands/baseline.js';
 import { buildExplainPayload } from './commands/explain.js';
@@ -38,8 +39,35 @@ export function buildProgram(): Command {
     .description('Run architecture rules against a fresh scan of the repo. Exit 0 iff green.')
     .option('--json', 'print the structured check payload as JSON', false)
     .option('--frozen-rules', 'also fail if a doc-built ruleset has drifted from its lockfile (ADR 011)', false)
-    .action(async (opts: { json: boolean; frozenRules: boolean }) => {
-      const code = await runCheck(process.cwd(), { json: opts.json, frozenRules: opts.frozenRules });
+    .option(
+      '--untrusted',
+      'never execute align.config.ts (or any hostRules predicate) — load the ruleset from ' +
+        '.align/ruleset-ir.json instead (ADR 014). Refuses if that file is missing or contains a ' +
+        'custom.host rule; run `align export-ir` in a trusted checkout first.',
+      false,
+    )
+    .option('--ir-only', 'alias for --untrusted', false)
+    .option('--ir <path>', 'override the .align/ruleset-ir.json path --untrusted/--ir-only reads from')
+    .action(async (opts: { json: boolean; frozenRules: boolean; untrusted: boolean; irOnly: boolean; ir?: string }) => {
+      const code = await runCheck(process.cwd(), {
+        json: opts.json,
+        frozenRules: opts.frozenRules,
+        untrusted: opts.untrusted || opts.irOnly,
+        ...(opts.ir !== undefined ? { ir: opts.ir } : {}),
+      });
+      process.exitCode = code;
+    });
+
+  program
+    .command('export-ir')
+    .description(
+      'Run once in a trusted context: import align.config.ts and write the effective ruleset ' +
+        '(components + rules, no functions) as portable JSON to .align/ruleset-ir.json — the data ' +
+        'source `align check --untrusted` reads instead of executing align.config.ts (ADR 014).',
+    )
+    .option('--out <path>', 'override the default .align/ruleset-ir.json output path')
+    .action(async (opts: { out?: string }) => {
+      const code = await runExportIr(process.cwd(), opts.out !== undefined ? { out: opts.out } : {});
       process.exitCode = code;
     });
 

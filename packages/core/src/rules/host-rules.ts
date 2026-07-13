@@ -114,6 +114,43 @@ export class HostPredicateExecutionError extends Error {
   }
 }
 
+/**
+ * Untrusted-mode's custom.host refusal (ADR 014). `--untrusted`/`--ir-only` never registers any
+ * host predicates (there is nothing to register them FROM — align.config.ts is never imported in
+ * that mode), so every `custom.host` rule is structurally unevaluatable there, permanently, not
+ * just until someone fixes a registration typo. Distinct from `UnknownHostRuleError` (a fixable
+ * config bug: register the predicate, fix the name, or remove the rule) — this error tells the
+ * truth about *why* it can't be fixed by editing `align.config.ts`: that file is never read under
+ * `--untrusted` at all. Refusing outright (never silently skipping the rule) follows the same
+ * false-green doctrine as `UnknownHostRuleError` and the reference-validity invariant (ADR 008
+ * amendment) — a silently-dropped rule would report green while enforcing nothing.
+ */
+export class UntrustedCustomHostRuleError extends Error {
+  constructor(public readonly ruleIds: readonly string[]) {
+    super(
+      `--untrusted refuses to evaluate ${ruleIds.length} custom.host rule(s): ${ruleIds.join(', ')}. ` +
+        `A custom.host predicate is host-side code by definition, and --untrusted's entire guarantee ` +
+        `is that no repo-controlled code executes — there is no predicate registry to consult because ` +
+        `align.config.ts is never imported in this mode. Options: run \`align check\` without ` +
+        `--untrusted on a repo you trust to execute code, or remove/replace these rules with a ` +
+        `portable arch.*/security.manifest.* kind before running \`align export-ir\` again.`,
+    );
+    this.name = 'UntrustedCustomHostRuleError';
+  }
+}
+
+/**
+ * `--untrusted`'s pre-flight guard (ADR 014), called by the CLI before constructing the
+ * orchestrator — mirrors `validateHostRules`'s fail-fast-on-first-offender convention but collects
+ * every offending rule id in one error instead of stopping at the first, since there is no
+ * "register the missing one and re-run" loop to support here (registration is categorically
+ * unavailable, not just incomplete).
+ */
+export function assertNoCustomHostRules(rules: readonly RuleIR[]): void {
+  const ids = rules.filter((r): r is CustomHostRule => r.kind === 'custom.host').map((r) => r.id);
+  if (ids.length > 0) throw new UntrustedCustomHostRuleError(ids);
+}
+
 function normalizeHostViolation(
   rule: CustomHostRule,
   hv: HostViolation,
