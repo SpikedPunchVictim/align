@@ -89,3 +89,37 @@ would ever fire. What the uncertainty list actually needed was better *categorie
 All figures above are cited inline from `spike/SPIKE_REPORT.md` §Q1, §Q2, and the Probe 3/4/5 extension
 section; see especially the "Recommendations for the v1 re-audit" list (items 1–9) and the n8n uncertainty
 decomposition table (probe 4).
+
+## Amendment (Stage 5, 2026-07-12): external-package retention + .mjs/.cjs/.mts/.cts scan coverage
+
+**External-package retention.** Three independent demand signals converged on the same gap:
+`docs/proposals/rule-expansion-evaluation.md`'s correction #2 (the scanner resolved and classified
+every external specifier, then discarded it — `scanner.ts:228`, `case 'external': return;`); the
+`custom.host` "`no-child-process-outside-git-rails` is inexpressible" finding logged while dogfooding
+align's own predicates; and an earlier coordinator misstatement the evaluation doc corrects (assuming
+external edges were already tracked). `DependencyGraph` gains `externalNodes`/`externalEdges`
+(name-level, `docs/core-interfaces.md`'s "Dependency graph" section has the full shape) — a **separate**
+pair of arrays from `nodes`/`edges`, not merged in, so every `arch.*` evaluator (no-dependency,
+no-cycles, layers, metric) is unaffected by construction; `custom.host` predicates gain visibility via
+`ctx.graph`. Regression-verified: rule counts on kluster (1 rule, 0 violations) and n8n (207 cycles) are
+byte-identical before and after this change, both scanning the real repos read-only. Memory: a per-scan
+string-intern table bounds retained memory by distinct-package count — n8n retains 3,742 external edges
+across only 41 distinct external nodes; peak RSS and wall time measured flat within run-to-run noise
+(no regression) at both kluster (~1,800 files) and n8n (3.2M LOC) scale. Uncertainty vocabulary is
+unaffected: a specifier that already resolved to `'external'` was never on the `unresolved` path, so
+only the discard behavior changed, not the classification. No new first-class rule kind was added —
+`arch.external-imports` (docs/proposals/rule-expansion-evaluation.md §B.3.1) stays in reserve; this
+amendment is infrastructure a `custom.host` predicate can use today, and gives that rule kind's future
+promotion case a working expression path to gather evidence from.
+
+**Scanner extension coverage.** `SOURCE_EXTENSIONS` grows from `.ts`/`.tsx`/`.js`/`.jsx` to also include
+`.mjs`/`.cjs`/`.mts`/`.cts` — same lexical grammar, parsed identically by
+`ts.createSourceFile`/`ts.resolveModuleName` (NodeNext already understands the extension-specific
+resolution rules, e.g. a `.mts` file importing `'./foo.mjs'` resolves to `./foo.mts` source). Evidence:
+kluster has 43 real `.mjs` + 9 `.cjs` files that were invisible to the scanner before this change
+(a live-session polish note); n8n has 230 `.mjs` + 6 `.cjs` + 9 `.mts` (0 `.cts` — still supported, just
+unexercised by either validation repo so far, noted rather than assumed). Measured graph delta on n8n:
+17,714 → 17,959 files (+245, exactly matching the four extensions' file counts), 61,483 → 61,587 edges
+(+104 from those files' own internal imports); on kluster: 1,758 → 1,809 files (+51), 8,343 → 8,381
+edges (+38). `arch.no-cycles` violation counts on both repos are unchanged by the added files (0 on
+kluster, 207 on n8n) — confirmed no rule regressions.

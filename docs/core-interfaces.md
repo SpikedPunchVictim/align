@@ -258,10 +258,41 @@ interface UncertaintyMarker {
 interface DependencyGraph {
   readonly nodes: readonly DependencyGraphNode[];
   readonly edges: readonly DependencyGraphEdge[];
+  // External-package retention (Stage 5 infra, ADR 004 amendment below). Deliberately separate
+  // arrays, not merged into nodes/edges above — every `arch.*` evaluator only ever reads
+  // nodes/edges (file-to-file), so component classification/cycles/layers/metrics are unaffected
+  // by construction (verified: rule counts on kluster/n8n identical before/after this change).
+  // `custom.host` predicates see these via `ctx.graph.externalNodes`/`externalEdges`.
+  readonly externalNodes: readonly ExternalPackageNode[];
+  readonly externalEdges: readonly ExternalDependencyEdge[];
   readonly uncertain: readonly UncertaintyMarker[];
   readonly scannedAt: number;        // epoch ms — the freshness proof underlying ADR 005
 }
+
+// Name-level (not per-import-site) — one node per distinct external package, dedupe'd across the
+// whole scan. `id` doubles as a stable Map key and as `ExternalDependencyEdge.to`.
+interface ExternalPackageNode {
+  readonly id: string;               // 'external:node:child_process' | 'external:lodash'
+  readonly packageName: string;      // 'child_process' | 'lodash' | '@scope/pkg'
+  readonly isBuiltin: boolean;       // Node builtin vs. npm package
+}
+
+interface ExternalDependencyEdge {
+  readonly from: RepoRelativePath;
+  readonly to: string;               // ExternalPackageNode.id
+  readonly specifier: string;        // exact source specifier, e.g. 'node:child_process'
+  readonly line: number;
+  readonly kind: EdgeKind;           // preserved exactly like internal edges
+}
 ```
+
+**Memory note (measured, n8n read-only)**: externals are the majority of import specifiers in a
+real repo, and the same package name repeats across thousands of import sites — the scanner interns
+`ExternalPackageNode.id`/`packageName`/edge `specifier` strings per-scan (a `Map<string,string>`
+reused across every file), so retained memory scales with distinct-package count, not edge count.
+n8n (17,959 files after adding .mjs/.cjs/.mts/.cts below) retains 3,742 external edges pointing at
+only 41 distinct external nodes — peak RSS and wall time were flat within run-to-run noise before
+vs. after (see the Stage 5 report for exact numbers), not a regression.
 
 ## Scanner contract
 
