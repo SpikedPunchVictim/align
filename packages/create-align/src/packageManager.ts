@@ -40,9 +40,34 @@ export function detectPackageManager(input: DetectPackageManagerInput): PackageM
   return 'npm';
 }
 
+export interface WorkspaceFacts {
+  /** A `pnpm-workspace.yaml` exists in the target directory — pnpm's workspace-root marker. */
+  readonly hasPnpmWorkspaceYaml: boolean;
+  /** The target package.json declares a `workspaces` field — npm/yarn's workspace-root marker. */
+  readonly hasWorkspacesField: boolean;
+}
+
+/**
+ * Whether the target directory is a package-manager WORKSPACE ROOT. This changes the add-dev
+ * invocation: pnpm refuses `pnpm add` at a workspace root without `-w` (`ERR_PNPM_ADDING_TO_ROOT`),
+ * and yarn classic has the same guard (`-W`). pnpm marks a workspace with `pnpm-workspace.yaml`;
+ * npm/yarn mark it with a `workspaces` field in package.json.
+ */
+export function isWorkspaceRoot(pm: PackageManager, facts: WorkspaceFacts): boolean {
+  return pm === 'pnpm' ? facts.hasPnpmWorkspaceYaml : facts.hasWorkspacesField;
+}
+
 export interface ShellCommand {
   readonly command: string;
   readonly args: readonly string[];
+}
+
+export interface AddDevCommandOptions {
+  /** True when the target cwd is the package-manager workspace root — adds the flag pnpm/yarn
+   * require to add a dependency there. For a monorepo this IS what we want: `align init` writes
+   * `align.config.ts` at the repo root, which resolves `@spikedpunch/align-core` from the root's
+   * `node_modules`. */
+  readonly workspaceRoot?: boolean;
 }
 
 /**
@@ -50,15 +75,24 @@ export interface ShellCommand {
  * `{ command, args }` pair — never a shell string (mirrors `@spikedpunch/align-agent`'s `git.ts`
  * discipline: build an argv array, let the imperative shell hand it to `execFile` untouched).
  */
-export function buildAddDevCommand(pm: PackageManager, specs: readonly string[]): ShellCommand {
+export function buildAddDevCommand(
+  pm: PackageManager,
+  specs: readonly string[],
+  options: AddDevCommandOptions = {},
+): ShellCommand {
   if (specs.length === 0) throw new Error('buildAddDevCommand requires at least one dependency spec');
+  const root = options.workspaceRoot === true;
   switch (pm) {
     case 'pnpm':
-      return { command: 'pnpm', args: ['add', '-D', ...specs] };
+      // `-w`/`--workspace-root` — pnpm errors with ERR_PNPM_ADDING_TO_ROOT at a workspace root otherwise.
+      return { command: 'pnpm', args: ['add', '-D', ...(root ? ['-w'] : []), ...specs] };
     case 'npm':
+      // npm adds to the root package.json without a workspace flag.
       return { command: 'npm', args: ['i', '-D', ...specs] };
     case 'yarn':
-      return { command: 'yarn', args: ['add', '-D', ...specs] };
+      // yarn CLASSIC (v1) needs `-W` at a workspace root; yarn berry (v2+) neither needs nor accepts
+      // it — yarn support is best-effort (see packages/create-align/README.md).
+      return { command: 'yarn', args: ['add', '-D', ...(root ? ['-W'] : []), ...specs] };
     default: {
       const exhaustive: never = pm;
       throw new Error(`unhandled package manager: ${String(exhaustive)}`);

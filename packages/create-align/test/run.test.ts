@@ -19,6 +19,29 @@ describe('runCreateAlign', () => {
     expect(calls).toEqual(['install:pnpm:@spikedpunch/align-cli@0.1.1,@spikedpunch/align-core@0.1.1', 'init:']);
   });
 
+  it('passes workspaceRoot to installDevDeps in a pnpm workspace (the kluster ERR_PNPM_ADDING_TO_ROOT case)', async () => {
+    const { effects, installDevDeps, logs } = createFakeEffects({
+      lockfiles: { hasPnpmLock: true, hasYarnLock: false, hasPackageLock: false },
+      workspace: { hasPnpmWorkspaceYaml: true, hasWorkspacesField: false },
+      ownVersion: '0.1.1',
+    });
+    await runCreateAlign(effects, { initArgs: [] });
+    expect(installDevDeps).toHaveBeenCalledWith(
+      'pnpm',
+      ['@spikedpunch/align-cli@0.1.1', '@spikedpunch/align-core@0.1.1'],
+      { workspaceRoot: true },
+    );
+    expect(logs.join('\n')).toMatch(/workspace root/);
+  });
+
+  it('leaves workspaceRoot false in a non-workspace repo', async () => {
+    const { effects, installDevDeps } = createFakeEffects({
+      lockfiles: { hasPnpmLock: true, hasYarnLock: false, hasPackageLock: false },
+    });
+    await runCreateAlign(effects, { initArgs: [] });
+    expect(installDevDeps).toHaveBeenCalledWith('pnpm', expect.any(Array), { workspaceRoot: false });
+  });
+
   it('respects an explicit --pm override even when a different lockfile is present', async () => {
     const { effects, calls } = createFakeEffects({ lockfiles: { hasPnpmLock: true, hasYarnLock: false, hasPackageLock: false } });
     const result = await runCreateAlign(effects, { pmOverride: 'npm', initArgs: [] });

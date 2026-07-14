@@ -7,7 +7,7 @@
  * testable end-to-end with a fake `CreateAlignEffects` (see `test/run.test.ts`), never mocking a
  * module.
  */
-import { detectPackageManager, type PackageManager } from './packageManager.js';
+import { detectPackageManager, isWorkspaceRoot, type PackageManager } from './packageManager.js';
 import { buildPinnedDevDependencySpecs } from './versionPin.js';
 import type { CreateAlignEffects } from './effects.js';
 
@@ -40,10 +40,11 @@ export async function runCreateAlign(effects: CreateAlignEffects, options: Creat
       ...effects.detectLockfiles(),
     });
 
+  const workspaceRoot = isWorkspaceRoot(pm, effects.detectWorkspace());
   const specs = buildPinnedDevDependencySpecs(effects.ownVersion());
-  effects.log(`Detected package manager: ${pm}`);
+  effects.log(`Detected package manager: ${pm}${workspaceRoot ? ' (workspace root)' : ''}`);
   effects.log(`Installing ${specs.join(', ')} as devDependencies...`);
-  await effects.installDevDeps(pm, specs);
+  await effects.installDevDeps(pm, specs, { workspaceRoot });
 
   effects.log('Running `align init`...');
   const exitCode = await effects.runAlignInit(options.initArgs);

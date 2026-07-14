@@ -38,6 +38,16 @@ pnpm create @spikedpunch/align --greenfield
 pnpm create @spikedpunch/align --pm npm
 ```
 
+## Workspaces (monorepos)
+
+In a workspace root, `create-align` installs the two devDependencies at the root — where `align
+init` writes `align.config.ts`, so it can resolve `@spikedpunch/align-core`. It detects a workspace
+root (a `pnpm-workspace.yaml`, or a `workspaces` field in `package.json`) and adds the flag the
+package manager requires: **pnpm** `-w` (otherwise `ERR_PNPM_ADDING_TO_ROOT`), **yarn classic** `-W`.
+**npm** needs no flag. **yarn berry (v2+)** is unverified — it neither needs nor accepts `-W`; if
+`create-align` fails on a yarn-berry workspace, install the two devDependencies by hand and run
+`yarn align init`.
+
 ## Zero runtime dependencies
 
 Built on `node:` built-ins only (`child_process`, `fs`, `path`, `url`) — no prompt library, no

@@ -10,7 +10,8 @@ import { promisify } from 'node:util';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildAddDevCommand, type PackageManager } from './packageManager.js';
+import { buildAddDevCommand, type PackageManager, type WorkspaceFacts } from './packageManager.js';
+import { alignInitArgv } from './alignCli.js';
 import type { CreateAlignEffects, DetectedLockfiles } from './effects.js';
 
 const execFileAsync = promisify(execFile);
@@ -55,16 +56,31 @@ export function createNodeEffects(cwd: string): CreateAlignEffects {
       hasPackageLock: fs.existsSync(path.join(cwd, 'package-lock.json')),
     }),
 
+    detectWorkspace: (): WorkspaceFacts => {
+      const pkgPath = path.join(cwd, 'package.json');
+      let hasWorkspacesField = false;
+      if (fs.existsSync(pkgPath)) {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { workspaces?: unknown };
+        hasWorkspacesField = pkg.workspaces !== undefined;
+      }
+      return {
+        hasPnpmWorkspaceYaml: fs.existsSync(path.join(cwd, 'pnpm-workspace.yaml')),
+        hasWorkspacesField,
+      };
+    },
+
     ownVersion: (): string => readOwnPackageJson().version,
 
-    installDevDeps: async (pm: PackageManager, specs: readonly string[]): Promise<void> => {
-      const { command, args } = buildAddDevCommand(pm, specs);
+    installDevDeps: async (pm: PackageManager, specs: readonly string[], options: { workspaceRoot: boolean }): Promise<void> => {
+      const { command, args } = buildAddDevCommand(pm, specs, { workspaceRoot: options.workspaceRoot });
       await execFileAsync(command, [...args], execOptions(cwd));
     },
 
     runAlignInit: async (args: readonly string[]): Promise<number> => {
       try {
-        const { stdout, stderr } = await execFileAsync(alignBinPath(cwd), [...args], execOptions(cwd));
+        // The `init` subcommand is this effect's responsibility — `args` are only the forwarded
+        // init flags (`--accept-existing`, `--greenfield`, ...), never the subcommand itself.
+        const { stdout, stderr } = await execFileAsync(alignBinPath(cwd), [...alignInitArgv(args)], execOptions(cwd));
         if (stdout.length > 0) process.stdout.write(stdout);
         if (stderr.length > 0) process.stderr.write(stderr);
         return 0;

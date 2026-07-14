@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAddDevCommand, detectPackageManager } from '../src/packageManager.js';
+import { buildAddDevCommand, detectPackageManager, isWorkspaceRoot } from '../src/packageManager.js';
 
 describe('detectPackageManager', () => {
   it('prefers the packageManager field over any lockfile', () => {
@@ -65,5 +65,38 @@ describe('buildAddDevCommand', () => {
 
   it('throws when given no specs — nothing to install', () => {
     expect(() => buildAddDevCommand('npm', [])).toThrow(/at least one/);
+  });
+
+  it('adds pnpm -w at a workspace root (ERR_PNPM_ADDING_TO_ROOT otherwise)', () => {
+    expect(buildAddDevCommand('pnpm', specs, { workspaceRoot: true })).toEqual({
+      command: 'pnpm',
+      args: ['add', '-D', '-w', ...specs],
+    });
+  });
+
+  it('adds yarn -W at a workspace root (yarn classic workspace-root check)', () => {
+    expect(buildAddDevCommand('yarn', specs, { workspaceRoot: true })).toEqual({
+      command: 'yarn',
+      args: ['add', '-D', '-W', ...specs],
+    });
+  });
+
+  it('adds no workspace flag for npm even at a workspace root (npm adds to the root directly)', () => {
+    expect(buildAddDevCommand('npm', specs, { workspaceRoot: true })).toEqual({
+      command: 'npm',
+      args: ['i', '-D', ...specs],
+    });
+  });
+});
+
+describe('isWorkspaceRoot', () => {
+  it('uses pnpm-workspace.yaml presence for pnpm', () => {
+    expect(isWorkspaceRoot('pnpm', { hasPnpmWorkspaceYaml: true, hasWorkspacesField: false })).toBe(true);
+    expect(isWorkspaceRoot('pnpm', { hasPnpmWorkspaceYaml: false, hasWorkspacesField: true })).toBe(false);
+  });
+
+  it('uses the package.json workspaces field for npm and yarn', () => {
+    expect(isWorkspaceRoot('yarn', { hasPnpmWorkspaceYaml: false, hasWorkspacesField: true })).toBe(true);
+    expect(isWorkspaceRoot('npm', { hasPnpmWorkspaceYaml: true, hasWorkspacesField: false })).toBe(false);
   });
 });
