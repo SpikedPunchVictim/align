@@ -7,12 +7,12 @@ import { toRepoRelativePath, type HostPredicate, type HostRuleContext, type Host
 // and so proposed one component covering all three packages) into per-package components that
 // can actually express the composition-root direction ARCHITECTURE.md §5 requires.
 // Scan-time excludes (not part of the portable IR — see packages/cli/src/config.ts's documented
-// deviation): test-apps/ and spike/ are read-only external targets and throwaway spike code, not
-// part of align's own architecture; fixture trees under packages/*/test/fixtures/ intentionally
+// deviation): test-apps/ is a read-only external target and docs/evidence/ holds the relocated
+// throwaway spike and probe code (see docs/evidence/*) — neither is part of align's own architecture; fixture trees under packages/*/test/fixtures/ intentionally
 // contain seeded violations (cycles, forbidden imports) and must not leak into the dogfood check.
 export const excludes = [
   'test-apps',
-  'spike',
+  'docs/evidence',
   'packages/core/test/fixtures',
   'packages/plugin-typescript/test/fixtures',
   'packages/cli/test/fixtures',
@@ -139,7 +139,7 @@ export default defineProject({
     c.custom
       .host('no-child-process-outside-git-rails')
       .because('node:child_process shell-outs in PRODUCTION code must stay confined to the audited, execFile-only rails (packages/agent/src/git.ts, packages/agent/src/format.ts, packages/create-align/src/nodeEffects.ts) — everywhere else, a child_process import is an unaudited shell-injection/supply-chain surface (test files are exempt; e2e-git.test.ts and packaging.test.ts have legitimate, reviewed test-time shell-outs). Only expressible since Stage 5\'s external-package retention gave custom.host predicates visibility into external edges (docs/proposals/rule-expansion-evaluation.md correction #2); predicate registered in this file\'s hostRules export.'),
-    // security.manifest gate dogfood (ADR 013, promoted 2026-07-12 on spike/MANIFEST_PROBE_REPORT.md
+    // security.manifest gate dogfood (ADR 013, promoted 2026-07-12 on docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md
     // probe evidence): align adopts its own two rules. `newDependencyGate` fingerprints every
     // current runtime/dev dependency across root + every workspace member's package.json —
     // `align init`/`baseline accept` seeds today's set once, so only a genuinely new dependency
@@ -148,10 +148,10 @@ export default defineProject({
     // itself (probe-measured) — align's own deps are all registry/workspace-protocol.
     c.security.manifest
       .sourceHygiene()
-      .because('Non-registry dependency sources need explicit human sign-off before they enter the tree (spike/MANIFEST_PROBE_REPORT.md Rule 1).'),
+      .because('Non-registry dependency sources need explicit human sign-off before they enter the tree (docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md Rule 1).'),
     c.security.manifest
       .newDependencyGate()
-      .because('A newly added dependency is a genuinely new, externally-sourced surface worth a deliberate look before it merges (spike/MANIFEST_PROBE_REPORT.md Rule 7 — real historical catch: @anthropic-ai/sdk entering this repo in Stage 4).'),
+      .because('A newly added dependency is a genuinely new, externally-sourced surface worth a deliberate look before it merges (docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md Rule 7 — real historical catch: @anthropic-ai/sdk entering this repo in Stage 4).'),
   ],
 });
 

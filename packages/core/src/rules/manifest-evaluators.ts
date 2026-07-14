@@ -14,7 +14,7 @@ export type SecurityManifestRule = SecurityManifestSourceHygieneRule | SecurityM
 
 /** git/http(s)/file/link — not registry, not `workspace:`, not an `npm:` alias (an alias still
  * resolves through the registry under a different name, so it correctly never matches here). Same
- * pattern spike/MANIFEST_PROBE_REPORT.md Rule 1 verified 3/3 real, 0 false positives against n8n. */
+ * pattern docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md Rule 1 verified 3/3 real, 0 false positives against n8n. */
 function classifySourceType(specifier: string): 'git' | 'http' | 'file' | 'link' | undefined {
   if (/^https?:\/\//.test(specifier)) return 'http';
   if (/^(git\+|git:|github:|gitlab:|bitbucket:)/.test(specifier)) return 'git';

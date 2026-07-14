@@ -5,7 +5,6 @@ out/
 .align/telemetry.jsonl
 .align/telemetry-state.json
 test-apps/
-spike/out/
 *.tsbuildinfo
 .DS_Store
 coverage/

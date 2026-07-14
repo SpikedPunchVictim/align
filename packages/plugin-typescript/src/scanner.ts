@@ -1,7 +1,7 @@
 /**
  * Per-file syntactic scan-and-discard (ADR 004): parse each file with the TypeScript compiler
  * API (not ts-morph — the raw compiler API is the spike-proven implementation), extract edges,
- * discard the AST immediately. Ported from spike/src/scanner.ts, adapted to core's `Scanner`
+ * discard the AST immediately. Ported from docs/evidence/kluster-spike/src/scanner.ts, adapted to core's `Scanner`
  * contract and extended with the asset-specifier / configurable-build-output-exclude vocabulary
  * and snippet capture (needed for `Violation.snippet`, see @spikedpunch/align-core's documented deviation).
  */

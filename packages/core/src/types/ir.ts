@@ -104,7 +104,7 @@ const archMetricSchema = z.object({
   provenance: ruleProvenanceSchema,
 });
 
-// `security.manifest.*` (ADR 013, promoted 2026-07-12 on spike/MANIFEST_PROBE_REPORT.md probe
+// `security.manifest.*` (ADR 013, promoted 2026-07-12 on docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md probe
 // evidence — probe Rules 1 and 7). Both are repo-wide (no `ComponentRef`, same shape as
 // `custom.host` — see `rules/component-refs.ts`'s `componentRefsOf`), because the manifest scan
 // domain (root + workspace package.json + pnpm-lock.yaml) has no notion of align's

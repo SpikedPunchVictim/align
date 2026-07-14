@@ -14,7 +14,7 @@ exercise — two 2,100+-line files structurally invisible to all 19 dependency/c
 promotion is scoped to the `loc` metric only — `fan-in`/`fan-out`/`instability` remain reserved
 discriminants pending their own evidence, and `arch.naming` remains in reserve unchanged.
 **`security.manifest.source-hygiene` and `security.manifest.new-dependency` were promoted 2026-07-12**,
-user-approved, on evidence from `spike/MANIFEST_PROBE_REPORT.md`'s manifest-security probe — see
+user-approved, on evidence from `docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md`'s manifest-security probe — see
 ADR 013 and the two kinds' own sections below. `security.secrets` was reserved-only prior to this
 promotion and remains reserved (a different, unrelated rule shape — content scanning for leaked
 credentials, not manifest/lockfile inspection); it is now listed separately from `security.tool` in
@@ -327,7 +327,7 @@ deviation note). `fixHint` is `{ code: 'split-file', file }`.
 
 ### `security.manifest.source-hygiene`
 
-**Promoted 2026-07-12** (user-approved, ADR 013) on evidence from `spike/MANIFEST_PROBE_REPORT.md`
+**Promoted 2026-07-12** (user-approved, ADR 013) on evidence from `docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md`
 Rule 1: 3/3 hand-verified real, zero false positives, caught on n8n (the probe's own stress test) —
 SheetJS's `xlsx` pinned to its own CDN tarball (`https://cdn.sheetjs.com/...`, stopped publishing to
 npm past 0.18) and `wa-sqlite` pinned to an unreleased git commit (`github:rhashimoto/wa-sqlite#...`).
@@ -347,7 +347,7 @@ bump or a manifest reformatting doesn't reset baseline consent for an already-re
 
 ### `security.manifest.new-dependency`
 
-**Promoted 2026-07-12** (user-approved, ADR 013) on evidence from `spike/MANIFEST_PROBE_REPORT.md`
+**Promoted 2026-07-12** (user-approved, ADR 013) on evidence from `docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md`
 Rule 7 — the probe's strongest result: a real historical catch on align's own history
 (`@anthropic-ai/sdk` entering the tree when `packages/agent` was built), plus mechanism-proof
 simulations on kluster and n8n, zero false positives across all three. **Re-expressed through
@@ -416,7 +416,7 @@ an `irVersion` bump or an additive union member, not a retrofit of the shapes ab
 **Also still reserved, distinct from the two `security.manifest.*` kinds promoted above (ADR 013):**
 `security.secrets` (built-in secrets scanner — AWS keys, private keys, high-entropy tokens; a content-
 scanning shape, not a manifest/lockfile-inspection one) and `security.manifest`'s own install-script
-exposure sibling (`spike/MANIFEST_PROBE_REPORT.md` Rule 2 — install-dependent, held back pending the
+exposure sibling (`docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md` Rule 2 — install-dependent, held back pending the
 content-pattern classifier rework the probe's own findings demand; see ADR 013's follow-up ladder).
 Version-pinning policy and registry-URL allowlisting were evaluated by the same probe and **rejected on
 evidence** (zero findings across 5,594 real specifiers; 100% redundant with `source-hygiene`,

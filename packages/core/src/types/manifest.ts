@@ -21,7 +21,7 @@ export interface ManifestDependency {
   readonly name: string;
   /** The effective specifier: lockfile-resolved (`pnpm-lock.yaml` importer entry) when a lockfile
    * is present, else the raw `package.json` value. Lockfile resolution is what makes a
-   * `catalog:`-managed dependency's real specifier visible (spike/MANIFEST_PROBE_REPORT.md Rule 1's
+   * `catalog:`-managed dependency's real specifier visible (docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md Rule 1's
    * documented reason for reading the lockfile at all, not just package.json). */
   readonly specifier: string;
   readonly field: ManifestDepField;

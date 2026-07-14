@@ -86,7 +86,7 @@ would ever fire. What the uncertainty list actually needed was better *categorie
 
 ## Evidence
 
-All figures above are cited inline from `spike/SPIKE_REPORT.md` §Q1, §Q2, and the Probe 3/4/5 extension
+All figures above are cited inline from `docs/evidence/kluster-spike/SPIKE_REPORT.md` §Q1, §Q2, and the Probe 3/4/5 extension
 section; see especially the "Recommendations for the v1 re-audit" list (items 1–9) and the n8n uncertainty
 decomposition table (probe 4).
 

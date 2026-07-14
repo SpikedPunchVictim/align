@@ -1,5 +1,5 @@
 /**
- * Iterative Tarjan strongly-connected-components — ported from spike/src/rules.ts (proven
+ * Iterative Tarjan strongly-connected-components — ported from docs/evidence/kluster-spike/src/rules.ts (proven
  * algorithm; recursive Tarjan blows the call stack on large graphs, hence the explicit frame
  * stack). Pure function: adjacency in, SCC groups out, no I/O.
  */

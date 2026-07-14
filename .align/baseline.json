@@ -206,5 +206,29 @@
     "acceptedAt": 1783927113673,
     "acceptedBy": "manual",
     "contentFingerprint": "0bb3c463b8853126"
+  },
+  {
+    "fingerprint": "17f8eb02cc106ccc",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/create-align/package.json",
+    "acceptedAt": 1784015090916,
+    "acceptedBy": "manual",
+    "contentFingerprint": "8809c97b55f338d5"
+  },
+  {
+    "fingerprint": "2e6c81f7237d025c",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/create-align/package.json",
+    "acceptedAt": 1784015090916,
+    "acceptedBy": "manual",
+    "contentFingerprint": "207faac5ac4b5d78"
+  },
+  {
+    "fingerprint": "d9d67682359c59d9",
+    "ruleId": "security.manifest.new-dependency",
+    "file": "packages/create-align/package.json",
+    "acceptedAt": 1784015090916,
+    "acceptedBy": "manual",
+    "contentFingerprint": "918d03bcfc04b543"
   }
 ]

@@ -123,7 +123,7 @@ export function makeCustomFactory(): CustomFactory {
 
 // ---------------------------------------------------------------------------------------------
 // `c.security.manifest` — the `security.manifest.*` rule kinds (ADR 013, promoted 2026-07-12 on
-// spike/MANIFEST_PROBE_REPORT.md probe evidence). First-class kinds, not `custom.host` escape
+// docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md probe evidence). First-class kinds, not `custom.host` escape
 // hatches: portable IR, tier-2 doc-authoring support (`build/tier2.ts`), full `.because()`
 // treatment via the same `ruleBuilder()` every other verb in this file uses. Both verbs take no
 // arguments — the manifest scan domain (root + workspace `package.json` + `pnpm-lock.yaml`) has no

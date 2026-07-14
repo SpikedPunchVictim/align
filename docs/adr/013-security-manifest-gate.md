@@ -9,7 +9,7 @@ names `security` as a v1-fixed category with no v1 rule kind — `security.secre
 reserved discriminants only, unspecified, pending evidence (`docs/ir-schema.md`). `docs/proposals/rule-
 expansion-evaluation.md` §B.5 Stage B-1 (user-approved) commissioned a Stage-S-shaped probe — offline manifest
 rules against align itself, `test-apps/kluster`, and `test-apps/n8n` — before promoting anything, per the
-project's promotion-on-evidence doctrine. The probe (`spike/MANIFEST_PROBE_REPORT.md`, 2026-07-12) measured
+project's promotion-on-evidence doctrine. The probe (`docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md`, 2026-07-12) measured
 seven candidate rule checkers; this ADR promotes the two the probe's own evidence supports and rejects/defers
 the rest.
 
@@ -184,6 +184,6 @@ this doctrine exists to bind whichever rule joins them next that does.
 
 ## Evidence
 
-`spike/MANIFEST_PROBE_REPORT.md` (2026-07-12) — full measured results across align/kluster/n8n for all seven
+`docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md` (2026-07-12) — full measured results across align/kluster/n8n for all seven
 candidate rules, cited by number throughout this ADR. `IMPLEMENTATION_PLAN.md`'s Design Reserve promotion log
 records the user's approval and the CI/CD install doctrine decision this ADR expands on.

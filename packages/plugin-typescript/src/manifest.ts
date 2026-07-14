@@ -3,7 +3,7 @@
  * rules — root + workspace `package.json` files (workspace inventory via `workspace.ts`'s
  * `loadWorkspacePackages`, reused rather than duplicated) plus `pnpm-lock.yaml`'s `importers:`
  * section for lockfile-resolved specifiers (needed so a `catalog:`-managed dependency's real
- * specifier is visible to `security.manifest.source-hygiene` — spike/MANIFEST_PROBE_REPORT.md Rule
+ * specifier is visible to `security.manifest.source-hygiene` — docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md Rule
  * 1's documented reason for reading the lockfile at all, not just package.json). No network, no
  * `node_modules` required — same read-only, pre-install posture as `workspace.ts` (ADR 004).
  */

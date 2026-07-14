@@ -51,7 +51,7 @@ tool-wrapping gates (Stage 5) activate it.
 - **VERIFY and the terminal merge both run a FULL, non-scoped `align check`** — v1 does not
   impact-scope verification inside the loop (impact scoping is Design Reserve). This is simpler and
   matches ADR 005's freshness doctrine at the cost of a full rescan per REPAIR attempt; acceptable
-  given the measured ~1.4s full-rescan cost on the target repo class (`spike/SPIKE_REPORT.md`).
+  given the measured ~1.4s full-rescan cost on the target repo class (`docs/evidence/kluster-spike/SPIKE_REPORT.md`).
   Impact-scoped in-loop VERIFY is a future promotion candidate if REPAIR-heavy runs measure slow.
 - **Model default is `claude-sonnet-5`**, not the `claude-api` skill's general-purpose
   `claude-opus-4-8` default — an explicit deviation directed by the Stage 4 task brief: a

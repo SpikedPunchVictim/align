@@ -61,7 +61,7 @@ const metricFragmentSchema = z.object({
   because: z.string().optional(),
 });
 
-// `security.manifest.*` (ADR 013, promoted 2026-07-12 on spike/MANIFEST_PROBE_REPORT.md probe
+// `security.manifest.*` (ADR 013, promoted 2026-07-12 on docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md probe
 // evidence) — mirrors the DSL's `.sourceHygiene()`/`.newDependencyGate()` (dsl/index.ts). Neither
 // verb takes a target/selector, so the fragment carries only `because`, same shape as
 // `customHostFragmentSchema` minus `hostRuleName`.

@@ -116,7 +116,7 @@ type Violation =
       readonly detail: string;
     })
   // 'manifest-source-hygiene' / 'manifest-new-dependency' — security.manifest.* (ADR 013, promoted
-  // 2026-07-12 on spike/MANIFEST_PROBE_REPORT.md probe evidence). `file` (ViolationBase) is the
+  // 2026-07-12 on docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md probe evidence). `file` (ViolationBase) is the
   // declaring package.json; `depName`/`specifier` are structured fields, never folded into prose
   // (ADR 007). `fixHint` is always `{ code: 'manual-review' }` — no structural fix align can
   // propose for a manifest-level finding.
@@ -211,7 +211,7 @@ type RuleIR =
       readonly provenance: RuleProvenance;
     }
   | {
-      // Promoted 2026-07-12 (user-approved, spike/MANIFEST_PROBE_REPORT.md probe evidence, ADR
+      // Promoted 2026-07-12 (user-approved, docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md probe evidence, ADR
       // 013). No ComponentRef at all — repo-wide, the manifest scan domain has no notion of
       // align's file-classified components.
       readonly kind: 'security.manifest.source-hygiene'; readonly id: RuleId;
@@ -226,7 +226,7 @@ type RuleIR =
   // 'arch.naming' (demoted at sign-off review — not spike-exercised)
   // 'lint.tool' | 'format.tool' | 'types.tool' | 'tests.tool' | 'security.secrets' | 'security.tool' | 'ts.*'
   // arch.metric's fan-in / fan-out / instability metrics (loc was promoted; these still need evidence)
-  // security.manifest's install-script-exposure sibling (spike/MANIFEST_PROBE_REPORT.md Rule 2 —
+  // security.manifest's install-script-exposure sibling (docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md Rule 2 —
   // held back pending a content-pattern classifier rework, see ADR 013's follow-up ladder)
 
 interface RulesetIR {
