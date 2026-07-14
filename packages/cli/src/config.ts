@@ -2,6 +2,7 @@ import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { mergeGeneratedRules, type HostPredicate, type HostPredicateRegistry, type RulesetIR } from '@spikedpunch/align-core';
 import { readGeneratedRules } from './align-dir.js';
+import { toAlignCoreMissingError } from './errors.js';
 
 export interface LoadedConfig {
   readonly ruleset: RulesetIR;
@@ -57,12 +58,23 @@ export const CONFIG_FILENAME = 'align.config.ts';
 export async function loadConfig(rootDir: string, options: LoadConfigOptions = {}): Promise<LoadedConfig> {
   const includeGenerated = options.includeGenerated ?? true;
   const configPath = path.join(rootDir, CONFIG_FILENAME);
-  const mod = (await import(pathToFileURL(configPath).href)) as {
+  let mod: {
     default?: RulesetIR;
     excludes?: readonly string[];
     hostRules?: Record<string, HostPredicate>;
     telemetry?: boolean;
   };
+  try {
+    mod = (await import(pathToFileURL(configPath).href)) as typeof mod;
+  } catch (err) {
+    // A target repo that hasn't installed @spikedpunch/align-core as a local devDependency yet
+    // (align.config.ts's own `import ... from '@spikedpunch/align-core/dsl'`) fails here with a
+    // raw ERR_MODULE_NOT_FOUND — mapped to a friendly, actionable error covering
+    // check/doctor/mcp/init (all funnel through this function). Any other import failure (a
+    // genuine syntax error, an unrelated missing module) is rethrown unchanged, never swallowed.
+    const mapped = toAlignCoreMissingError(err);
+    throw mapped ?? err;
+  }
   if (mod.default === undefined) {
     throw new Error(`${CONFIG_FILENAME} must have a default export (the result of defineProject(...)).`);
   }

@@ -11,7 +11,7 @@ should be, propose a fix). Violations surface through a CLI and an MCP server as
 structured payloads instead of prose, so an agent can run check → fix → re-check in a tight loop
 until the repo is green.
 
-> 508 tests pass across four packages; align checks itself on every commit (`pnpm check`).
+> 560 tests pass across five packages; align checks itself on every commit (`pnpm check`).
 
 See `ARCHITECTURE.md` for the full design, `docs/adr/` for the numbered decision record behind
 each feature, and run `align skill --topic all` for the live, binary-generated reference this
@@ -79,24 +79,44 @@ detection is on the roadmap (see [How align treats trust](#how-align-treats-trus
 
 ## Quickstart
 
-Install the CLI from npm:
+The primary path — from inside the repo you want to check (it needs an existing `package.json`):
 
 ```bash
+pnpm create @spikedpunch/align
+# equivalently: npm init @spikedpunch/align   /   yarn create @spikedpunch/align
+```
+
+This installs `@spikedpunch/align-cli` and `@spikedpunch/align-core` as **local** devDependencies
+of that repo — pinned to `create-align`'s own version, lockstep, no confirmation prompt — then
+delegates to `align init` to detect components, write a starter `align.config.ts`, and seed the
+baseline. `align.config.ts` imports the DSL directly from `@spikedpunch/align-core` (`import {
+defineProject } from '@spikedpunch/align-core/dsl'`), so it needs that package resolvable through
+normal Node module resolution — under pnpm's strict `node_modules`, a transitive or globally
+installed `align-core` isn't enough, which is exactly what `create-align` fixes in one command.
+Flags: `--yes`/`-y` (fully non-interactive), `--pm <pnpm|npm|yarn>` (override package-manager
+detection), and anything else (`--greenfield`, `--accept-existing`) passes through to `align init`
+unchanged. See `packages/create-align/README.md` for the full flag reference.
+
+<details>
+<summary><strong>Prefer to install manually, or run a global CLI?</strong> — expand for the equivalent commands</summary>
+
+```bash
+# In the repo you want to check — the same two packages create-align installs, by hand:
+pnpm add -D @spikedpunch/align-cli @spikedpunch/align-core
+align init
+```
+
+```bash
+# Or install the CLI globally / run it via npx:
 npm i -g @spikedpunch/align-cli    # or: pnpm add -g @spikedpunch/align-cli
 align --version
-# ...or run it without a global install:
 npx @spikedpunch/align-cli --version
 ```
 
-`align.config.ts` imports the DSL directly from `@spikedpunch/align-core` (`import { defineProject }
-from '@spikedpunch/align-core/dsl'`), so a repo you point align at also needs that package resolvable
-through normal Node module resolution. Add both as dev dependencies of the repo you want to check —
-this matters under pnpm's strict `node_modules`, where a transitive dependency is not directly
-importable:
+A global/`npx` install still needs `@spikedpunch/align-core` resolvable from the repo you point
+align at (the manual `pnpm add -D` above) — this is exactly the gap `create-align` closes.
 
-```bash
-pnpm add -D @spikedpunch/align-cli @spikedpunch/align-core   # in the repo you want to check
-```
+</details>
 
 <details>
 <summary><strong>Build from source instead</strong> — for contributing to align, or running an unreleased revision</summary>
@@ -806,7 +826,9 @@ packages/
 │                       #   gate stack, baseline, orchestrator. Zero framework dependencies.
 ├── plugin-typescript/  # @spikedpunch/align-plugin-typescript — ts-morph/compiler-API dependency graph + adapters
 ├── cli/                # @spikedpunch/align-cli — commander CLI; hosts `align mcp` (stdio MCP server)
-└── agent/              # @spikedpunch/align-agent — built-in BYOK fix loop (`align agent run`)
+├── agent/              # @spikedpunch/align-agent — built-in BYOK fix loop (`align agent run`)
+└── create-align/       # @spikedpunch/create-align — `pnpm create @spikedpunch/align`: installs align-cli +
+                        #   align-core as local devDependencies, then delegates to `align init`. Zero runtime deps.
 ```
 
 ## Development

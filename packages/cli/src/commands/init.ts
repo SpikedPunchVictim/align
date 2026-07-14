@@ -10,6 +10,7 @@ import { renderConfig } from '../init/render-config.js';
 import { writeAgentInstructions } from '../init/claude-md.js';
 import { writeGeneratedRulesNote } from '../init/config-comment.js';
 import { ensureTelemetryGitignored } from '../init/gitignore.js';
+import { offerAlignScript } from '../init/npm-script.js';
 import { createOrchestrator } from '../composition-root.js';
 import { CONFIG_FILENAME, loadConfig } from '../config.js';
 import { writeBaseline, ensureAlignDir } from '../align-dir.js';
@@ -24,6 +25,14 @@ export interface InitOptions {
    * only those — this flag is for the "every component is empty right now" case auto-detection
    * alone already covers, made explicit for a human who wants to say so up front. */
   readonly greenfield?: boolean;
+  /** `-y, --yes` (create-align hardening): defaults the npm-script-offer prompt to yes and skips
+   * asking, even when interactive. Deliberately does NOT imply `--accept-existing` — baseline
+   * seeding is a separate, human consent decision (ADR 006's "silence is never consent" doctrine
+   * covers pre-existing violations specifically; a purely-additive npm script does not carry the
+   * same risk, so `--yes`/non-interactive alone is enough to default it in). */
+  readonly yes?: boolean;
+  /** `--no-scripts`: skip the npm-script offer entirely — no prompt, no write. */
+  readonly noScripts?: boolean;
 }
 
 export async function runInit(rootDir: string, options: InitOptions): Promise<number> {
@@ -82,20 +91,30 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   const run = await orchestrator.check({ rootDir, excludes });
   const violations = run.gates.flatMap((g) => g.violations);
 
+  const isInteractive = options.nonInteractive === true ? false : (options.nonInteractive ?? process.stdin.isTTY === true);
+
+  // The npm-script offer runs on every exit path (green, baselined, or declined) — it's an
+  // independent, purely-additive convenience, not gated on the baseline outcome.
+  const finish = async (code: number): Promise<number> => {
+    await offerAlignScript(rootDir, isInteractive, {
+      ...(options.noScripts !== undefined ? { noScripts: options.noScripts } : {}),
+      ...(options.yes !== undefined ? { yes: options.yes } : {}),
+    });
+    return code;
+  };
+
   if (violations.length === 0) {
     writeBaseline(rootDir, []);
     console.log('Initial check is green — no baseline seeding needed.');
-    return 0;
+    return finish(0);
   }
-
-  const isInteractive = options.nonInteractive === true ? false : (options.nonInteractive ?? process.stdin.isTTY === true);
 
   if (!options.acceptExisting && !isInteractive) {
     console.log(
       `align check found ${violations.length} pre-existing violation(s). Re-run with --accept-existing to seed ` +
         `the baseline non-interactively (silence is never consent — ADR 006), or run interactively to be prompted.`,
     );
-    return 1;
+    return finish(1);
   }
 
   let shouldSeed = options.acceptExisting;
@@ -110,7 +129,7 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
 
   if (!shouldSeed) {
     console.log('Not seeding the baseline. `align check` will report red until you fix these or run `align baseline accept`.');
-    return 1;
+    return finish(1);
   }
 
   writeBaseline(
@@ -124,5 +143,5 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     })),
   );
   console.log(`Seeded baseline with ${violations.length} pre-existing violation(s) — run \`align baseline show\` to review.`);
-  return 0;
+  return finish(0);
 }

@@ -47,8 +47,20 @@ export function buildProgram(): Command {
       "force every detected component to empty: 'until-populated' regardless of today's file count (architecture-first authoring)",
       false,
     )
-    .action(async (opts: { acceptExisting: boolean; greenfield: boolean }) => {
-      const code = await runInit(process.cwd(), { acceptExisting: opts.acceptExisting, greenfield: opts.greenfield });
+    .option(
+      '-y, --yes',
+      'answer yes without prompting where safe (the npm-script offer only — baseline seeding of ' +
+        'pre-existing violations still requires --accept-existing; consent to tolerate existing debt is never silent)',
+      false,
+    )
+    .option('--no-scripts', 'skip offering to add an "align": "align check" script to package.json')
+    .action(async (opts: { acceptExisting: boolean; greenfield: boolean; yes: boolean; scripts: boolean }) => {
+      const code = await runInit(process.cwd(), {
+        acceptExisting: opts.acceptExisting,
+        greenfield: opts.greenfield,
+        yes: opts.yes,
+        noScripts: !opts.scripts,
+      });
       process.exitCode = code;
     });
 

@@ -1,0 +1,50 @@
+{
+  "name": "@spikedpunch/create-align",
+  "version": "0.1.0",
+  "description": "Bootstrap align (architecture-conformance verification) into an existing repo: installs @spikedpunch/align-cli and @spikedpunch/align-core as local devDependencies, lockstep-pinned to this package's own version, then delegates to `align init`.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SpikedPunchVictim/align",
+    "directory": "packages/create-align"
+  },
+  "keywords": [
+    "align",
+    "architecture",
+    "conformance",
+    "create",
+    "scaffold",
+    "bootstrap",
+    "dependency-graph",
+    "static-analysis"
+  ],
+  "type": "module",
+  "bin": {
+    "create-align": "./dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4",
+    "@types/node": "^22.9.0"
+  }
+}

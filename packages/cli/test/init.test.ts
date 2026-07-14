@@ -164,3 +164,55 @@ describe('align init — greenfield scaffolding (R4)', () => {
     expect(await runCheck(tmpDir, { json: false })).toBe(0);
   });
 });
+
+// create-align hardening (deliverable 2): `align init` offers to add a single
+// `"align": "align check"` npm script to the target repo's package.json — idempotent,
+// non-interactive-defaults-to-yes (low risk, purely additive — unlike baseline seeding's
+// silence-is-never-consent doctrine), and skippable via --no-scripts.
+describe('align init — npm-script offer', () => {
+  function writePackageJson(dir: string, content: Record<string, unknown>): void {
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(content, null, 2), 'utf8');
+  }
+
+  it('adds the "align" script by default in non-interactive mode (no --yes needed)', async () => {
+    tmpDir = makeSinglePackageRepo();
+    writePackageJson(tmpDir, { name: 'target-repo', version: '1.0.0' });
+    const code = await runInit(tmpDir, { acceptExisting: false, nonInteractive: true });
+    expect(code).toBe(0);
+    const pkg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'package.json'), 'utf8')) as { scripts?: Record<string, string> };
+    expect(pkg.scripts?.align).toBe('align check');
+  });
+
+  it('--no-scripts skips the offer entirely — package.json scripts stay untouched', async () => {
+    tmpDir = makeSinglePackageRepo();
+    writePackageJson(tmpDir, { name: 'target-repo', version: '1.0.0' });
+    const code = await runInit(tmpDir, { acceptExisting: false, nonInteractive: true, noScripts: true });
+    expect(code).toBe(0);
+    const pkg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'package.json'), 'utf8')) as { scripts?: Record<string, string> };
+    expect(pkg.scripts?.align).toBeUndefined();
+  });
+
+  it('is idempotent — re-running does not touch an already-present "align" script', async () => {
+    tmpDir = makeSinglePackageRepo();
+    writePackageJson(tmpDir, { name: 'target-repo', version: '1.0.0', scripts: { align: 'align check --json' } });
+    const code = await runInit(tmpDir, { acceptExisting: false, nonInteractive: true, yes: true });
+    expect(code).toBe(0);
+    const pkg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'package.json'), 'utf8')) as { scripts?: Record<string, string> };
+    // Never overwritten, even though it differs from the default "align check".
+    expect(pkg.scripts?.align).toBe('align check --json');
+  });
+
+  it('no-ops silently when the target repo has no package.json at all', async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-init-test-'));
+    fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'src/index.ts'), `export const x = 1;\n`, 'utf8');
+    fs.writeFileSync(
+      path.join(tmpDir, 'tsconfig.json'),
+      JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext' } }),
+      'utf8',
+    );
+    const code = await runInit(tmpDir, { acceptExisting: false, nonInteractive: true, yes: true });
+    expect(code).toBe(0);
+    expect(fs.existsSync(path.join(tmpDir, 'package.json'))).toBe(false);
+  });
+});

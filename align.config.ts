@@ -54,9 +54,16 @@ export const excludes = [
 // hardcode an ever-growing per-file allowlist for future e2e tests, the predicate exempts test
 // files by path convention (`**/test/**`, this repo's one test-directory convention, confirmed
 // against every package) — the rule's actual concern is the PRODUCTION shell-out surface.
+//
+// `packages/create-align/src/nodeEffects.ts` joined this allowlist when `@spikedpunch/create-align`
+// shipped (`pnpm create @spikedpunch/align`): it's the one file that shells out to the target
+// repo's package manager (`pnpm add -D`/`npm i -D`/`yarn add -D`) and to the freshly-installed
+// local `align` binary (`align init`) — the same execFile-only, argv-array discipline as
+// align-agent's git rails, isolated to a single file for the same reason.
 const CHILD_PROCESS_ALLOWED_FILES: ReadonlySet<RepoRelativePath> = new Set([
   toRepoRelativePath('packages/agent/src/git.ts'),
   toRepoRelativePath('packages/agent/src/format.ts'),
+  toRepoRelativePath('packages/create-align/src/nodeEffects.ts'),
 ]);
 
 function isTestFile(file: RepoRelativePath): boolean {
@@ -75,9 +82,8 @@ export const hostRules: Record<string, HostPredicate> = {
         range: { startLine: edge.line, endLine: edge.line },
         snippet: edge.snippet,
         message:
-          `Only packages/agent/src/git.ts and packages/agent/src/format.ts (align's production ` +
-          `shell-out rails) may import node:child_process outside test files — '${edge.from}' ` +
-          `imports it via '${edge.specifier}'.`,
+          `Only align's audited execFile-only rails (${[...CHILD_PROCESS_ALLOWED_FILES].join(', ')}) ` +
+          `may import node:child_process outside test files — '${edge.from}' imports it via '${edge.specifier}'.`,
       });
     }
     return violations;
@@ -107,6 +113,7 @@ export default defineProject({
     pluginTypescript: 'packages/plugin-typescript/**',
     cli: 'packages/cli/**',
     agent: 'packages/agent/**',
+    createAlign: 'packages/create-align/**',
   },
   rules: (c) => [
     c.arch.noCycles(),
@@ -122,12 +129,16 @@ export default defineProject({
       .layer(c.agent)
       .canOnlyDependOn(c.core)
       .because('@spikedpunch/align-agent (Stage 4 BYOK fix loop, ADR 010) depends only on @spikedpunch/align-core + @anthropic-ai/sdk — it never imports plugin-typescript or cli; the CLI composition root wires concrete effects (git, fs, the TS scanner) into it, not the reverse (IMPLEMENTATION_PLAN.md Stage 4).'),
+    c.arch
+      .component(c.createAlign)
+      .isIsolated()
+      .because('@spikedpunch/create-align (`pnpm create @spikedpunch/align`) bootstraps align into a target repo by shelling out to the package manager and the freshly-installed align binary — it imports nothing from core/plugin-typescript/cli/agent, and nothing in this repo imports it back, a true leaf package (rule of three: install logic lives only here, scaffolding logic only in cli/init).'),
     c.custom
       .host('typesLayerIsLeaf')
       .because("packages/core/src/types/ is align's foundation layer (branded types, IR zod schema, Violation model) and must not acquire a dependency on any sibling subdirectory of packages/core/src/ — a sub-path-scoped invariant arch.layers/arch.no-dependency can't express at core's whole-component granularity (docs/proposals/rule-expansion-evaluation.md §A.2.2). Predicate registered in this file's hostRules export."),
     c.custom
       .host('no-child-process-outside-git-rails')
-      .because('node:child_process shell-outs in PRODUCTION code must stay confined to the two audited, execFile-only rails (packages/agent/src/git.ts, packages/agent/src/format.ts) — everywhere else, a child_process import is an unaudited shell-injection/supply-chain surface (test files are exempt; e2e-git.test.ts and packaging.test.ts have legitimate, reviewed test-time shell-outs). Only expressible since Stage 5\'s external-package retention gave custom.host predicates visibility into external edges (docs/proposals/rule-expansion-evaluation.md correction #2); predicate registered in this file\'s hostRules export.'),
+      .because('node:child_process shell-outs in PRODUCTION code must stay confined to the audited, execFile-only rails (packages/agent/src/git.ts, packages/agent/src/format.ts, packages/create-align/src/nodeEffects.ts) — everywhere else, a child_process import is an unaudited shell-injection/supply-chain surface (test files are exempt; e2e-git.test.ts and packaging.test.ts have legitimate, reviewed test-time shell-outs). Only expressible since Stage 5\'s external-package retention gave custom.host predicates visibility into external edges (docs/proposals/rule-expansion-evaluation.md correction #2); predicate registered in this file\'s hostRules export.'),
     // security.manifest gate dogfood (ADR 013, promoted 2026-07-12 on spike/MANIFEST_PROBE_REPORT.md
     // probe evidence): align adopts its own two rules. `newDependencyGate` fingerprints every
     // current runtime/dev dependency across root + every workspace member's package.json —

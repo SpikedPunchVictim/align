@@ -1,11 +1,19 @@
 # Releasing align to npm
 
-align publishes four packages, versioned **in lockstep** (all four always share one version):
+align publishes five packages, versioned **in lockstep** (all five always share one version):
 
 - `@spikedpunch/align-core`
 - `@spikedpunch/align-plugin-typescript`
 - `@spikedpunch/align-agent`
 - `@spikedpunch/align-cli`
+- `@spikedpunch/create-align`
+
+`@spikedpunch/create-align` is the primary consumer onboarding path — `pnpm create @spikedpunch/align`
+(equivalently `npm init @spikedpunch/align` / `yarn create @spikedpunch/align`) installs
+`@spikedpunch/align-cli` + `@spikedpunch/align-core` as local devDependencies of the target repo,
+pinned to `create-align`'s own version, then delegates to `align init`. Keeping it in lockstep with
+the other four is what makes that pin correct on every release — a stale `create-align` would
+install a stale `align-cli`/`align-core` pair forever.
 
 There are two flows: a **one-time local bootstrap** (required before CI can ever publish), and the
 **routine tagged release** (CI does the work). Read the bootstrap section first — it is not
@@ -22,8 +30,8 @@ means **the package must already exist before you can register CI as its publish
 
 So the order is fixed:
 
-1. Publish `0.1.0` of all four packages **from your machine** (authenticated as you).
-2. Register this repo's `release.yml` as a Trusted Publisher on each of the four now-existing packages.
+1. Publish `0.1.0` of all five packages **from your machine** (authenticated as you).
+2. Register this repo's `release.yml` as a Trusted Publisher on each of the five now-existing packages.
 3. From then on, every release is a `git tag` — CI publishes tokenlessly with provenance.
 
 ---
@@ -68,13 +76,13 @@ Notes:
 - If pnpm complains about the git branch/tree state during a deliberate local publish, add
   `--no-git-checks`.
 
-Verify all four appear at `https://www.npmjs.com/package/@spikedpunch/align-cli` (and the other three).
+Verify all five appear at `https://www.npmjs.com/package/@spikedpunch/align-cli` (and the other four).
 
 ---
 
 ## Step 2 — Register CI as a Trusted Publisher (one time, per package)
 
-For **each** of the four packages, on npmjs.com:
+For **each** of the five packages, on npmjs.com:
 
 1. Go to the package → **Settings** → **Publishing access** (a.k.a. *Trusted Publisher*).
 2. Add a GitHub Actions publisher with these fields:
@@ -84,7 +92,7 @@ For **each** of the four packages, on npmjs.com:
    - **Environment**: leave blank (the workflow does not use a GitHub Environment).
 3. Save.
 
-Once all four are registered, CI can publish without any stored npm credentials.
+Once all five are registered, CI can publish without any stored npm credentials.
 
 > If you later want to *require* a review gate before publishing, add an `environment:` to the
 > `release` job in `release.yml` and set the same environment name in each package's trusted-publisher
@@ -95,7 +103,7 @@ Once all four are registered, CI can publish without any stored npm credentials.
 ## Step 3 — Routine release (every version after bootstrap)
 
 ```bash
-pnpm release:version 0.2.0          # writes 0.2.0 into all four package.json files
+pnpm release:version 0.2.0          # writes 0.2.0 into all five package.json files
 pnpm install --lockfile-only        # refresh pnpm-lock.yaml to match
 git commit -am "release: v0.2.0"
 git tag v0.2.0
@@ -145,6 +153,6 @@ of a long-lived secret you should rotate periodically. You can migrate back to O
 | --- | --- |
 | `402 Payment Required` on first publish | Scoped packages default to private. Ensure `publishConfig.access: public` (already set in every package.json) and pass `--access public`. |
 | `workspace:*` shows up on the published package | You used `npm publish` instead of `pnpm publish`. Always publish via pnpm. |
-| CLI installs but its deps 404 | A package published out of order, or one of the four failed mid-run. `pnpm -r publish` handles ordering; re-run it — already-published versions are skipped. |
+| CLI installs but its deps 404 | A package published out of order, or one of the five failed mid-run. `pnpm -r publish` handles ordering; re-run it — already-published versions are skipped. |
 | Release workflow auth error | See *Fallback: token-based publishing* above. |
 | `You cannot publish over the previously published versions` | The version already exists. Bump with `pnpm release:version` and re-tag. |

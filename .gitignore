@@ -9,3 +9,6 @@ spike/out/
 *.tsbuildinfo
 .DS_Store
 coverage/
+
+# npm pack artifacts (RELEASING.md inspection step)
+*.tgz

@@ -3,8 +3,10 @@
 //
 // Internal deps use the `workspace:*` protocol, which pnpm rewrites to the
 // concrete version at publish time — so there is nothing else to update here.
-// This script only touches the four publishable packages, never the private
-// monorepo root.
+// This script only touches the five publishable packages, never the private
+// monorepo root. `create-align` (packages/create-align) reads its OWN version
+// at runtime (never hardcoded) to pin the align-cli/align-core devDependencies
+// it installs, so keeping it in lockstep here is what makes that pin correct.
 //
 //   node scripts/bump-version.mjs 0.2.0      (or: pnpm release:version 0.2.0)
 
@@ -19,7 +21,7 @@ if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
 }
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const packages = ['core', 'plugin-typescript', 'cli', 'agent'];
+const packages = ['core', 'plugin-typescript', 'cli', 'agent', 'create-align'];
 
 for (const name of packages) {
   const path = join(root, 'packages', name, 'package.json');
@@ -30,7 +32,7 @@ for (const name of packages) {
   console.log(`  packages/${name}: ${prev} -> ${version}`);
 }
 
-console.log(`\nAll four packages set to ${version}. Next steps:`);
+console.log(`\nAll ${packages.length} packages set to ${version}. Next steps:`);
 console.log(`  pnpm install --lockfile-only       # refresh pnpm-lock.yaml`);
 console.log(`  git commit -am "release: v${version}"`);
 console.log(`  git tag v${version} && git push --follow-tags   # CI publishes on the tag`);
