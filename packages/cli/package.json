@@ -1,6 +1,6 @@
 {
   "name": "@spikedpunch/align-cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "align CLI — an architecture-conformance verification oracle for LLM coding agents, with a built-in MCP server.",
   "license": "MIT",
   "repository": {
