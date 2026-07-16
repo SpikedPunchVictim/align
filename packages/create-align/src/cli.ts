@@ -18,7 +18,7 @@ export interface ParsedCreateAlignArgs {
 
 export type ParseArgsResult = { readonly ok: true; readonly args: ParsedCreateAlignArgs } | { readonly ok: false; readonly error: string };
 
-const VALID_PACKAGE_MANAGERS: ReadonlySet<string> = new Set(['pnpm', 'npm', 'yarn']);
+const VALID_PACKAGE_MANAGERS: ReadonlySet<string> = new Set(['pnpm', 'npm', 'yarn', 'bun']);
 
 function isValidPackageManager(value: string): value is PackageManager {
   return VALID_PACKAGE_MANAGERS.has(value);

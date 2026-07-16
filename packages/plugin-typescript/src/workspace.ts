@@ -14,17 +14,47 @@ export interface WorkspacePackage {
   readonly dir: string; // repo-relative, trailing slash, forward slashes
 }
 
-export function loadWorkspacePackages(rootDir: string): WorkspacePackage[] {
-  const wsPath = path.join(rootDir, 'pnpm-workspace.yaml');
-  if (!fs.existsSync(wsPath)) return [];
+const asStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((p): p is string => typeof p === 'string') : [];
 
-  let patterns: string[];
-  try {
-    const doc = parseYaml(fs.readFileSync(wsPath, 'utf8')) as { packages?: unknown } | undefined;
-    patterns = Array.isArray(doc?.packages) ? doc.packages.filter((p): p is string => typeof p === 'string') : [];
-  } catch {
-    return []; // malformed workspace file: read-only survey posture, don't crash the scan
+/**
+ * The workspace glob-pattern list, read from whichever package manager's declaration exists:
+ * pnpm's `pnpm-workspace.yaml` `packages:` (authoritative for pnpm — package.json `workspaces` is
+ * ignored by pnpm, so it wins when both are present), or npm/yarn/bun's `package.json`
+ * `workspaces` field (array form, or yarn-classic's `{ packages: [...] }` object form). The glob
+ * vocabulary is identical across all four, so `expandPattern` consumes the result unchanged. Deno
+ * (`deno.json`'s `workspace` field) is intentionally not read here — see the PM-support notes.
+ * Read-only survey posture: a malformed file yields `[]`, never a thrown scan.
+ */
+export function readWorkspaceGlobs(rootDir: string): string[] {
+  const pnpmWsPath = path.join(rootDir, 'pnpm-workspace.yaml');
+  if (fs.existsSync(pnpmWsPath)) {
+    try {
+      const doc = parseYaml(fs.readFileSync(pnpmWsPath, 'utf8')) as { packages?: unknown } | undefined;
+      const patterns = asStringArray(doc?.packages);
+      if (patterns.length > 0) return patterns;
+    } catch {
+      // fall through to package.json — a malformed pnpm-workspace.yaml shouldn't hide a workspaces field
+    }
   }
+
+  const pkgPath = path.join(rootDir, 'package.json');
+  if (fs.existsSync(pkgPath)) {
+    try {
+      const ws = (JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { workspaces?: unknown }).workspaces;
+      if (Array.isArray(ws)) return asStringArray(ws);
+      if (ws !== null && typeof ws === 'object') return asStringArray((ws as { packages?: unknown }).packages);
+    } catch {
+      // malformed package.json: read-only survey posture
+    }
+  }
+
+  return [];
+}
+
+export function loadWorkspacePackages(rootDir: string): WorkspacePackage[] {
+  const patterns = readWorkspaceGlobs(rootDir);
+  if (patterns.length === 0) return [];
 
   const dirs = new Set<string>();
   for (const pattern of patterns) {

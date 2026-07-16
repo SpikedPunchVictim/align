@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { loadWorkspacePackages } from '@spikedpunch/align-plugin-typescript';
+import { loadWorkspacePackages, readWorkspaceGlobs } from '@spikedpunch/align-plugin-typescript';
 
 export interface DetectedComponent {
   readonly name: string;
@@ -9,27 +9,23 @@ export interface DetectedComponent {
 
 /**
  * Mechanical component auto-detection for `align init`. Groups by the *fixed (non-wildcard)
- * prefix* of each `pnpm-workspace.yaml` glob pattern rather than one component per package — a
+ * prefix* of each workspace glob pattern rather than one component per package — a
  * generically-implementable heuristic that keeps the starter component count small without
  * requiring the hand-curated judgment calls the spike applied to kluster (documented limitation:
  * less semantically precise than a human-reviewed component map, but zero-config and directionally
- * correct for the common "packages/*, application/*" monorepo shape).
+ * correct for the common "packages/*, application/*" monorepo shape). Workspace globs come from
+ * whichever package manager declared them (pnpm-workspace.yaml or package.json `workspaces`), read
+ * once by the shared `readWorkspaceGlobs` — no PM-specific parsing duplicated here.
  */
 export function detectComponents(rootDir: string): DetectedComponent[] {
-  const wsPath = path.join(rootDir, 'pnpm-workspace.yaml');
-  if (fs.existsSync(wsPath)) {
-    return detectFromWorkspaceFile(rootDir);
-  }
+  const patterns = readWorkspaceGlobs(rootDir);
+  if (patterns.length > 0) return detectFromWorkspaceGlobs(patterns);
   const fromDirs = detectFromTopLevelPackageDirs(rootDir);
   if (fromDirs.length > 0) return fromDirs;
   return detectSinglePackage(rootDir);
 }
 
-function detectFromWorkspaceFile(rootDir: string): DetectedComponent[] {
-  // Re-derive the raw glob pattern list the same way loadWorkspacePackages does, but we only
-  // need the *patterns* here, not the resolved packages.
-  const wsPath = path.join(rootDir, 'pnpm-workspace.yaml');
-  const patterns = readWorkspacePatterns(wsPath);
+function detectFromWorkspaceGlobs(patterns: readonly string[]): DetectedComponent[] {
   const prefixes = new Set<string>();
   for (const pattern of patterns) prefixes.add(fixedPrefix(pattern));
 
@@ -38,35 +34,6 @@ function detectFromWorkspaceFile(rootDir: string): DetectedComponent[] {
     .map((prefix) => ({ name: sanitizeName(lastSegment(prefix)), pattern: `${prefix}/**` }));
 
   return dedupeNames(components);
-}
-
-function readWorkspacePatterns(wsPath: string): string[] {
-  try {
-    // Lightweight, dependency-free read of the `packages:` list — avoids importing the `yaml`
-    // package here too; a regex-free approach would need full YAML parsing, so we defer to a
-    // minimal line-based reader sufficient for the simple list shape pnpm-workspace.yaml uses.
-    const text = fs.readFileSync(wsPath, 'utf8');
-    const lines = text.split('\n');
-    const patterns: string[] = [];
-    let inPackages = false;
-    for (const line of lines) {
-      if (/^packages:\s*$/.test(line)) {
-        inPackages = true;
-        continue;
-      }
-      if (inPackages) {
-        const m = /^\s*-\s*['"]?([^'"]+)['"]?\s*$/.exec(line);
-        if (m?.[1] !== undefined) {
-          patterns.push(m[1]);
-          continue;
-        }
-        if (/^\S/.test(line)) break; // dedented to a new top-level key
-      }
-    }
-    return patterns;
-  } catch {
-    return [];
-  }
 }
 
 function fixedPrefix(pattern: string): string {

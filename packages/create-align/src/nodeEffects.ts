@@ -53,6 +53,8 @@ export function createNodeEffects(cwd: string): CreateAlignEffects {
     detectLockfiles: (): DetectedLockfiles => ({
       hasPnpmLock: fs.existsSync(path.join(cwd, 'pnpm-lock.yaml')),
       hasYarnLock: fs.existsSync(path.join(cwd, 'yarn.lock')),
+      // bun.lock (text, current default) or bun.lockb (binary, older)
+      hasBunLock: fs.existsSync(path.join(cwd, 'bun.lock')) || fs.existsSync(path.join(cwd, 'bun.lockb')),
       hasPackageLock: fs.existsSync(path.join(cwd, 'package-lock.json')),
     }),
 

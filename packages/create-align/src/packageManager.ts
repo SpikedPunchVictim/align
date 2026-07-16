@@ -6,7 +6,7 @@
  * command.
  */
 
-export type PackageManager = 'pnpm' | 'npm' | 'yarn';
+export type PackageManager = 'pnpm' | 'npm' | 'yarn' | 'bun';
 
 export interface DetectPackageManagerInput {
   /** The `packageManager` field from the target repo's package.json, e.g. `"pnpm@9.1.0"` —
@@ -14,12 +14,14 @@ export interface DetectPackageManagerInput {
   readonly packageManagerField?: string;
   readonly hasPnpmLock: boolean;
   readonly hasYarnLock: boolean;
+  readonly hasBunLock: boolean;
   readonly hasPackageLock: boolean;
 }
 
 const FIELD_PREFIXES: ReadonlyArray<readonly [prefix: string, pm: PackageManager]> = [
   ['pnpm@', 'pnpm'],
   ['yarn@', 'yarn'],
+  ['bun@', 'bun'],
   ['npm@', 'npm'],
 ];
 
@@ -36,6 +38,7 @@ export function detectPackageManager(input: DetectPackageManagerInput): PackageM
   }
   if (input.hasPnpmLock) return 'pnpm';
   if (input.hasYarnLock) return 'yarn';
+  if (input.hasBunLock) return 'bun';
   if (input.hasPackageLock) return 'npm';
   return 'npm';
 }
@@ -93,6 +96,10 @@ export function buildAddDevCommand(
       // yarn CLASSIC (v1) needs `-W` at a workspace root; yarn berry (v2+) neither needs nor accepts
       // it — yarn support is best-effort (see packages/create-align/README.md).
       return { command: 'yarn', args: ['add', '-D', ...(root ? ['-W'] : []), ...specs] };
+    case 'bun':
+      // bun uses `-d` for devDependencies and adds to the root package.json without a workspace-root
+      // guard (no -w/-W equivalent). The install command is unit-tested but not run end-to-end here.
+      return { command: 'bun', args: ['add', '-d', ...specs] };
     default: {
       const exhaustive: never = pm;
       throw new Error(`unhandled package manager: ${String(exhaustive)}`);

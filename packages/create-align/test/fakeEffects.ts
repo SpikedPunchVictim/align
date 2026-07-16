@@ -11,7 +11,7 @@ export interface FakeEffectsConfig {
   readonly initExitCode?: number;
 }
 
-const DEFAULT_LOCKFILES: DetectedLockfiles = { hasPnpmLock: false, hasYarnLock: false, hasPackageLock: false };
+const DEFAULT_LOCKFILES: DetectedLockfiles = { hasPnpmLock: false, hasYarnLock: false, hasBunLock: false, hasPackageLock: false };
 const DEFAULT_WORKSPACE: WorkspaceFacts = { hasPnpmWorkspaceYaml: false, hasWorkspacesField: false };
 
 /** A fully in-memory `CreateAlignEffects` fake — no real fs, no real network, no real child
