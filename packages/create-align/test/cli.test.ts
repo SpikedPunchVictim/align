@@ -28,7 +28,8 @@ describe('parseCreateAlignArgs', () => {
   });
 
   it('rejects an invalid --pm value', () => {
-    const result = parseCreateAlignArgs(['--pm', 'bun']);
+    // 'deno' is intentionally NOT a supported --pm value yet (deferred — see PM-support notes).
+    const result = parseCreateAlignArgs(['--pm', 'deno']);
     expect(result.ok).toBe(false);
   });
 

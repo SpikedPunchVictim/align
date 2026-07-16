@@ -9,9 +9,10 @@ Implements [`@spikedpunch/align-core`](https://www.npmjs.com/package/@spikedpunc
 
 - a scan-and-discard dependency-graph builder over the TypeScript compiler API,
 - nearest-`tsconfig` resolution,
-- a pnpm-workspace-name resolver with **realpath** classification of inter-package edges (path
-  substring matching silently misclassifies workspace-symlinked edges as external), and
-- the `package.json`/`pnpm-lock.yaml` manifest scanner behind align's security gate.
+- a workspace-name resolver (reads `pnpm-workspace.yaml` **or** npm/yarn/bun's `package.json`
+  `workspaces` field) with **realpath** classification of inter-package edges (path substring
+  matching silently misclassifies workspace-symlinked edges as external), and
+- the `package.json`/lockfile manifest scanner behind align's security gate.
 
 Depends on `typescript` and `yaml`. `@spikedpunch/align-core` never imports this package —
 dependency direction is `core ← plugin`, enforced by align's own dogfooded rules.

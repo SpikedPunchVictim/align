@@ -13,9 +13,9 @@ pnpm create @spikedpunch/align
 
 1. Requires an existing `package.json` in the current directory (new-project scaffolding is out of
    scope — this augments a repo you already have).
-2. Detects your package manager (`pnpm` / `npm` / `yarn`) from the `packageManager` field in
+2. Detects your package manager (`pnpm` / `npm` / `yarn` / `bun`) from the `packageManager` field in
    `package.json`, falling back to lockfile presence (`pnpm-lock.yaml` / `yarn.lock` /
-   `package-lock.json`), defaulting to `npm`.
+   `bun.lock`/`bun.lockb` / `package-lock.json`), defaulting to `npm`.
 3. Installs `@spikedpunch/align-cli` and `@spikedpunch/align-core` as devDependencies, pinned to
    **this package's own version** (lockstep — e.g. `@spikedpunch/align-cli@0.1.1`). No
    confirmation prompt — running the install immediately is the point of the command.
@@ -29,7 +29,7 @@ pnpm create @spikedpunch/align
 | Flag | Meaning |
 | --- | --- |
 | `--yes`, `-y` | Fully non-interactive. Also forwarded to `align init`, which uses it to default its own script-offer prompt to yes (baseline seeding still requires `--accept-existing` explicitly — consent to tolerate existing debt is never inferred from `--yes` alone). |
-| `--pm <pnpm\|npm\|yarn>` | Override package-manager detection. |
+| `--pm <pnpm\|npm\|yarn\|bun>` | Override package-manager detection. |
 | anything else | Forwarded verbatim to `align init` — e.g. `--greenfield`, `--accept-existing`. |
 
 ```bash
@@ -42,11 +42,13 @@ pnpm create @spikedpunch/align --pm npm
 
 In a workspace root, `create-align` installs the two devDependencies at the root — where `align
 init` writes `align.config.ts`, so it can resolve `@spikedpunch/align-core`. It detects a workspace
-root (a `pnpm-workspace.yaml`, or a `workspaces` field in `package.json`) and adds the flag the
-package manager requires: **pnpm** `-w` (otherwise `ERR_PNPM_ADDING_TO_ROOT`), **yarn classic** `-W`.
-**npm** needs no flag. **yarn berry (v2+)** is unverified — it neither needs nor accepts `-W`; if
-`create-align` fails on a yarn-berry workspace, install the two devDependencies by hand and run
-`yarn align init`.
+root (a `pnpm-workspace.yaml`, or a `workspaces` field in `package.json` — npm, yarn, and bun all
+use the latter) and adds the flag the package manager requires: **pnpm** `-w` (otherwise
+`ERR_PNPM_ADDING_TO_ROOT`), **yarn classic** `-W`. **npm** and **bun** need no flag. **yarn berry
+(v2+)** is unverified — it neither needs nor accepts `-W`; if `create-align` fails on a yarn-berry
+workspace, install the two devDependencies by hand and run `yarn align init`. Detection markers:
+`pnpm-lock.yaml`, `yarn.lock`, `bun.lock`/`bun.lockb`, `package-lock.json`, or the `packageManager`
+field.
 
 ## Zero runtime dependencies
 

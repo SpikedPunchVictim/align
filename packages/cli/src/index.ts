@@ -1,6 +1,11 @@
 #!/usr/bin/env node
+import { installWarningFilter } from './suppress-warnings.js';
 import { buildProgram } from './program.js';
 import { AlignCoreMissingError } from './errors.js';
+
+// Silence Node's benign MODULE_TYPELESS_PACKAGE_JSON note when loading align.config.ts from a target
+// repo without "type":"module" — before any command (and its config load) runs.
+installWarningFilter();
 
 try {
   await buildProgram().parseAsync(process.argv);

@@ -13,7 +13,7 @@ describe('runCreateAlign', () => {
   });
 
   it('installs pinned devDependencies via the detected package manager, THEN runs align init, in order', async () => {
-    const { effects, calls } = createFakeEffects({ lockfiles: { hasPnpmLock: true, hasYarnLock: false, hasPackageLock: false }, ownVersion: '0.1.1' });
+    const { effects, calls } = createFakeEffects({ lockfiles: { hasPnpmLock: true, hasYarnLock: false, hasBunLock: false, hasPackageLock: false }, ownVersion: '0.1.1' });
     const result = await runCreateAlign(effects, { initArgs: [] });
     expect(result).toEqual({ status: 'done', exitCode: 0, pm: 'pnpm' });
     expect(calls).toEqual(['install:pnpm:@spikedpunch/align-cli@0.1.1,@spikedpunch/align-core@0.1.1', 'init:']);
@@ -21,7 +21,7 @@ describe('runCreateAlign', () => {
 
   it('passes workspaceRoot to installDevDeps in a pnpm workspace (the kluster ERR_PNPM_ADDING_TO_ROOT case)', async () => {
     const { effects, installDevDeps, logs } = createFakeEffects({
-      lockfiles: { hasPnpmLock: true, hasYarnLock: false, hasPackageLock: false },
+      lockfiles: { hasPnpmLock: true, hasYarnLock: false, hasBunLock: false, hasPackageLock: false },
       workspace: { hasPnpmWorkspaceYaml: true, hasWorkspacesField: false },
       ownVersion: '0.1.1',
     });
@@ -36,14 +36,14 @@ describe('runCreateAlign', () => {
 
   it('leaves workspaceRoot false in a non-workspace repo', async () => {
     const { effects, installDevDeps } = createFakeEffects({
-      lockfiles: { hasPnpmLock: true, hasYarnLock: false, hasPackageLock: false },
+      lockfiles: { hasPnpmLock: true, hasYarnLock: false, hasBunLock: false, hasPackageLock: false },
     });
     await runCreateAlign(effects, { initArgs: [] });
     expect(installDevDeps).toHaveBeenCalledWith('pnpm', expect.any(Array), { workspaceRoot: false });
   });
 
   it('respects an explicit --pm override even when a different lockfile is present', async () => {
-    const { effects, calls } = createFakeEffects({ lockfiles: { hasPnpmLock: true, hasYarnLock: false, hasPackageLock: false } });
+    const { effects, calls } = createFakeEffects({ lockfiles: { hasPnpmLock: true, hasYarnLock: false, hasBunLock: false, hasPackageLock: false } });
     const result = await runCreateAlign(effects, { pmOverride: 'npm', initArgs: [] });
     expect(result.status).toBe('done');
     expect(result.status === 'done' && result.pm).toBe('npm');
@@ -59,7 +59,7 @@ describe('runCreateAlign', () => {
   it('detects packageManager field over lockfile presence', async () => {
     const { effects, calls } = createFakeEffects({
       packageManagerField: 'yarn@4.1.0',
-      lockfiles: { hasPnpmLock: true, hasYarnLock: false, hasPackageLock: false },
+      lockfiles: { hasPnpmLock: true, hasYarnLock: false, hasBunLock: false, hasPackageLock: false },
     });
     await runCreateAlign(effects, { initArgs: [] });
     expect(calls[0]).toMatch(/^install:yarn:/);

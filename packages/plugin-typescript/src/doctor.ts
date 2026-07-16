@@ -8,7 +8,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import ts from 'typescript';
-import { loadWorkspacePackages } from './workspace.js';
+import { loadWorkspacePackages, readWorkspaceGlobs } from './workspace.js';
 
 const EXCLUDED_DIR_NAMES = new Set([
   'node_modules',
@@ -131,14 +131,15 @@ export interface OrphanedPackage {
 }
 
 /**
- * Packages on disk (a directory with a `package.json`) that no `pnpm-workspace.yaml` glob covers
- * (spike finding: kluster had 13 workspace-orphaned `@fold/*` packages). Returns `[]` when there's
- * no `pnpm-workspace.yaml` at all — the "orphaned" concept only applies to declared pnpm
- * workspaces, not every repo with a package.json.
+ * Packages on disk (a directory with a `package.json`) that no workspace glob covers (spike
+ * finding: kluster had 13 workspace-orphaned `@fold/*` packages). Returns `[]` when the repo
+ * declares no workspace at all (pnpm `pnpm-workspace.yaml` or npm/yarn/bun `package.json`
+ * `workspaces`) — the "orphaned" concept only applies to declared workspaces, not every repo with
+ * a package.json.
  */
 export function findOrphanedPackages(rootDir: string, excludes: readonly string[] = []): OrphanedPackage[] {
+  if (readWorkspaceGlobs(rootDir).length === 0) return [];
   const covered = new Set(loadWorkspacePackages(rootDir).map((p) => p.dir));
-  if (!fs.existsSync(path.join(rootDir, 'pnpm-workspace.yaml'))) return [];
 
   const orphaned: OrphanedPackage[] = [];
   walkDirs(rootDir, excludes, (absDir) => {

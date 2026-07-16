@@ -11,6 +11,7 @@ import type { PackageManager, WorkspaceFacts } from './packageManager.js';
 export interface DetectedLockfiles {
   readonly hasPnpmLock: boolean;
   readonly hasYarnLock: boolean;
+  readonly hasBunLock: boolean;
   readonly hasPackageLock: boolean;
 }
 
