@@ -11,7 +11,7 @@ import { evaluateManifestRule, type SecurityManifestRule } from './rules/manifes
 import { ruleCategoryOf } from './rules/rule-category.js';
 import { validateRuleComponentRefs } from './rules/component-refs.js';
 import { validateHostRules, type HostPredicateRegistry } from './rules/host-rules.js';
-import { findUngroundedComponents, validateClassifiedComponents } from './components/registry.js';
+import { findUngroundedComponents, validateClassifiedComponents, validateSelectorSyntax } from './components/registry.js';
 
 /** No predicates registered — the default for callers that don't inject one (most existing tests
  * exercise portable `arch.*` kinds only; a real deployment always gets a real registry from the
@@ -118,6 +118,10 @@ export class GateOrchestrator {
     //    `hostRules` export gets the empty default, same as before registration existed.
     const classifiedComponents = new Set(graph.nodes.map((n) => n.component));
     try {
+      // Selector-syntax lint first: an unsupported glob (character class, extglob, nested/range
+      // brace, leading `!`) fails here with a precise message, before the classification-based
+      // checks below could report it as a confusing zero-match — and regardless of `empty` policy.
+      validateSelectorSyntax(this.ruleset.components);
       validateClassifiedComponents(this.ruleset.components, classifiedComponents);
       validateRuleComponentRefs(this.ruleset.rules, this.ruleset.components);
       validateHostRules(this.ruleset.rules, new Set(this.hostPredicates.keys()));

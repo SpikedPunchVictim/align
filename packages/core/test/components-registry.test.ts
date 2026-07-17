@@ -5,6 +5,7 @@ import {
   findUngroundedComponents,
   validateClassifiedComponents,
   validateComponents,
+  validateSelectorSyntax,
 } from '../src/components/registry.js';
 import { toComponentName, toRepoRelativePath } from '../src/types/branded.js';
 import type { ComponentDefinitionIR, EmptyPolicy } from '../src/types/ir.js';
@@ -13,6 +14,24 @@ const glob = (patterns: string[], empty: EmptyPolicy = 'fail'): ComponentDefinit
   name: '',
   selector: { kind: 'glob', patterns },
   empty,
+});
+
+describe('validateSelectorSyntax', () => {
+  it('passes a component using the supported glob dialect, including brace expansion', () => {
+    const components = { [toComponentName('providers')]: glob(['src/llm-{anthropic,ollama,openai}/**']) };
+    expect(() => validateSelectorSyntax(components)).not.toThrow();
+  });
+
+  it('throws an actionable ComponentValidationError on unsupported selector syntax', () => {
+    const components = { [toComponentName('providers')]: glob(['src/llm-[ao]*/**']) };
+    expect(() => validateSelectorSyntax(components)).toThrow(ComponentValidationError);
+    expect(() => validateSelectorSyntax(components)).toThrow(/glob dialect does not support/);
+  });
+
+  it('lints regardless of empty policy — an empty: allow component cannot hide bad syntax', () => {
+    const components = { [toComponentName('providers')]: glob(['!src/**'], 'allow') };
+    expect(() => validateSelectorSyntax(components)).toThrow(/negated/);
+  });
 });
 
 describe('classifyFile', () => {

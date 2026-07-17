@@ -8,6 +8,7 @@ import { runDoctor } from './commands/doctor.js';
 import { runBuild, DEFAULT_DOC_PATH } from './commands/build.js';
 import { runAgentCommand } from './commands/agent.js';
 import { runSkill, type SkillTopic } from './commands/skill.js';
+import { runDocs } from './commands/docs.js';
 import { runTelemetryReport, DEFAULT_TELEMETRY_FILE } from './commands/telemetry.js';
 import { startMcpServer } from './mcp/server.js';
 import { ALIGN_VERSION, resolveTelemetryPreConfig } from './telemetry/index.js';
@@ -254,6 +255,19 @@ export function buildProgram(): Command {
         return;
       }
       process.exitCode = await runSkill(process.cwd(), { topic, install: opts.install }, program);
+    });
+
+  program
+    .command('docs [topic]')
+    .description(
+      "Print align's docs for THIS installed version. `align docs` lists topics; `align docs " +
+        '<topic>` prints one (e.g. config, selectors, baseline, greenfield, security, untrusted, ' +
+        'agent, ci, trust). Conceptual topics are version-matched prose bundled in the package; ' +
+        'rule/verb/gate/command topics are generated live from the binary. For the full LLM ' +
+        'authoring/fix-loop guide, see `align skill`.',
+    )
+    .action((topic: string | undefined) => {
+      process.exitCode = runDocs(program, topic !== undefined ? { topic } : {});
     });
 
   program

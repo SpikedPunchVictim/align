@@ -11,7 +11,7 @@ import { renderDslVerbsSection } from './dsl-verbs.js';
 import { renderBulletGrammarSection } from './bullet-grammar.js';
 import { renderGatesSection } from './gates.js';
 import { renderCliInventorySection } from './cli-inventory.js';
-import { renderFixLoopProtocolSection, renderDocAuthoringSection, renderBaselineConsentSection, renderMcpPayloadReferenceSection } from './static-sections.js';
+import { renderFixLoopProtocolSection, renderDocAuthoringSection, renderBaselineConsentSection, renderMcpPayloadReferenceSection, renderComponentSelectorSection } from './static-sections.js';
 
 export type SkillTopic = 'authoring' | 'fixing' | 'all';
 
@@ -44,6 +44,8 @@ export function renderSkillMarkdown(topic: SkillTopic, program: Command): string
       ),
       '',
       section('DSL verbs', 'The authoring surface (`defineProject`\'s `c.*` factories), introspected off the live builder objects:\n\n' + renderDslVerbsSection()),
+      '',
+      section('Component selectors: the glob dialect', renderComponentSelectorSection()),
       '',
       section(
         'Tier-2 bullet grammar (doc authoring)',

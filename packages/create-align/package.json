@@ -1,6 +1,6 @@
 {
   "name": "@spikedpunch/create-align",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Bootstrap align (architecture-conformance verification) into an existing repo: installs @spikedpunch/align-cli and @spikedpunch/align-core as local devDependencies, lockstep-pinned to this package's own version, then delegates to `align init`.",
   "license": "MIT",
   "repository": {
