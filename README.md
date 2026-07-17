@@ -246,6 +246,12 @@ later, so "why does this rule exist" has an answer attached to the rule itself i
 someone's memory or a stale PR description. That's the DX case over a plain JSON/YAML rules file:
 an IDE catches a broken selector before `align check` ever runs.
 
+**Selector glob dialect.** Component patterns use a deliberately minimal, zero-dependency glob
+matcher — `*` (one segment), `**` (any depth), `?` (one char), `{a,b,c}` brace expansion (e.g.
+`src/llm-{anthropic,ollama,openai}/**`), and literals. It is **not** full micromatch: character
+classes (`[ao]`), extglobs (`(a|b)`), `|`, and leading `!` are unsupported and **fail at config
+load with a precise error** rather than silently matching zero files.
+
 ## Architecture rules
 
 align ships four `arch.*` rule kinds:
@@ -805,6 +811,7 @@ format` before any pagination applies.
 | `align agent run [options]` | Built-in BYOK LLM fix loop (requires `ANTHROPIC_API_KEY`, or `ANTHROPIC_BASE_URL` for a compatible endpoint). |
 | `align mcp [options]` | Start the align MCP server (stdio). |
 | `align skill [options]` | Print the LLM-facing authoring/fixing guide. `--install` writes a version-stamped `.claude/skills/align/SKILL.md`. |
+| `align docs [topic]` | Print version-matched docs for the installed binary. `align docs` lists topics; `align docs <topic>` prints one (`config`, `selectors`, `baseline`, `greenfield`, `security`, `untrusted`, `agent`, `ci`, `trust`, …) — conceptual topics are bundled prose, mechanical ones are generated live. |
 | `align telemetry [options]` | Summarize `.align/telemetry.jsonl` — latency percentiles, top-firing rules, time-to-green, dead rules, friction ranking. |
 
 Gates run in a fixed priority order — `architecture > security > types > lint > format`:

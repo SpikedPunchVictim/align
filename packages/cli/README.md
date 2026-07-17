@@ -45,8 +45,14 @@ npm i -g @spikedpunch/align-cli
 ```bash
 align check     # fresh full scan; exit 0 iff green
 align init      # (re)detect components, write align.config.ts, seed the baseline
+align docs      # version-matched docs for this install; `align docs <topic>` prints one section
 align mcp       # start the stdio MCP server for a connected coding agent
 ```
+
+New to align? `align docs` lists every topic (`config`, `selectors`, `baseline`, `greenfield`,
+`security`, `untrusted`, `agent`, `ci`, `trust`, …) and prints the docs for **exactly the version you
+have installed** — no hunting for the right release's README. `align docs config` is the
+`align.config.ts` API reference.
 
 ## Your first check
 
