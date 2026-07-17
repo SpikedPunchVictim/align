@@ -1,6 +1,10 @@
 import type { ComponentName, RepoRelativePath } from '../types/branded.js';
 import type { ComponentDefinitionIR, EmptyPolicy } from '../types/ir.js';
-import { globMatch } from './glob.js';
+import { globMatch, lintGlobPattern } from './glob.js';
+
+/** One-sentence statement of align's supported glob dialect, reused in load-time error messages. */
+const SUPPORTED_GLOB_VOCABULARY =
+  '`*` (one path segment), `**` (any depth), `?` (one character), `{a,b,c}` brace expansion, and literal path segments';
 
 /** Package name -> repo-relative directory (with trailing slash), e.g. from pnpm-workspace.yaml. */
 export type WorkspacePackageIndex = ReadonlyMap<string, RepoRelativePath>;
@@ -41,6 +45,34 @@ export function classifyFile(
     if (def !== undefined && matchesSelector(file, def, workspacePackages)) return name;
   }
   return undefined;
+}
+
+/**
+ * Load-time selector-syntax lint. Runs for EVERY glob component regardless of its `empty` policy —
+ * so an `empty: 'allow'` (or `'until-populated'`) component cannot hide a selector using unsupported
+ * syntax that would otherwise silently compile to a zero-match literal and leave the component
+ * permanently ungrounded. align's glob dialect is deliberately minimal (zero-dependency core); this
+ * makes it *loudly* minimal — anything outside the dialect fails here, at the exact pattern, with an
+ * actionable message, instead of at scan time as a mysterious zero-match error.
+ */
+export function validateSelectorSyntax(
+  components: Readonly<Record<ComponentName, ComponentDefinitionIR>>,
+): void {
+  for (const name of Object.keys(components) as ComponentName[]) {
+    const def = components[name];
+    if (def === undefined || def.selector.kind !== 'glob') continue;
+    for (const pattern of def.selector.patterns) {
+      const problem = lintGlobPattern(pattern);
+      if (problem !== undefined) {
+        throw new ComponentValidationError(
+          `Component '${name}' selector '${pattern}' uses ${problem}, which align's glob dialect ` +
+            `does not support. It supports only ${SUPPORTED_GLOB_VOCABULARY} — list patterns ` +
+            `explicitly (e.g. patterns: ['llm-anthropic/**', 'llm-ollama/**']) or use a \`*\` wildcard.`,
+          name,
+        );
+      }
+    }
+  }
 }
 
 /**

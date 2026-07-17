@@ -11,6 +11,25 @@ export function renderFixLoopProtocolSection(): string {
   return FIX_LOOP_PROTOCOL.map((p) => `- **${p.summary}** ${p.detail}`).join('\n');
 }
 
+export function renderComponentSelectorSection(): string {
+  return [
+    'Component selectors in `align.config.ts` (`{ pattern: ... }` or `patterns: [...]`) match files with a',
+    'deliberately minimal, **zero-dependency glob dialect — NOT full micromatch/minimatch**. Supported:',
+    '',
+    '- `*` — one path segment',
+    '- `**` — any depth (zero or more segments)',
+    '- `?` — one character',
+    '- `{a,b,c}` — brace expansion, e.g. `src/llm-{anthropic,ollama,openai}/**`; flat only (no nesting, no `{a..z}` ranges)',
+    '- literal path segments',
+    '',
+    'NOT supported: character classes (`[ao]`), extglobs (`(a|b)`), `|` alternation, leading `!` negation. An',
+    'unsupported selector **fails at config load with a precise error** — it does not silently match zero files.',
+    'A component matching zero files is a hard error by default (a stale selector must never pass as green); set',
+    "`empty: 'until-populated'` (greenfield — auto-arms once files land) or `empty: 'allow'` (permanent) only for",
+    'a component that is intentionally empty right now — never to paper over an unsupported or stale selector.',
+  ].join('\n');
+}
+
 export function renderDocAuthoringSection(): string {
   return [
     'A markdown architecture/best-practices doc is a buildable intent source (`align build`, ADR 011) — it',
