@@ -1,6 +1,6 @@
 {
   "name": "@spikedpunch/align-plugin-typescript",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "TypeScript/JavaScript dependency-graph plugin for align — ts-morph-based scanning and language adapters.",
   "license": "MIT",
   "repository": {
