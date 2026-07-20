@@ -103,6 +103,26 @@ describe('TypeScriptScanner — pnpm-workspace fixture (ADR 004 non-negotiable)'
   });
 });
 
+describe('TypeScriptScanner — isBarrelReexport bit (ADR 016 public-surface inference)', () => {
+  it('marks a bare `export * from` edge true and a named `export { a, b } from` edge false/absent', async () => {
+    const scanner = new TypeScriptScanner();
+    const graph = await scanner.scan({ rootDir: path.join(fixturesDir, 'exports'), components: allComponent(), excludes: [] });
+    const reexportEdges = graph.edges.filter((e) => e.from === 'src/reexport.ts');
+    expect(reexportEdges).toHaveLength(2);
+
+    const toNamed = reexportEdges.find((e) => e.to === 'src/named.ts');
+    const toDefault = reexportEdges.find((e) => e.to === 'src/default.ts');
+    expect(toNamed?.isBarrelReexport).not.toBe(true);
+    expect(toDefault?.isBarrelReexport).toBe(true);
+  });
+
+  it('leaves isBarrelReexport unset on plain import edges', async () => {
+    const scanner = new TypeScriptScanner();
+    const graph = await scanner.scan({ rootDir: path.join(fixturesDir, 'clean'), components: allComponent(), excludes: [] });
+    expect(graph.edges[0]?.isBarrelReexport).toBeUndefined();
+  });
+});
+
 describe('TypeScriptScanner — extension coverage (.mjs/.cjs/.mts/.cts, Stage 5 infra)', () => {
   it('scans all four extensions as nodes and resolves same-flavor relative imports as edges', async () => {
     const scanner = new TypeScriptScanner();

@@ -1,0 +1,4 @@
+{
+  "name": "@fixture/types-field",
+  "types": "./dist/index.d.ts"
+}
