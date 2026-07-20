@@ -30,6 +30,19 @@ export interface DependencyGraphEdge {
   // The scanner already holds file text in memory when it extracts the edge; capturing the line
   // here costs nothing extra and keeps evaluators pure.
   readonly snippet: string;
+  // DEVIATION from docs/core-interfaces.md, added for ADR 016 (public-surface inference):
+  // `kind: 'reexport' | 'type-only'` alone can't tell `export { foo } from './x'` (a NAMED
+  // re-export, already fully resolved into the FROM file's own `DependencyGraphNode.exports` by
+  // `exports.ts` — no further resolution needed) apart from a bare `export * from './x'` /
+  // `export type * from './x'` (a barrel hop whose contents are invisible to `exports.ts` by
+  // design and must be recursively resolved by `inferSurface.ts`'s transitive walk). Both produce
+  // an identically-shaped edge today. `true` iff the export declaration had no named/namespace
+  // export clause (`exportClause === undefined`, exports.ts:44's exact bare-star check);
+  // `undefined` for every 'import'/'dynamic' edge, where the distinction doesn't apply. Optional
+  // so every existing evaluator/fixture that only reads `kind` is unaffected by construction —
+  // same "separate, additive field" doctrine already applied to `snippet` above and to the
+  // external-node retention amendment.
+  readonly isBarrelReexport?: boolean;
 }
 
 // External-package graph members (Stage 5 infra, docs/proposals/rule-expansion-evaluation.md's
