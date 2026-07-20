@@ -613,6 +613,90 @@ vacuously passing rule). A predicate must be a pure function over its `HostRuleC
 so custom rules get the same freshness guarantee as the built-in ones. `custom.host` rules are
 **not portable to [untrusted mode](#untrusted-mode)** — see that section.
 
+### Recipe: keep a package browser-safe (no Node builtins)
+
+A package shipped to the browser must never pull a Node builtin into the bundle. Two invariants keep
+it safe, and both are pure predicates over the graph's retained external edges. align normalizes
+builtins for you: bare `fs` and `node:fs` both resolve to the id `external:node:fs`, and every
+builtin carries `ExternalPackageNode.isBuiltin` — so you match *all* of them, in *both* spellings,
+without maintaining a name list.
+
+1. **No file in the package imports a Node builtin.**
+2. **The barrel re-exports nothing that (transitively) touches one** — including a Node-only provider
+   re-exported from *another* package, which invariant 1 (scoped to this package's own files) never
+   sees. This matters because a CJS build can't tree-shake a top-level `require`, so one such
+   re-export silently re-breaks every browser consumer even when no browser code path uses it.
+
+```ts
+import { defineProject } from '@spikedpunch/align-core/dsl';
+import type { HostPredicate, HostRuleContext, HostViolation } from '@spikedpunch/align-core';
+
+export default defineProject({
+  components: { webShared: 'packages/web-shared/src/**' },
+  rules: (c) => [
+    c.custom.host('browserSafeNoNodeBuiltins')
+      .because('packages/web-shared ships to the browser; any Node builtin in the bundle breaks it.'),
+    c.custom.host('barrelNoNodeOnlyReexports')
+      .because('The CJS build cannot tree-shake a top-level require, so one Node-only re-export from the barrel breaks every browser consumer.'),
+  ],
+});
+
+const PKG = 'packages/web-shared/src/';
+const builtinIdsOf = (ctx: HostRuleContext): ReadonlySet<string> =>
+  new Set(ctx.graph.externalNodes.filter((n) => n.isBuiltin).map((n) => n.id));
+
+export const hostRules: Record<string, HostPredicate> = {
+  // Invariant 1 — no direct Node-builtin import anywhere in the package.
+  // (Scoped by path prefix; `edge.from` is a repo-relative path.)
+  browserSafeNoNodeBuiltins: (ctx: HostRuleContext): HostViolation[] => {
+    const builtins = builtinIdsOf(ctx);
+    return ctx.graph.externalEdges
+      .filter((e) => builtins.has(e.to) && e.from.startsWith(PKG))
+      .map((e) => ({
+        file: e.from,
+        snippet: e.snippet,
+        message: `browser-safe 'webShared' must not import a Node builtin — imports '${e.specifier}'.`,
+      }));
+  },
+
+  // Invariant 2 — nothing publicly re-exported from the barrel (transitively) touches a builtin.
+  barrelNoNodeOnlyReexports: (ctx: HostRuleContext): HostViolation[] => {
+    const barrel = ctx.graph.nodes.find((n) => n.file.endsWith(`${PKG}index.ts`));
+    if (!barrel) return [];
+    const builtins = builtinIdsOf(ctx);
+    const nodeTouching = new Set<string>(
+      ctx.graph.externalEdges.filter((e) => builtins.has(e.to)).map((e) => e.from),
+    );
+    const reexportsOf = (file: string): readonly string[] =>
+      ctx.graph.edges.filter((e) => e.from === file && e.kind === 'reexport').map((e) => e.to);
+
+    const out: HostViolation[] = [];
+    const seen = new Set<string>([barrel.file]);
+    const queue = [...reexportsOf(barrel.file)];
+    while (queue.length > 0) {
+      const mod = queue.shift() as string;
+      if (seen.has(mod)) continue;
+      seen.add(mod);
+      if (nodeTouching.has(mod)) {
+        out.push({
+          file: barrel.file,
+          message: `barrel re-exports a Node-only module ('${mod}') — the CJS build can't tree-shake its top-level require, breaking browser consumers.`,
+        });
+      }
+      queue.push(...reexportsOf(mod));
+    }
+    return out;
+  },
+};
+```
+
+Invariant 2 is the hand-written form of the public-surface-leakage rule on align's roadmap
+([ADR 016](docs/adr/016-public-surface-inference.md)) — *"don't publicly re-export X through the
+barrel,"* here with X = *Node-touching* rather than *`@internal`*. align enforces the **structural
+proxy** — the barrel does not re-export a builtin-touching module — not the CJS-tree-shaking property
+itself (a bundler fact align doesn't evaluate); the structural invariant is what deterministically
+prevents the breakage.
+
 ## Telemetry (opt-in, local-only)
 
 align can log its own usage to a local, append-only file — **never a network call, ever** (ADR 015,
