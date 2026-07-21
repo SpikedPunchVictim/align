@@ -16,6 +16,15 @@ graph LR
 \`\`\`"
 `;
 
+exports[`buildViolationMermaid > renders a layers-external violation naming the external package (ADR 017 Part A) 1`] = `
+"\`\`\`mermaid
+graph LR
+  a["web<br/>src/web/a.ts"]
+  b["external:lodash<br/>external:lodash"]
+  a -->|"lodash (forbidden)"| b
+\`\`\`"
+`;
+
 exports[`buildViolationMermaid > renders a no-cycles chain with the suggested break edge visually marked 1`] = `
 "\`\`\`mermaid
 graph LR
@@ -34,5 +43,14 @@ graph LR
   a["api<br/>src/api/service.ts"]
   b["ui<br/>src/ui/component.ts"]
   a -->|"../ui/component.js (forbidden)"| b
+\`\`\`"
+`;
+
+exports[`buildViolationMermaid > renders a no-dependency-external violation naming the external package (ADR 017 Part A) 1`] = `
+"\`\`\`mermaid
+graph LR
+  a["core<br/>packages/core/src/index.ts"]
+  b["external:child_process<br/>external:node:child_process"]
+  a -->|"node:child_process (forbidden)"| b
 \`\`\`"
 `;

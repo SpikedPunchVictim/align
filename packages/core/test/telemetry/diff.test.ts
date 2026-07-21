@@ -23,9 +23,57 @@ function noDependencyViolation(id: string, file = 'a.ts'): Violation {
   };
 }
 
+function noDependencyExternalViolation(id: string): Violation {
+  return {
+    id: toViolationId(id),
+    ruleId: toRuleId('r1'),
+    category: 'architecture',
+    severity: 'error',
+    file: toRepoRelativePath('a.ts'),
+    range: { startLine: 1, endLine: 1 },
+    snippet: 'import x',
+    fixHint: { code: 'manual-review' },
+    kind: 'no-dependency-external',
+    fromFile: toRepoRelativePath('a.ts'),
+    fromComponent: toComponentName('core'),
+    toExternal: 'external:node:child_process',
+    externalPackageName: 'child_process',
+    specifier: 'node:child_process',
+    line: 1,
+  };
+}
+
+function layersExternalViolation(id: string): Violation {
+  return {
+    id: toViolationId(id),
+    ruleId: toRuleId('r1'),
+    category: 'architecture',
+    severity: 'error',
+    file: toRepoRelativePath('a.ts'),
+    range: { startLine: 1, endLine: 1 },
+    snippet: 'import x',
+    fixHint: { code: 'manual-review' },
+    kind: 'layers-external',
+    fromLayer: toComponentName('web'),
+    fromFile: toRepoRelativePath('a.ts'),
+    toExternal: 'external:lodash',
+    externalPackageName: 'lodash',
+    specifier: 'lodash',
+    line: 1,
+  };
+}
+
 describe('componentOfViolation', () => {
   it("returns the offending file's own component for no-dependency", () => {
     expect(componentOfViolation(noDependencyViolation('v1'))).toBe('api');
+  });
+
+  it('returns fromComponent for no-dependency-external (ADR 017 Part A)', () => {
+    expect(componentOfViolation(noDependencyExternalViolation('v1'))).toBe('core');
+  });
+
+  it('returns fromLayer for layers-external (ADR 017 Part A)', () => {
+    expect(componentOfViolation(layersExternalViolation('v1'))).toBe('web');
   });
 });
 

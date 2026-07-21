@@ -12,6 +12,7 @@ import type {
   ArchNoCyclesRule,
   ArchNoDependencyRule,
   CustomHostRule,
+  DependencyTarget,
   RuleIR,
   RuleProvenance,
   SecurityManifestNewDependencyRule,
@@ -25,6 +26,50 @@ import type {
 export interface ComponentToken {
   readonly name: ComponentName;
 }
+
+// ---------------------------------------------------------------------------------------------
+// `external(...)` — ADR 017 Part A: a permitted TARGET for `.cannotDependOn(...)` /
+// `.canOnlyDependOn(...)` alongside `ComponentToken`s, matched against `graph.externalEdges`
+// (never `graph.nodes`/`graph.edges`). A free function (not `c.external(...)`) — mirrors the ADR's
+// own examples (`c.webShared.cannotDependOn(external('node:*'))`) and the "selector, not a
+// component" distinction: unlike a `ComponentToken`, it is never a key of the components map.
+// ---------------------------------------------------------------------------------------------
+
+export interface ExternalSelectorToken {
+  readonly kind: 'external';
+  readonly pattern: string;
+  readonly includeTypeOnly: boolean;
+}
+
+export interface ExternalSelectorOptions {
+  /** Default `false` — matches runtime edges only (`import`/`reexport`/`dynamic`), mirroring
+   * `arch.noCycles`'s existing `includeTypeOnly` option and its default. The browser-safety case
+   * (`cannotDependOn(external('node:*'))`) wants the default off; the §8.3 core-purity case
+   * (`cannotDependOn(external('react', { includeTypeOnly: true }))`) opts in because "must not
+   * import framework *types*" specifically wants type-only edges caught too. */
+  readonly includeTypeOnly?: boolean;
+}
+
+/** `external('node:*')`, `external('fs')`, `external('node:fs')`, `external('@scope/*')`,
+ * `external('lodash')` — glob pattern matched against `ExternalPackageNode` at evaluation time
+ * (`rules/external-match.ts`'s `externalSelectorMatchesNode`, semantics pinned in
+ * `docs/ir-schema.md`). Produces a plain IR value (`{ kind: 'external', pattern, includeTypeOnly }`)
+ * — no host code, so a rule naming one stays portable to `align check --untrusted` (ADR 014). */
+export function external(pattern: string, opts?: ExternalSelectorOptions): ExternalSelectorToken {
+  return { kind: 'external', pattern, includeTypeOnly: opts?.includeTypeOnly ?? false };
+}
+
+function isExternalSelectorToken(ref: DependencyRefToken): ref is ExternalSelectorToken {
+  return 'pattern' in ref;
+}
+
+function toDependencyTarget(ref: DependencyRefToken): DependencyTarget {
+  return isExternalSelectorToken(ref) ? { kind: 'external', pattern: ref.pattern, includeTypeOnly: ref.includeTypeOnly } : ref.name;
+}
+
+/** A `.cannotDependOn(...)` / `.canOnlyDependOn(...)` argument: either a component (the original
+ * shape) or an external selector (ADR 017 Part A's widening). */
+export type DependencyRefToken = ComponentToken | ExternalSelectorToken;
 
 export interface RuleBuilder {
   /** Hoists into `provenance.because` (ADR 002) — the single field feeding terminal output, IDE
@@ -53,10 +98,16 @@ export function ruleBuilder(makeBase: (provenance: RuleProvenance) => readonly R
 }
 
 export interface LayerRuleBuilder {
-  /** dependencies outside this allowlist are violations */
-  canOnlyDependOn(...refs: readonly ComponentToken[]): RuleBuilder;
-  /** dependencies on this denylist are violations; everything else is permitted */
-  cannotDependOn(...refs: readonly ComponentToken[]): RuleBuilder;
+  /** dependencies outside this allowlist are violations. Accepts `external(...)` selectors
+   * alongside components (ADR 017 Part A) — naming >=1 external selector opts this layer's
+   * external edges into evaluation (default-deny becomes expressible for externals, e.g. vscode's
+   * browser-layer allow-list); a components-only call is unaffected (external edges stay ignored,
+   * back-compat invariant). */
+  canOnlyDependOn(...refs: readonly DependencyRefToken[]): RuleBuilder;
+  /** dependencies on this denylist are violations; everything else is permitted. Accepts
+   * `external(...)` selectors alongside components (ADR 017 Part A) — one `arch.no-dependency`
+   * rule per listed ref, external or component alike. */
+  cannotDependOn(...refs: readonly DependencyRefToken[]): RuleBuilder;
 }
 
 export interface ComponentRuleBuilder {
@@ -176,28 +227,29 @@ export function makeArchFactory(allComponents: readonly ComponentToken[]): ArchF
   return {
     layer(token: ComponentToken): LayerRuleBuilder {
       return {
-        canOnlyDependOn(...refs: readonly ComponentToken[]): RuleBuilder {
+        canOnlyDependOn(...refs: readonly DependencyRefToken[]): RuleBuilder {
           return ruleBuilder((provenance) => {
             const rule: ArchLayersRule = {
               kind: 'arch.layers',
               id: toRuleId(`arch.layers:${token.name}`),
-              layers: [{ layer: token.name, canDependOn: refs.map((r) => r.name) }],
+              layers: [{ layer: token.name, canDependOn: refs.map(toDependencyTarget) }],
               provenance,
             };
             return [rule];
           });
         },
-        cannotDependOn(...refs: readonly ComponentToken[]): RuleBuilder {
+        cannotDependOn(...refs: readonly DependencyRefToken[]): RuleBuilder {
           return ruleBuilder((provenance) =>
-            refs.map(
-              (ref): ArchNoDependencyRule => ({
+            refs.map((ref): ArchNoDependencyRule => {
+              const isExternal = isExternalSelectorToken(ref);
+              return {
                 kind: 'arch.no-dependency',
-                id: toRuleId(`arch.no-dependency:${token.name}->${ref.name}`),
+                id: toRuleId(`arch.no-dependency:${token.name}->${isExternal ? `external:${ref.pattern}` : ref.name}`),
                 from: token.name,
-                to: ref.name,
+                to: toDependencyTarget(ref),
                 provenance,
-              }),
-            ),
+              };
+            }),
           );
         },
       };

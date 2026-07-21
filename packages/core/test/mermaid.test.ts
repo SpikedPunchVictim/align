@@ -60,6 +60,46 @@ function layersViolation(): Violation {
   };
 }
 
+function noDependencyExternalViolation(): Violation {
+  return {
+    id: computeFingerprint(['no-dependency-external', 'r1']),
+    ruleId: toRuleId('r1'),
+    category: 'architecture',
+    severity: 'error',
+    file: toRepoRelativePath('packages/core/src/index.ts'),
+    range: { startLine: 1, endLine: 1 },
+    snippet: `import cp from 'node:child_process';`,
+    fixHint: { code: 'remove-import', file: toRepoRelativePath('packages/core/src/index.ts'), line: 1 },
+    kind: 'no-dependency-external',
+    fromFile: toRepoRelativePath('packages/core/src/index.ts'),
+    fromComponent: toComponentName('core'),
+    toExternal: 'external:node:child_process',
+    externalPackageName: 'child_process',
+    specifier: 'node:child_process',
+    line: 1,
+  };
+}
+
+function layersExternalViolation(): Violation {
+  return {
+    id: computeFingerprint(['layers-external', 'r1']),
+    ruleId: toRuleId('r1'),
+    category: 'architecture',
+    severity: 'error',
+    file: toRepoRelativePath('src/web/a.ts'),
+    range: { startLine: 1, endLine: 1 },
+    snippet: `import _ from 'lodash';`,
+    fixHint: { code: 'remove-import', file: toRepoRelativePath('src/web/a.ts'), line: 1 },
+    kind: 'layers-external',
+    fromLayer: toComponentName('web'),
+    fromFile: toRepoRelativePath('src/web/a.ts'),
+    toExternal: 'external:lodash',
+    externalPackageName: 'lodash',
+    specifier: 'lodash',
+    line: 1,
+  };
+}
+
 function customViolation(): Violation {
   return {
     id: computeFingerprint(['custom', 'r1']),
@@ -108,6 +148,22 @@ describe('buildViolationMermaid', () => {
     const mermaid = buildViolationMermaid(layersViolation());
     expect(mermaid).toContain('api<br/>src/api/service.ts');
     expect(mermaid).toContain('ui<br/>src/ui/component.ts');
+    expect(mermaid).toMatchSnapshot();
+  });
+
+  it('renders a no-dependency-external violation naming the external package (ADR 017 Part A)', () => {
+    const mermaid = buildViolationMermaid(noDependencyExternalViolation());
+    expect(mermaid).toContain('graph LR');
+    expect(mermaid).toContain('core<br/>packages/core/src/index.ts');
+    expect(mermaid).toContain('external:child_process');
+    expect(mermaid).toContain('node:child_process (forbidden)');
+    expect(mermaid).toMatchSnapshot();
+  });
+
+  it('renders a layers-external violation naming the external package (ADR 017 Part A)', () => {
+    const mermaid = buildViolationMermaid(layersExternalViolation());
+    expect(mermaid).toContain('web<br/>src/web/a.ts');
+    expect(mermaid).toContain('external:lodash');
     expect(mermaid).toMatchSnapshot();
   });
 
