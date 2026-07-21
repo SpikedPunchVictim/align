@@ -1,8 +1,9 @@
 # ADR 017: External-import selectors + manifest-field classification
 
-**STATUS: DRAFT — pending owner sign-off.** Nothing here is built. It proposes two additive mechanisms
-and a falsification plan; per promotion-on-evidence doctrine (`docs/proposals/rule-expansion-evaluation.md`)
-each is gated on the Falsification section, not authorized by accepting this ADR.
+**STATUS: ACCEPTED — owner sign-off 2026-07-21.** Part A (external selectors on `cannotDependOn`/
+`canOnlyDependOn`) is cleared to build. Part B (`manifestField` classification) remains **gated** on its
+Falsification §3 test. Downstream rule ADRs (Stage-1 provenance, etc.) are separate decisions per
+promotion-on-evidence doctrine (`docs/proposals/rule-expansion-evaluation.md`).
 
 > **Revision (2026-07-21, post-Fable-review).** An earlier draft proposed a `presets` layer shipping
 > `enterpriseEdition()` and `backstageRoles()`. **Cut.** A vendored `backstageRoles()` ships align a copy
