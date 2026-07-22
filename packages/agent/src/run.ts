@@ -268,7 +268,18 @@ export async function runAgentLoop(effects: AgentEffects, ruleset: RulesetIR, op
 
   const initialCheck = await effects.runCheck();
   if (initialCheck.verdict === 'error') {
-    return { verdict: 'refused', refusalReason: 'gate error on initial check — environmental, not fixable by the agent', groups: [], finalCheck: initialCheck };
+    // Surface WHICH gate errored and WHY — the environmental detail lives on each GateResult's
+    // errorMessage; the agent cannot fix it, but the user needs it to act (agent.ts prints next steps).
+    const erroring = initialCheck.gates.filter((g) => g.status === 'error');
+    const detail = erroring
+      .map((g) => `${g.gate} gate: ${g.errorMessage ?? 'unknown error'}`)
+      .join('; ');
+    return {
+      verdict: 'refused',
+      refusalReason: `initial \`align check\` could not complete — ${detail || 'a gate errored'}. This is an environment/config problem, not a code violation the agent can fix.`,
+      groups: [],
+      finalCheck: initialCheck,
+    };
   }
 
   const violations = initialCheck.gates.flatMap((g) => g.violations);
