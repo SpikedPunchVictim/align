@@ -1,8 +1,18 @@
 # ADR 018: Doc-reference integrity (`docs.link-integrity`)
 
-**STATUS: DRAFT — pending owner sign-off.** Nothing here is built. Proposes one rule + a falsification
-plan; per promotion-on-evidence doctrine (`docs/proposals/rule-expansion-evaluation.md`) it ships only
-if the plan clears, not on acceptance of this ADR.
+**STATUS: DESIGN RESERVE — the evidence did not clear the bar.** The decisive PR-flow probe
+(`docs/evidence/doc-consistency-probe/PR_FLOW_PROBE.md`) showed genuine dead-link *introduction* is
+rare (~0.2% of doc-touching commits; 88% of apparent "flow" was one repo's translated-README
+convention). Per promotion-on-evidence doctrine this candidate is **not built**. The design below is
+retained as the reference shape *if* a real adopter later demonstrates demand — and if so, in the
+leaner form the Fable review prescribed (additive `HostRuleContext.docLinks` + a `custom.host` recipe,
+**no** `docs` gate category, **no** site-route machinery), not as originally drafted below.
+
+> **Promotion trigger:** a specific align user showing dangling doc links are a real, recurring problem
+> *on their own repo/CI* — real demand, not enterprise-repo inference.
+
+---
+_Original draft (superseded by the status above) follows for reference._
 
 > ADR numbering note: 016 (public-surface inference) and 017 (external selectors) are in flight on the
 > `stage0-surface-inference` branch; this is 018 to avoid collision when the branches merge.
