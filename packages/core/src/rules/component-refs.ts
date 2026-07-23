@@ -36,7 +36,13 @@ function* componentRefsOf(rule: RuleIR): Generator<string> {
   switch (rule.kind) {
     case 'arch.no-dependency':
       yield rule.from;
-      yield rule.to;
+      // ADR 017 Part A: `to` widens to `ComponentRef | ExternalSelector`. An external selector is
+      // not a `ComponentRef` at all — it's a glob pattern matched against `graph.externalEdges`
+      // (`rules/external-match.ts`), never validated against the components registry (there is no
+      // "unknown external package" error class the way there is an unknown component — a pattern
+      // matching zero external nodes is instead surfaced as an ungrounded-selector advisory, the
+      // `findUngroundedExternalSelectors` sibling of this file's own guard).
+      if (typeof rule.to === 'string') yield rule.to;
       return;
     case 'arch.no-cycles':
       if (rule.scope !== 'repo') yield rule.scope;
@@ -44,7 +50,8 @@ function* componentRefsOf(rule: RuleIR): Generator<string> {
     case 'arch.layers':
       for (const layerDef of rule.layers) {
         yield layerDef.layer;
-        yield* layerDef.canDependOn;
+        // Same external-selector carve-out as `arch.no-dependency.to` above.
+        for (const entry of layerDef.canDependOn) if (typeof entry === 'string') yield entry;
       }
       return;
     case 'arch.metric':

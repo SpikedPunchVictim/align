@@ -1,0 +1,7 @@
+{
+  "name": "@fixture/wildcard-subpath",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  }
+}

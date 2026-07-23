@@ -29,6 +29,14 @@ export function buildViolationMermaid(violation: Violation): string {
       );
     case 'layers':
       return fence(edgeDiagram(violation.fromLayer, violation.fromFile, violation.toLayer, violation.toFile, violation.specifier));
+    case 'no-dependency-external':
+      return fence(
+        edgeDiagram(violation.fromComponent, violation.fromFile, `external:${violation.externalPackageName}`, violation.toExternal, violation.specifier),
+      );
+    case 'layers-external':
+      return fence(
+        edgeDiagram(violation.fromLayer, violation.fromFile, `external:${violation.externalPackageName}`, violation.toExternal, violation.specifier),
+      );
     case 'metric':
       return fence(metricDiagram(violation.component, violation.file, violation.value, violation.threshold));
     case 'custom':

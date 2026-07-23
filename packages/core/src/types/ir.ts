@@ -52,11 +52,33 @@ const ruleProvenanceSchema = z.object({
 
 const ruleId = z.string();
 
+// External selector (ADR 017 Part A): a permitted TARGET for `arch.no-dependency`'s `to` and a
+// permitted entry in `arch.layers`' `canDependOn` — glob-matched against `graph.externalEdges`,
+// never `graph.nodes`/`graph.edges` (docs/ir-schema.md's external-selector section pins the exact
+// matching semantics: `node:` prefix requires an `ExternalPackageNode.isBuiltin` match, glob over
+// `packageName` otherwise). `includeTypeOnly` defaults `false` (mirrors `arch.no-cycles`'
+// `includeTypeOnly`) — matched runtime edges only unless a rule author opts in (the browser-safety
+// case wants the default off; the §8.3 core-purity "must not import framework *types*" case opts
+// in). No new RuleIR *kind* (ADR 017: "two existing kinds gain a target variant") — this is a
+// value shape nested inside the two kinds below, not a discriminant of `ruleIRSchema` itself.
+const externalSelectorSchema = z.object({
+  kind: z.literal('external'),
+  pattern: z.string().min(1),
+  includeTypeOnly: z.boolean(),
+});
+
+// `to`/`canDependOn` entries widen to `ComponentRef | ExternalSelector` (ADR 017 Part A). Back-
+// compat is structural, not just behavioral: a rule authored before this change round-trips
+// through this schema unchanged (a bare component-name string still parses as the `componentRef`
+// arm of the union), and `arch.layers`' opt-in invariant (external edges evaluated only when a
+// layer's `canDependOn` names >=1 external selector) is enforced by the evaluator, not this schema.
+const dependencyTargetSchema = z.union([componentRef, externalSelectorSchema]);
+
 const archNoDependencySchema = z.object({
   kind: z.literal('arch.no-dependency'),
   id: ruleId,
   from: componentRef,
-  to: componentRef,
+  to: dependencyTargetSchema,
   provenance: ruleProvenanceSchema,
 });
 
@@ -75,7 +97,7 @@ const archLayersSchema = z.object({
     .array(
       z.object({
         layer: componentRef,
-        canDependOn: z.array(componentRef),
+        canDependOn: z.array(dependencyTargetSchema),
       }),
     )
     .min(1),
@@ -143,6 +165,8 @@ export type ComponentDefinitionIR = z.infer<typeof componentDefinitionSchema>;
 export type RuleProvenance = z.infer<typeof ruleProvenanceSchema>;
 export type RuleIR = z.infer<typeof ruleIRSchema>;
 export type RulesetIR = z.infer<typeof rulesetIRSchema>;
+export type ExternalSelector = z.infer<typeof externalSelectorSchema>;
+export type DependencyTarget = z.infer<typeof dependencyTargetSchema>;
 export type ArchNoDependencyRule = z.infer<typeof archNoDependencySchema>;
 export type ArchNoCyclesRule = z.infer<typeof archNoCyclesSchema>;
 export type ArchLayersRule = z.infer<typeof archLayersSchema>;

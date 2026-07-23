@@ -223,6 +223,48 @@ describe('align check --untrusted — custom.host is unavailable', () => {
   });
 });
 
+describe('align check --untrusted — external() selector rules are portable (ADR 017 Part A)', () => {
+  it('an external-selector cannotDependOn rule evaluates correctly under --untrusted (IR-only, no host code)', async () => {
+    tmpDir = copyFixture('simple-app-external-violation');
+    expect(await runExportIr(tmpDir)).toBe(0);
+
+    // The exported IR must actually carry the external selector, not silently drop it.
+    const exported = readRulesetIr(tmpDir);
+    expect(exported?.ruleset.rules).toHaveLength(1);
+    expect(exported?.ruleset.rules[0]).toMatchObject({
+      kind: 'arch.no-dependency',
+      from: 'app',
+      to: { kind: 'external', pattern: 'node:child_process', includeTypeOnly: false },
+    });
+
+    // Poison align.config.ts AFTER exporting — --untrusted must never import it again.
+    fs.writeFileSync(path.join(tmpDir, 'align.config.ts'), `throw new Error('EXPLOIT');\n`, 'utf8');
+
+    const { result: code } = await withCapturedConsole(() => runCheck(tmpDir, { json: false, untrusted: true }));
+    // The real node:child_process import in src/a.ts is still there — a real violation from a
+    // real scan, evaluated purely off the committed IR artifact, no align.config.ts execution.
+    expect(code).toBe(1);
+  });
+
+  it('the same rule is green under --untrusted when the source has no matching external import', async () => {
+    tmpDir = copyFixture('simple-app'); // no child_process import anywhere in this fixture
+    fs.writeFileSync(
+      path.join(tmpDir, 'align.config.ts'),
+      `import { defineProject, external } from '@spikedpunch/align-core/dsl';\n\n` +
+        `export default defineProject({\n` +
+        `  components: { app: 'src/**' },\n` +
+        `  rules: (c) => [c.arch.layer(c.app).cannotDependOn(external('node:child_process'))],\n` +
+        `});\n`,
+      'utf8',
+    );
+    expect(await runExportIr(tmpDir)).toBe(0);
+    fs.writeFileSync(path.join(tmpDir, 'align.config.ts'), `throw new Error('EXPLOIT');\n`, 'utf8');
+
+    const code = await runCheck(tmpDir, { json: false, untrusted: true });
+    expect(code).toBe(0);
+  });
+});
+
 describe('align check --untrusted + --frozen-rules is a guarded, explicit error', () => {
   it('refuses the combination instead of running either mode inconsistently', async () => {
     tmpDir = copyFixture('simple-app');

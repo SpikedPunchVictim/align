@@ -1,4 +1,5 @@
 export * from './exports.js';
+export * from './entrypoint.js';
 export * from './plugin.js';
 export * from './scanner.js';
 export * from './tsconfig-resolver.js';

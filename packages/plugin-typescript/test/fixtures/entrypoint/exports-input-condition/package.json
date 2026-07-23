@@ -1,0 +1,15 @@
+{
+  "name": "@fixture/exports-input-condition",
+  "exports": {
+    ".": {
+      "input": "./src/index.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./output_parsers": {
+      "input": "./src/output_parsers/index.ts",
+      "import": "./dist/output_parsers/index.js",
+      "require": "./dist/output_parsers/index.cjs"
+    }
+  }
+}

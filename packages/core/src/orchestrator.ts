@@ -4,7 +4,7 @@ import type { Violation } from './types/violation.js';
 import { EMPTY_MANIFEST_INVENTORY, type ManifestScanner } from './types/manifest.js';
 import type { BaselineStore } from './baseline/store.js';
 import type { Advisory, CheckRun, GateResult } from './gates/types.js';
-import { buildUncertaintyAdvisories } from './gates/advisories.js';
+import { buildUncertaintyAdvisories, buildUngroundedExternalSelectorAdvisories } from './gates/advisories.js';
 import type { PluginRegistry } from './plugin/registry.js';
 import { evaluateRule } from './rules/evaluators.js';
 import { evaluateManifestRule, type SecurityManifestRule } from './rules/manifest-evaluators.js';
@@ -187,6 +187,10 @@ export class GateOrchestrator {
     const advisories: Advisory[] = [
       ...buildUncertaintyAdvisories(graph.uncertain),
       ...movedAdvisories(moves.length + securityMoves),
+      // ADR 017 Part A: computed after evaluation succeeds (same "trustworthy ruleset" precondition
+      // as `ungroundedComponents` below) — an ungrounded external selector is vacuously green, not
+      // a failure, so it never affects `verdict`, only visibility.
+      ...buildUngroundedExternalSelectorAdvisories(architectureRules, graph.externalNodes),
     ];
 
     const gates = [parseGate, architectureGate, securityGate];

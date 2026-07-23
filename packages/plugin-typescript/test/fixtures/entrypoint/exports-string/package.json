@@ -1,0 +1,4 @@
+{
+  "name": "@fixture/exports-string",
+  "exports": "./dist/index.js"
+}

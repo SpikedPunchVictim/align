@@ -65,6 +65,22 @@ export type Violation =
       readonly specifier: string;
       readonly line: number;
     })
+  // ADR 017 Part A: `arch.no-dependency`'s `to` target is an external selector, not a component —
+  // a distinct `kind` (not a reused 'no-dependency' with optional fields, CODING_BEST_PRACTICES.md
+  // §10) because there is no `toComponent`/`toFile` to report (the target is a name-level
+  // `ExternalPackageNode`, not a scanned file). `Violation.kind` already partitions more finely
+  // than `RuleIR.kind` (e.g. 'layers' vs. 'no-dependency' both come from different rule kinds than
+  // 'metric'/'custom'), so a new `Violation` kind here is not a new `RuleIR` kind — the ADR's "no
+  // new rule kind" constraint is about the IR discriminant, not this finer-grained violation model.
+  | (ViolationBase & {
+      readonly kind: 'no-dependency-external';
+      readonly fromFile: RepoRelativePath;
+      readonly fromComponent: ComponentName;
+      readonly toExternal: string; // ExternalPackageNode.id, e.g. 'external:node:child_process'
+      readonly externalPackageName: string;
+      readonly specifier: string;
+      readonly line: number;
+    })
   | (ViolationBase & {
       readonly kind: 'no-cycles';
       readonly chain: readonly CycleEdge[]; // per-edge detail, not just file names (ADR 004)
@@ -76,6 +92,18 @@ export type Violation =
       readonly toLayer: ComponentName;
       readonly fromFile: RepoRelativePath;
       readonly toFile: RepoRelativePath;
+      readonly specifier: string;
+      readonly line: number;
+    })
+  // ADR 017 Part A: `arch.layers`' `canDependOn` includes an external selector and this layer's
+  // edge matched none of them — same "distinct kind, no component on the target side" rationale as
+  // 'no-dependency-external' above.
+  | (ViolationBase & {
+      readonly kind: 'layers-external';
+      readonly fromLayer: ComponentName;
+      readonly fromFile: RepoRelativePath;
+      readonly toExternal: string;
+      readonly externalPackageName: string;
       readonly specifier: string;
       readonly line: number;
     })
@@ -129,6 +157,12 @@ export function renderViolationMessage(v: Violation): string {
         `(component '${v.toComponent}') via '${v.specifier}' at line ${v.line}, which rule ` +
         `'${v.ruleId}' forbids.` + (v.because !== undefined ? ` ${v.because}` : '')
       );
+    case 'no-dependency-external':
+      return (
+        `${v.fromFile} (component '${v.fromComponent}') imports external package ` +
+        `'${v.externalPackageName}' via '${v.specifier}' at line ${v.line}, which rule ` +
+        `'${v.ruleId}' forbids.` + (v.because !== undefined ? ` ${v.because}` : '')
+      );
     case 'no-cycles': {
       const lastHop = v.chain[v.chain.length - 1];
       const nodeNames: string[] = v.chain.map((e) => String(e.from));
@@ -143,6 +177,12 @@ export function renderViolationMessage(v: Violation): string {
       return (
         `${v.fromFile} (layer '${v.fromLayer}') imports ${v.toFile} (layer '${v.toLayer}') via ` +
         `'${v.specifier}' at line ${v.line}, which rule '${v.ruleId}' forbids.` +
+        (v.because !== undefined ? ` ${v.because}` : '')
+      );
+    case 'layers-external':
+      return (
+        `${v.fromFile} (layer '${v.fromLayer}') imports external package '${v.externalPackageName}' ` +
+        `via '${v.specifier}' at line ${v.line}, which rule '${v.ruleId}' forbids.` +
         (v.because !== undefined ? ` ${v.because}` : '')
       );
     case 'metric':

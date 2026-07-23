@@ -1,0 +1,4 @@
+{
+  "name": "@fixture/main-field",
+  "main": "./dist/index.cjs.js"
+}
