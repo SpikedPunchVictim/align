@@ -1,9 +1,32 @@
 # ADR 019: Co-change-informed rule suggestion (onboarding + retrofit)
 
-**STATUS: DRAFT — pending owner sign-off.** Proposes an enhancement to align's existing rule-suggestion
-surfaces + a falsification plan; per promotion-on-evidence doctrine it ships only if the plan clears.
+**STATUS: DRAFT — RESCOPED after the placebo test (2026-07-23).** The Fable review demanded the arm the
+original draft skipped: co-change ranking vs. import-graph-only ranking. **It was run, and co-change
+largely fails it.** So the co-change pass is **cut from v1**; the shippable proposal is the
+import-graph-only version below (which needs no git-history mining). Co-change is deferred behind the
+decision-flip test in § Falsification. Original co-change framing retained below the Decision for the
+record.
 
 > ADR numbering: 016/017 in flight on `stage0-surface-inference`; 018 on main. This is 019.
+
+## Placebo-test result (the measurement that rescoped this ADR)
+
+align already builds the import graph; component **fan-in** and **edge-weight** are one aggregation away,
+**no new mechanism**. Measured on directus:
+- **Fan-in alone surfaces the foundation layer** — `@directus/types` (22 importers), `utils` (18),
+  `constants` (11) top the fan-in ranking. The onboarding demo's "the foundation fell out of co-change"
+  is **redundant with import fan-in**; the git-history pass added nothing to that result.
+- **Co-change vs. edge-weight top-12 overlap = 6/12.** Where they diverge, edge-weight surfaces *stable,
+  heavy* dependencies (`api↔errors` 198 imports, `types↔utils` 35) while co-change surfaces *churny* ones
+  (`storage-driver↔utils`). Per ADR 009's day-one-green doctrine, the **stable** deps are the better rule
+  candidates — the exact pairs co-change **down-ranks**. Co-change's unique signal (recency/hotness) is
+  thus a *plausibly wrong* prior for encoding settled architecture.
+- Co-change's one genuinely non-redundant payload — hidden no-edge implicit contracts (PROBE.md class 4)
+  — is **out of scope** here (nothing to enforce). So the expensive pass would be kept for a sort key the
+  static graph already provides.
+
+**Conclusion:** within this ADR's scope (import-coupled pairs), co-change is a more-expensive proxy for
+import centrality, ranking by a prior (churn) that is arguably wrong for the goal. Cut it from v1.
 
 ## Context
 
@@ -30,51 +53,60 @@ actually govern, *ranked by how much they churn*. Two demonstrations proved the 
   specific, reviewable question the owner can judge: *should Fastify plugins reach into the db directly,
   or go through services?*
 
-## Decision
+## Decision (v1 — import-graph-only; co-change deferred)
 
-Enhance the existing suggestion surfaces (`align init`, `align_propose_rules`) with a **co-change-
-informed ranking**, in two modes. This is **not a new rule kind** and **not enforcement** — it produces
-*suggestions a human confirms*.
+Enhance the existing suggestion surfaces (`align init`, `align_propose_rules`) with an **import-graph-
+derived ranking** — **no git-history pass**. Not a new rule kind and not enforcement; suggestions a human
+confirms.
 
-### Inputs (all light; most already exist)
-- **Co-change**: a new `git log --name-only` pass mapping each commit's files → components, accumulating
-  pairwise co-change counts + per-component change counts (confidence = `max(P(B|A), P(A|B))`). Bounded
-  sample (recent N commits). The one genuinely new mechanism.
-- **Import graph + components**: align already builds both.
+### Inputs (all already computed by align — zero new extraction pipeline)
+- **Import graph with weights**: component-level edge-weight (import-site count) and **fan-in** (distinct
+  importers) — one aggregation over the edges `scanner.ts` already emits. This is the ranking signal.
 - **Existing ruleset** (retrofit mode only): the loaded `align.config.ts` rules.
+- **~~Co-change~~ — CUT from v1.** The placebo test showed it's redundant with fan-in for the foundation
+  and diverges toward the wrong (churn) prior. Deferred behind the § Falsification decision-flip test; if
+  it ever earns its keep, it's a *secondary* sort ("govern where change is active"), never the primary.
 
 ### Mode 1 — onboarding (blank/sparse config)
-Rank **import-coupled** component pairs by co-change; emit candidate dependency-direction rules in
-dependency order (foundation → consumers), each with its co-change confidence as the rationale. The
-human accepts/edits/rejects; align writes the accepted ones.
+Rank component import edges by **fan-in / edge-weight**; emit candidate dependency-direction rules in
+dependency order (high-fan-in foundation at the bottom), each with the import-weight as rationale. The
+human accepts/edits/rejects; align writes the accepted ones. (On directus this surfaces
+`types`/`utils`/`constants` as the foundation with no git mining. On small repos this largely overlaps
+ADR 009's existing layer macros; the added value is per-edge weighting + accept/reject copy, and it earns
+its place mainly on large repos — backstage 255 pkgs / 1,490 edges — where raw edge existence isn't a
+ranking.)
 
 ### Mode 2 — retrofit (existing ruleset)
-Classify each import-coupled + high-co-change pair as **governed** (covered by an existing rule) or
-**GAP** (not). Emit the GAPs, ranked by co-change, as "boundaries you haven't decided on yet." This is
-ongoing rule-*health*, distinct from onboarding.
+Enumerate component import edges **not covered by any existing rule** = the gap list (a pure-graph
+computation). Rank by edge-weight/fan-in. This is ongoing rule-*health*, `align doctor`-shaped
+(dev-loop lever 3b). On kluster this yields the real `apiPlugins → apiDb` / `apiPlugins → apiServices`
+gaps once composition roots are excluded (below).
 
-### Precision-critical (learned from the demonstrations)
-- **Intersect with the import graph — never suggest from co-change alone.** The 467 no-edge directus
-  pairs and the 70-93% hidden mass are noise for suggestion; only import-coupled pairs are governable.
-- **Down-rank catch-all / composition-root components.** kluster's `api` catch-all → every sub-layer
-  showed as "GAP" but is the composition root legitimately wiring everything. A root/catch-all heuristic
-  (glob breadth, fan-out) must suppress these or the gap list cries wolf — the same inherent-coupling
-  discipline the probe applied.
-- **Suggest, never auto-apply.** Co-change tells you `apiPlugins → apiDb` is load-bearing; it cannot tell
-  you whether that direction is *intended* (usually) or a smell to invert. Bidirectional import edges are
-  flagged as cycle-risk, but the human decides.
+### Precision-critical
+- **Exclude composition roots by explicit declaration, not a heuristic.** kluster's `api` catch-all
+  legitimately depends on every sub-layer; a fan-out/glob-breadth heuristic can't distinguish a
+  legitimate root from a god-component (and would suppress the god-component — the *most* important gap).
+  Per this repo's explicit-over-implicit standard, the human declares `compositionRoots: ['api']` once in
+  config; no threshold tuning, no wolf-crying. (After that, kluster's real gap list is ~2-3 edges — small
+  enough that ranking barely matters, which is itself part of why co-change is unnecessary here.)
+- **Suggest, never auto-apply.** The graph tells you `apiPlugins → apiDb` is a load-bearing, ungoverned
+  edge; it cannot tell you whether that direction is *intended* (usually) or a smell to invert.
+  Bidirectional edges are flagged as cycle-risk, but the human decides.
 
 ## Falsification / validation plan
-1. **Suggestion precision (onboarding).** Run Mode 1 on directus/n8n and a mid-size untooled repo; have
-   a maintainer (or the ARCHITECTURE.md, where one exists) judge the top-N suggested rules — what
-   fraction would they accept? Target: the foundation-layer suggestions (directus types/utils/env) are
-   accepted; the noise (root-component, no-edge) is correctly suppressed.
-2. **Gap precision (retrofit).** Run Mode 2 on kluster (already validated: the `apiPlugins → apiDb` gap
-   is real and owner-judgeable) and align's own repo; confirm the GAPs are genuine ungoverned boundaries,
-   not root-component noise. If the root/catch-all heuristic can't suppress the `api → *` class, that's a
-   scope finding.
-3. **Cost.** Confirm the co-change git-log pass is bounded and fast enough to run in `align init` / on
-   demand, not every check.
+
+**For v1 (import-graph-only):** run Mode 1 on directus/n8n + a mid-size untooled repo and Mode 2 on
+kluster + align's own repo; a maintainer judges whether the top-N suggested rules / gaps are ones they'd
+accept, and whether `compositionRoots` cleanly removes the catch-all noise. Cheap; the mechanism is
+already-computed graph data.
+
+**The gate for ever building the co-change pass — the decision-flip test (Fable's demand, partly run):**
+emit top-N suggestions ranked (arm A) by import fan-in/edge-weight vs. (arm B) by co-change, and measure
+**whether any human accept/reject decision flips** between arms. *Partial result (directus):* fan-in
+alone surfaces the foundation; top-12 overlap 6/12, and the co-change-only pairs skew to churny (not
+better) candidates — no evidence a decision flips in co-change's favor. Until a repo shows co-change
+producing a *better* accept/reject decision than fan-in, the pass is not built. Zero decision-flips ⇒
+co-change stays cut.
 
 ## Out of scope
 - **Enforcing co-change coupling** — there is nothing to gate (no import edge for the hidden pairs); this
@@ -93,13 +125,16 @@ ongoing rule-*health*, distinct from onboarding.
 - **Auto-generate and apply rules.** Rejected: direction/intent is a human judgment (a load-bearing
   dependency is usually fine, occasionally a smell); auto-applying would encode guesses as gates.
 
-## Consequences
-- A new bounded co-change `git log` pass (the one new mechanism); reuses align's import graph, component
-  model, and — for retrofit — the loaded ruleset.
-- `align init` / `align_propose_rules` gain co-change ranking (onboarding) and a gap report (retrofit).
-- A root/catch-all component heuristic (glob breadth / fan-out) for noise suppression.
-- Directly serves the dev-loop review's top-supported lever (3a, rule-authoring assist,
-  `docs/proposals/dev-loop-exploration.md`) — it targets adoption friction, align's actual barrier.
+## Consequences (v1)
+- **No new extraction pipeline.** Ranking is an aggregation over the import edges align already scans;
+  gap-finding is edges-minus-ruleset. The git-history co-change pass is **not built** in v1.
+- `align init` / `align_propose_rules` gain edge-weight/fan-in ranking (onboarding) and an
+  ungoverned-edge gap report (retrofit, `align doctor`-shaped).
+- A `compositionRoots` config field (explicit, human-declared) for catch-all exclusion — no heuristic.
+- Serves the dev-loop review's top-supported lever (3a, rule-authoring assist,
+  `docs/proposals/dev-loop-exploration.md`), targeting adoption friction — but the honest scope is
+  smaller than the original draft: on small repos it mostly overlaps ADR 009's layer macros; its real
+  payoff is large-repo edge-weight ranking + the retrofit gap report.
 
 ## Evidence
 - `docs/evidence/co-change-coupling/PROBE.md` — co-change vs import graph (the diagnostic + noise classes).
