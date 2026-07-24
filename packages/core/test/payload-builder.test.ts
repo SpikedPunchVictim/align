@@ -92,3 +92,16 @@ describe('buildMcpCheckPayload', () => {
     });
   });
 });
+
+describe('buildMcpCheckPayload — complete flag (reconciled-build-order #1 follow-up)', () => {
+  it('is true for a dependency-complete scan (no missing-dependencies advisory)', () => {
+    expect(buildMcpCheckPayload(runWith([])).complete).toBe(true);
+  });
+
+  it('is false when a missing-dependencies advisory fired — the green verdict is then provisional', () => {
+    const run = runWith([], { advisories: [{ kind: 'missing-dependencies', message: 'deps missing' }] });
+    const payload = buildMcpCheckPayload(run);
+    expect(payload.verdict).toBe('green');
+    expect(payload.complete).toBe(false);
+  });
+});

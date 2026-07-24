@@ -43,6 +43,12 @@ export interface McpCheckPayload {
    * (docs/proposals/reconciled-build-order.md #2). Structured so agents can read the ratchet
    * without parsing prose. */
   readonly baselineDebt: BaselineDebt;
+  /** `false` when the graph was built without the repo's external dependencies (a
+   * `missing-dependencies` advisory fired) — external-edge rules could not be fully evaluated, so a
+   * `green` verdict here is provisional, not authoritative. Structured so a consumer reading
+   * `verdict` alone isn't misled by a lying green (same false-green doctrine as `--frozen-rules`,
+   * docs/proposals/reconciled-build-order.md #1). `true` for a normal, dependency-complete scan. */
+  readonly complete: boolean;
 }
 
 export interface BuildCheckPayloadOptions {
@@ -69,9 +75,11 @@ export function buildMcpCheckPayload(run: CheckRun, options: BuildCheckPayloadOp
   const hasMore = offset + pageSize < capped.length;
 
   const baselineDebt = options.baselineDebt ?? { previous: 0, current: 0, delta: 0 };
+  const complete = !run.advisories.some((a) => a.kind === 'missing-dependencies');
 
   return {
     verdict: run.verdict,
+    complete,
     gates: run.gates.map((g) => ({
       gate: g.gate,
       status: g.status,

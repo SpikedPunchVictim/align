@@ -60,7 +60,7 @@ async function readHuman(run: () => Promise<number>): Promise<{ code: number; te
   return { code, text: logs.join('\n') };
 }
 
-async function readJson(run: () => Promise<number>): Promise<{ code: number; payload: { advisories: { kind: string; message: string }[]; baselineDebt: { previous: number; current: number; delta: number } } }> {
+async function readJson(run: () => Promise<number>): Promise<{ code: number; payload: { verdict: string; complete: boolean; advisories: { kind: string; message: string }[]; baselineDebt: { previous: number; current: number; delta: number } } }> {
   const logs: string[] = [];
   const originalWrite = process.stdout.write.bind(process.stdout);
   process.stdout.write = ((chunk: string) => {
@@ -73,7 +73,7 @@ async function readJson(run: () => Promise<number>): Promise<{ code: number; pay
   } finally {
     process.stdout.write = originalWrite;
   }
-  return { code, payload: JSON.parse(logs.join('')) as { advisories: { kind: string; message: string }[]; baselineDebt: { previous: number; current: number; delta: number } } };
+  return { code, payload: JSON.parse(logs.join('')) as { verdict: string; complete: boolean; advisories: { kind: string; message: string }[]; baselineDebt: { previous: number; current: number; delta: number } } };
 }
 
 describe('align check — deps-not-installed false-green fix (docs/proposals/reconciled-build-order.md #1)', () => {
@@ -85,6 +85,8 @@ describe('align check — deps-not-installed false-green fix (docs/proposals/rec
     expect(text).toContain('dependencies appear uninstalled or incomplete');
     expect(text).toContain('2 external specifier(s)');
     expect(text).not.toContain('unresolvable-specifier');
+    // The verdict line is annotated provisional so a human isn't misled by the green.
+    expect(text).toMatch(/verdict: green \(provisional/);
   });
 
   it('includes the missing-dependencies advisory in the --json payload', async () => {
@@ -95,6 +97,10 @@ describe('align check — deps-not-installed false-green fix (docs/proposals/rec
     expect(advisory).toBeDefined();
     expect(advisory?.message).toContain('dependencies appear uninstalled or incomplete');
     expect(payload.advisories.some((a) => a.kind === 'uncertainty' && a.message.includes('unresolvable-specifier'))).toBe(false);
+    // The verdict is green but the graph is incomplete — `complete: false` says so structurally, so a
+    // consumer reading `verdict` alone isn't misled (reconciled-build-order #1 follow-up).
+    expect(payload.verdict).toBe('green');
+    expect(payload.complete).toBe(false);
   });
 
   it('fires even when node_modules exists but holds only align (partial install) — the false-green case the fix targets', async () => {

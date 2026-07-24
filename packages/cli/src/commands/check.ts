@@ -292,5 +292,9 @@ function printHuman(
     const deltaStr = baselineDebt.delta === 0 ? '0' : `${baselineDebt.delta > 0 ? '+' : ''}${baselineDebt.delta}`;
     console.log(`baselined debt: ${baselineDebt.previous} → ${baselineDebt.current} (${deltaStr})`);
   }
-  console.log(`verdict: ${run.verdict}`);
+  // Provisional when the graph was built without the repo's external deps (a missing-dependencies
+  // advisory fired) — mirrors the payload `complete: false` so a human skimming to the verdict line
+  // isn't misled by a green that couldn't evaluate external-edge rules.
+  const incomplete = run.advisories.some((a) => a.kind === 'missing-dependencies');
+  console.log(`verdict: ${run.verdict}${incomplete ? ' (provisional — dependencies not fully installed)' : ''}`);
 }
