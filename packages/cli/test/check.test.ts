@@ -381,3 +381,78 @@ describe('align baseline — move detection (ADR 006, carried-over Stage 1 gap)'
     expect(await runCheck(tmpDir, { json: false })).toBe(0);
   });
 });
+
+describe('align check — baseline-debt trailer (docs/proposals/reconciled-build-order.md #2)', () => {
+  async function readHuman(run: () => Promise<number>): Promise<{ code: number; text: string }> {
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = ((...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    }) as typeof console.log;
+    let code: number;
+    try {
+      code = await run();
+    } finally {
+      console.log = originalLog;
+    }
+    return { code, text: logs.join('\n') };
+  }
+
+  async function readJson(run: () => Promise<number>): Promise<{ code: number; payload: { baselineDebt: { previous: number; current: number; delta: number } } }> {
+    const logs: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string) => {
+      logs.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+    let code: number;
+    try {
+      code = await run();
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+    return { code, payload: JSON.parse(logs.join('')) as { baselineDebt: { previous: number; current: number; delta: number } } };
+  }
+
+  it('prints a baseline-debt trailer even when no baseline exists', async () => {
+    tmpDir = copyFixture('simple-app');
+    const { code, text } = await readHuman(() => runCheck(tmpDir, { json: false }));
+    expect(code).toBe(0);
+    expect(text).toContain('baselined debt: 0 → 0 (0)');
+    expect(text).toContain('verdict: green');
+  });
+
+  it('reports no delta immediately after a violation is accepted (previous baseline is already updated)', async () => {
+    tmpDir = copyFixture('simple-app-violation');
+    expect(await runCheck(tmpDir, { json: false })).toBe(1);
+
+    await baselineAccept(tmpDir, undefined);
+    const { code, text } = await readHuman(() => runCheck(tmpDir, { json: false }));
+    expect(code).toBe(0);
+    expect(text).toContain('baselined debt: 1 → 1 (0)');
+  });
+
+  it('includes structured baselineDebt in the --json payload', async () => {
+    tmpDir = copyFixture('simple-app-violation');
+    await baselineAccept(tmpDir, undefined);
+    const { code, payload } = await readJson(() => runCheck(tmpDir, { json: true }));
+    expect(code).toBe(0);
+    expect(payload.baselineDebt).toEqual({ previous: 1, current: 1, delta: 0 });
+  });
+
+  it('reports a negative delta when a baselined violation is fixed without pruning', async () => {
+    tmpDir = copyFixture('simple-app-violation');
+    await baselineAccept(tmpDir, undefined);
+
+    // Fix the violation on disk but do NOT prune the baseline file.
+    fs.writeFileSync(
+      path.join(tmpDir, 'src/api/service.ts'),
+      `export function handleRequest(): string {\n  return 'ok';\n}\n`,
+      'utf8',
+    );
+
+    const { code, text } = await readHuman(() => runCheck(tmpDir, { json: false }));
+    expect(code).toBe(0);
+    expect(text).toContain('baselined debt: 1 → 0 (-1)');
+  });
+});

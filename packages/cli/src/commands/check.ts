@@ -2,6 +2,7 @@ import {
   assertNoCustomHostRules,
   buildMcpCheckPayload,
   renderViolationMessage,
+  type BaselineEntry,
   type CheckRun,
   type ExportedRuleset,
   type InMemoryBaselineStore,
@@ -70,9 +71,16 @@ export async function runCheck(rootDir: string, options: CheckOptions): Promise<
   return options.untrusted === true ? runUntrustedCheck(rootDir, options) : runTrustedCheck(rootDir, options);
 }
 
+export interface BaselineDebt {
+  readonly previous: number;
+  readonly current: number;
+  readonly delta: number;
+}
+
 async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<number> {
   const { ruleset, excludes, hostRules, telemetry } = await loadConfig(rootDir);
-  const { orchestrator, baselineStore } = createOrchestrator(ruleset, readBaseline(rootDir), hostRules);
+  const previousBaseline = readBaseline(rootDir);
+  const { orchestrator, baselineStore } = createOrchestrator(ruleset, previousBaseline, hostRules);
 
   const recorder = createTelemetryRecorder(rootDir, 'check', options.telemetryPreConfig, telemetry);
   const rulesetIrHash = computeRulesetIrHash(ruleset);
@@ -98,7 +106,7 @@ async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<
 
   recordCheckTelemetry(rootDir, recorder, effectiveRun, wallMs, rulesetIrHash, 'check');
 
-  return emit(effectiveRun, options, generatedRulesSummary(rootDir));
+  return emit(effectiveRun, options, generatedRulesSummary(rootDir), computeBaselineDebt(previousBaseline, run));
 }
 
 /**
@@ -192,7 +200,8 @@ async function runUntrustedCheck(rootDir: string, options: CheckOptions): Promis
   }
 
   const rulesetIrHash = computeRulesetIrHash(exported.ruleset);
-  const { orchestrator, baselineStore } = createOrchestrator(exported.ruleset, readBaseline(rootDir), new Map());
+  const previousBaseline = readBaseline(rootDir);
+  const { orchestrator, baselineStore } = createOrchestrator(exported.ruleset, previousBaseline, new Map());
   const wallStart = performance.now();
   const run = await orchestrator.check({ rootDir, excludes: exported.excludes });
   const wallMs = performance.now() - wallStart;
@@ -200,7 +209,7 @@ async function runUntrustedCheck(rootDir: string, options: CheckOptions): Promis
 
   recordCheckTelemetry(rootDir, recorder, run, wallMs, rulesetIrHash, 'check --untrusted');
 
-  return emit(run, options, undefined);
+  return emit(run, options, undefined, computeBaselineDebt(previousBaseline, run));
 }
 
 function persistMovedBaseline(rootDir: string, run: CheckRun, baselineStore: InMemoryBaselineStore): void {
@@ -211,23 +220,34 @@ function persistMovedBaseline(rootDir: string, run: CheckRun, baselineStore: InM
   }
 }
 
+function computeBaselineDebt(previousBaseline: readonly BaselineEntry[], run: CheckRun): BaselineDebt {
+  const previous = previousBaseline.length;
+  const current = run.gates.reduce((sum, g) => sum + g.baselinedCount, 0);
+  return { previous, current, delta: current - previous };
+}
+
 function emit(
   run: CheckRun,
   options: CheckOptions,
   generatedRules: { readonly count: number; readonly doc: string; readonly builtAt: string } | undefined,
+  baselineDebt: BaselineDebt,
 ): number {
   if (options.json) {
-    const payload = buildMcpCheckPayload(run);
+    const payload = buildMcpCheckPayload(run, { baselineDebt });
     const withGeneratedRules = generatedRules === undefined ? payload : { ...payload, generatedRules: { ...generatedRules } };
     process.stdout.write(`${JSON.stringify(withGeneratedRules, null, 2)}\n`);
     return run.verdict === 'green' ? 0 : 1;
   }
 
-  printHuman(run, generatedRules);
+  printHuman(run, generatedRules, baselineDebt);
   return run.verdict === 'green' ? 0 : 1;
 }
 
-function printHuman(run: CheckRun, generatedRules?: { readonly count: number; readonly doc: string; readonly builtAt: string }): void {
+function printHuman(
+  run: CheckRun,
+  generatedRules?: { readonly count: number; readonly doc: string; readonly builtAt: string },
+  baselineDebt?: BaselineDebt,
+): void {
   for (const gate of run.gates) {
     const label = `${gate.gate}`.padEnd(12);
     if (gate.status === 'error') {
@@ -267,6 +287,10 @@ function printHuman(run: CheckRun, generatedRules?: { readonly count: number; re
     console.log(
       `⚠ ${run.ungroundedComponents.length} component(s) matched no files (ungrounded, provisionally green): ${names}`,
     );
+  }
+  if (baselineDebt !== undefined) {
+    const deltaStr = baselineDebt.delta === 0 ? '0' : `${baselineDebt.delta > 0 ? '+' : ''}${baselineDebt.delta}`;
+    console.log(`baselined debt: ${baselineDebt.previous} → ${baselineDebt.current} (${deltaStr})`);
   }
   console.log(`verdict: ${run.verdict}`);
 }

@@ -15,6 +15,12 @@ const CATEGORY_PRIORITY: Readonly<Record<Category, number>> = {
   format: 4,
 };
 
+export interface BaselineDebt {
+  readonly previous: number;
+  readonly current: number;
+  readonly delta: number;
+}
+
 export interface McpCheckPayload {
   readonly verdict: 'green' | 'red' | 'error';
   readonly gates: readonly {
@@ -33,12 +39,17 @@ export interface McpCheckPayload {
    * `green` (an empty greenfield component is not a failure); this field is what makes that green
    * distinguishable from a fully-grounded one. */
   readonly ungroundedComponents: readonly UngroundedComponent[];
+  /** Change in baselined debt since the last persisted baseline: `47 → 45 (−2)`
+   * (docs/proposals/reconciled-build-order.md #2). Structured so agents can read the ratchet
+   * without parsing prose. */
+  readonly baselineDebt: BaselineDebt;
 }
 
 export interface BuildCheckPayloadOptions {
   readonly maxPerRule?: number; // first-N-per-rule cap (ADR 007 rule 5); default 10, spike-validated
   readonly cursor?: string; // opaque offset string from a previous page
   readonly pageSize?: number; // max violations in this page across all rules
+  readonly baselineDebt?: BaselineDebt;
 }
 
 /**
@@ -57,6 +68,8 @@ export function buildMcpCheckPayload(run: CheckRun, options: BuildCheckPayloadOp
   const page = capped.slice(offset, offset + pageSize);
   const hasMore = offset + pageSize < capped.length;
 
+  const baselineDebt = options.baselineDebt ?? { previous: 0, current: 0, delta: 0 };
+
   return {
     verdict: run.verdict,
     gates: run.gates.map((g) => ({
@@ -70,6 +83,7 @@ export function buildMcpCheckPayload(run: CheckRun, options: BuildCheckPayloadOp
     ...(capped.length > pageSize ? { pagination: { cursor: String(offset + pageSize), hasMore } } : {}),
     advisories: run.advisories,
     ungroundedComponents: run.ungroundedComponents,
+    baselineDebt,
   };
 }
 
