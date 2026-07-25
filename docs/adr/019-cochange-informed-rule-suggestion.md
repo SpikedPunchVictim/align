@@ -1,11 +1,11 @@
 # ADR 019: Co-change-informed rule suggestion (onboarding + retrofit)
 
-**STATUS: DRAFT — RESCOPED after the placebo test (2026-07-23).** The Fable review demanded the arm the
-original draft skipped: co-change ranking vs. import-graph-only ranking. **It was run, and co-change
-largely fails it.** So the co-change pass is **cut from v1**; the shippable proposal is the
-import-graph-only version below (which needs no git-history mining). Co-change is deferred behind the
+**STATUS: ACCEPTED (v1 = import-graph-only) — owner sign-off 2026-07-24.** The Fable review demanded the
+arm the original draft skipped: co-change ranking vs. import-graph-only ranking. It was run, and
+co-change largely failed it — so the co-change git-history pass is **cut from v1**; what ships is the
+import-graph-only Mode-2 gap report + Mode-1 ranking below. Co-change stays deferred behind the
 decision-flip test in § Falsification. Original co-change framing retained below the Decision for the
-record.
+record. Build target for reconciled-build-order #3 is **Mode 2 (the ungoverned-edge gap report)**.
 
 > ADR numbering: 016/017 in flight on `stage0-surface-inference`; 018 on main. This is 019.
 
