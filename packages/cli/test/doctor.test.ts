@@ -328,4 +328,114 @@ describe('align doctor', () => {
       expect(logs.join('\n')).not.toContain('stale-skill');
     });
   });
+
+  // ADR 019 Mode 2 (ACCEPTED, v1 = import-graph-only), docs/proposals/reconciled-build-order.md #3
+  // — the ungoverned-edge gap report. Fixture reproduces the ADR's kluster demo shape: apiDomain's
+  // dependency on apiDb is governed (an arch.layers rule), apiPlugins' dependency on apiDb is not
+  // — a real gap. A composition-root `api` component also imports every sub-layer but is declared
+  // in `compositionRoots`, so its fan-out is excluded from the report entirely.
+  describe('ungoverned-edge gap report (ADR 019 Mode 2)', () => {
+    function writeGapFixture(dir: string, opts: { compositionRoots?: string[] } = {}): void {
+      fs.mkdirSync(path.join(dir, 'src', 'apiDb'), { recursive: true });
+      fs.mkdirSync(path.join(dir, 'src', 'apiDomain'), { recursive: true });
+      fs.mkdirSync(path.join(dir, 'src', 'apiPlugins'), { recursive: true });
+      fs.mkdirSync(path.join(dir, 'src', 'api'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'src/apiDb/index.ts'), `export const db = 1;\n`, 'utf8');
+      fs.writeFileSync(
+        path.join(dir, 'src/apiDomain/index.ts'),
+        `import { db } from '../apiDb/index.js';\nexport const domain = db;\n`,
+        'utf8',
+      );
+      fs.writeFileSync(
+        path.join(dir, 'src/apiPlugins/index.ts'),
+        `import { db } from '../apiDb/index.js';\nexport const plugin = db;\n`,
+        'utf8',
+      );
+      fs.writeFileSync(
+        path.join(dir, 'src/api/index.ts'),
+        `import '../apiDb/index.js';\nimport '../apiDomain/index.js';\nimport '../apiPlugins/index.js';\nexport const composed = true;\n`,
+        'utf8',
+      );
+      writeTsconfig(dir, { compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext' } });
+      const compositionRootsExport =
+        opts.compositionRoots !== undefined ? `export const compositionRoots = ${JSON.stringify(opts.compositionRoots)};\n` : '';
+      fs.writeFileSync(
+        path.join(dir, 'align.config.ts'),
+        `import { defineProject } from '@spikedpunch/align-core/dsl';\n${compositionRootsExport}export default defineProject({\n` +
+          `  components: { api: 'src/api/**', apiDomain: 'src/apiDomain/**', apiPlugins: 'src/apiPlugins/**', apiDb: 'src/apiDb/**' },\n` +
+          `  rules: (c) => [c.arch.layer(c.apiDomain).canOnlyDependOn(c.apiDb)],\n` +
+          `});\n`,
+        'utf8',
+      );
+      fs.symlinkSync(path.join(process.cwd(), 'node_modules'), path.join(dir, 'node_modules'), 'dir');
+    }
+
+    async function jsonReport(dir: string): Promise<{ advisories: { kind: string; message: string }[] }> {
+      const jsonLogs: string[] = [];
+      const originalWrite = process.stdout.write.bind(process.stdout);
+      process.stdout.write = ((chunk: string) => {
+        jsonLogs.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write;
+      try {
+        await runDoctor(dir, { json: true });
+      } finally {
+        process.stdout.write = originalWrite;
+      }
+      return JSON.parse(jsonLogs.join('')) as { advisories: { kind: string; message: string }[] };
+    }
+
+    it('reports apiPlugins -> apiDb as an ungoverned-edge gap, but not apiDomain -> apiDb (governed by an arch.layers rule)', async () => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-doctor-gap-test-'));
+      writeGapFixture(tmpDir);
+
+      const payload = await jsonReport(tmpDir);
+      const gapAdvisories = payload.advisories.filter((a) => a.kind === 'ungoverned-edge');
+      const messages = gapAdvisories.map((a) => a.message);
+
+      expect(messages.some((m) => m.startsWith('apiPlugins -> apiDb'))).toBe(true);
+      expect(messages.some((m) => m.startsWith('apiDomain -> apiDb'))).toBe(false);
+    });
+
+    it('excludes a declared compositionRoots component as a gap-report SOURCE, even though it imports every sub-layer', async () => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-doctor-gap-test-'));
+      writeGapFixture(tmpDir, { compositionRoots: ['api'] });
+
+      const payload = await jsonReport(tmpDir);
+      const messages = payload.advisories.filter((a) => a.kind === 'ungoverned-edge').map((a) => a.message);
+
+      expect(messages.some((m) => m.startsWith('api -> '))).toBe(false);
+      // apiPlugins -> apiDb is still a real gap independent of the composition-root exclusion.
+      expect(messages.some((m) => m.startsWith('apiPlugins -> apiDb'))).toBe(true);
+    });
+
+    it('without compositionRoots declared, the composition root\'s own fan-out shows up as gaps too (no heuristic exclusion)', async () => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-doctor-gap-test-'));
+      writeGapFixture(tmpDir); // no compositionRoots export at all
+
+      const payload = await jsonReport(tmpDir);
+      const messages = payload.advisories.filter((a) => a.kind === 'ungoverned-edge').map((a) => a.message);
+
+      expect(messages.some((m) => m.startsWith('api -> apiPlugins'))).toBe(true);
+    });
+
+    it('human output surfaces the ungoverned-edge kind with edge-weight/fan-in detail', async () => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-doctor-gap-test-'));
+      writeGapFixture(tmpDir, { compositionRoots: ['api'] });
+
+      const logs: string[] = [];
+      const originalLog = console.log;
+      console.log = (msg: string) => logs.push(msg);
+      try {
+        await runDoctor(tmpDir);
+      } finally {
+        console.log = originalLog;
+      }
+      const output = logs.join('\n');
+      expect(output).toContain('ungoverned-edge');
+      expect(output).toContain('apiPlugins -> apiDb');
+      expect(output).toContain('import site');
+      expect(output).toContain('fan-in');
+    });
+  });
 });

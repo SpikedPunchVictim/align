@@ -1,6 +1,13 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { buildUncertaintyAdvisories, findUngroundedComponents, toComponentName, type Advisory, type UncertaintyMarker } from '@spikedpunch/align-core';
+import {
+  buildUncertaintyAdvisories,
+  computeUngovernedEdgeGaps,
+  findUngroundedComponents,
+  toComponentName,
+  type Advisory,
+  type UncertaintyMarker,
+} from '@spikedpunch/align-core';
 import { TypeScriptPlugin, UNMAPPED_COMPONENT, findDeadAliases, findOrphanedPackages } from '@spikedpunch/align-plugin-typescript';
 import { loadConfig } from '../config.js';
 import { ALIGN_VERSION } from '../telemetry/index.js';
@@ -122,6 +129,24 @@ async function collectDoctorReport(rootDir: string): Promise<DoctorReport> {
         advisories.push({
           kind: 'ungrounded-component',
           message: `Component '${ungrounded.name}' (selector: ${ungrounded.selector}, empty: '${ungrounded.policy}') matched zero files — ${suggestion}`,
+        });
+      }
+
+      // ADR 019 Mode 2 (ACCEPTED, v1 = import-graph-only), docs/proposals/reconciled-build-order.md
+      // #3, "the real silence-fixer": component import edges that exist but aren't covered by any
+      // existing arch.no-dependency/arch.layers rule — boundaries the human hasn't decided on yet.
+      // Pure graph computation (edges-minus-ruleset), already ranked by edge-weight/fan-in by
+      // `computeUngovernedEdgeGaps`; pushed here in that ranked order so the generic per-kind
+      // human-display cap below (`DOCTOR_HUMAN_DISPLAY_CAP`) naturally shows the top N with an
+      // "and M more" pointer to `--json`, same as every other advisory kind — no bespoke
+      // truncation needed for this one.
+      const compositionRoots = new Set(loaded.compositionRoots.map(toComponentName));
+      for (const gap of computeUngovernedEdgeGaps(graph, ruleset, compositionRoots)) {
+        const weightNote = `${gap.edgeWeight} import site${gap.edgeWeight === 1 ? '' : 's'}, fan-in ${gap.fanIn}`;
+        const cycleNote = gap.bidirectional ? '; bidirectional — cycle risk' : '';
+        advisories.push({
+          kind: 'ungoverned-edge',
+          message: `${gap.from} -> ${gap.to} (${weightNote}${cycleNote}) — no existing rule governs this dependency; an undecided architectural boundary.`,
         });
       }
 

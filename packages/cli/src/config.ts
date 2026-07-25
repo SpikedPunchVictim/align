@@ -25,6 +25,16 @@ export interface LoadedConfig {
   // `telemetry/resolve.ts`, treats "config didn't say" as "no" only after `--telemetry`/
   // `--no-telemetry`/`ALIGN_TELEMETRY` have all already been checked).
   readonly telemetry?: boolean;
+  // ADR 019 Mode 2 (the ungoverned-edge gap report, docs/proposals/reconciled-build-order.md #3):
+  // explicit, human-declared composition-root component names (e.g. kluster's catch-all `api`,
+  // which legitimately depends on every sub-layer) — excluded as a gap-report edge SOURCE so a
+  // deliberate catch-all's expected fan-out isn't reported as noise. Same deviation shape as
+  // `excludes`/`hostRules`/`telemetry`: this is an advisory-computation input, not a
+  // rule-evaluation concern, so it doesn't belong in the portable `RulesetIR` — and ADR 019's
+  // Precision-critical section explicitly rejects inferring this from a fan-out/glob-breadth
+  // heuristic, so there is no other way to populate it. Read from an optional named
+  // `compositionRoots` export; `[]` when absent.
+  readonly compositionRoots: readonly string[];
 }
 
 function toHostPredicateRegistry(hostRules: Record<string, HostPredicate> | undefined): HostPredicateRegistry {
@@ -63,6 +73,7 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
     excludes?: readonly string[];
     hostRules?: Record<string, HostPredicate>;
     telemetry?: boolean;
+    compositionRoots?: readonly string[];
   };
   try {
     mod = (await import(pathToFileURL(configPath).href)) as typeof mod;
@@ -81,12 +92,13 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
   const excludes = mod.excludes ?? [];
   const hostRules = toHostPredicateRegistry(mod.hostRules);
   const telemetry = mod.telemetry !== undefined ? { telemetry: mod.telemetry } : {};
+  const compositionRoots = mod.compositionRoots ?? [];
 
-  if (!includeGenerated) return { ruleset: mod.default, excludes, hostRules, ...telemetry };
+  if (!includeGenerated) return { ruleset: mod.default, excludes, hostRules, compositionRoots, ...telemetry };
 
   const generated = readGeneratedRules(rootDir);
-  if (generated === undefined) return { ruleset: mod.default, excludes, hostRules, ...telemetry };
+  if (generated === undefined) return { ruleset: mod.default, excludes, hostRules, compositionRoots, ...telemetry };
 
   const mergedRules = mergeGeneratedRules(mod.default.rules, generated.rules);
-  return { ruleset: { ...mod.default, rules: [...mergedRules] }, excludes, hostRules, ...telemetry };
+  return { ruleset: { ...mod.default, rules: [...mergedRules] }, excludes, hostRules, compositionRoots, ...telemetry };
 }
