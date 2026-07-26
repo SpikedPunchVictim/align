@@ -53,15 +53,20 @@ no git mining — ADR 019 rescoped, co-change cut). Rank by fan-in/edge-weight; 
 by explicit `compositionRoots: [...]` declaration. `align doctor`-shaped. Fixes silence (a) for existing
 structure. Effort: low (graph-only). Gate: maintainer accept/reject precision.
 
-### 4. Deep-import provenance  — *strongest net-new signal*
-`arch.import-provenance`: flag cross-package imports that reach past the declared public surface into
-`/src`,`/dist`,`/lib`,`/internal` or an undeclared subpath; respect `exports` wildcards. Keys off
-package boundaries + `exports` — **no component classification needed**, so it works on the repos where
-presets can't bind. The only recommendation producing net-new violations. Evidence: n8n spike (466 raw
-→ ~15-20 est. TP once wildcards respected — an untriaged *hypothesis*, to be triaged, not a measured
-rate); vscode same class (`@vscode/prompt-tsx/dist/base/...`). Effort: medium. Needs its own ADR.
-**Placebo-test first:** compare the `exports`-aware machinery against a dumb `/src/|/dist/` cross-package
-grep before crediting the machinery (the discipline that rescoped ADR 019).
+### 4. Deep-import convention check  — *strongest net-new signal* — **BUILT (ADR 020)**
+Flag cross-package imports that reach past a package's public surface into a `src`/`dist`/`lib`/
+`internal` subpath segment. Keys off package boundaries + specifier text — **no component
+classification needed**, so it works on the repos where presets can't bind.
+**Shipped rescoped** (ADR 020, `67dbf05`): the placebo test the build order demanded was run and
+**cut the `exports`-aware machinery** (Arm B changed ~2% in both samples; the dominant FP driver —
+`typescript`/`mocha` multi-entry conventions, 69% of vscode hits — is untouched by it). With that gone
+and vscode precision ~31%, it does **not** clear the blocking bar → it ships as a **`doctor` advisory**
+(`computeDeepImportHits`, the #3 shape), **not** a new IR rule kind. Two evidence corrections folded in:
+a v1 allowlist (`knownPublicDeepImports`, seeded `typescript/lib/*` + `mocha/lib/*`) and the
+**false-quiet fix** — unresolved deep-subpath specifiers route to `graph.uncertain`, not `edges`, so the
+check reads all three sources or sees ~nothing in the uninstalled repos it targets. Live: n8n 178 hits,
+vscode 18 (`@vscode/prompt-tsx` ×12). First-class `arch.import-provenance` IR rule kind → Design Reserve
+behind a blocking-readiness + precision-with-allowlist trigger.
 
 ### 5. Contract presets  — *after classification robustness*
 Ship generic (never vendored) preset packs on the existing engine: `contracts-purity`,
@@ -91,11 +96,11 @@ trailer actually get acted on?) before building the acknowledged-state throttle.
 ## Status snapshot
 | # | item | status |
 |---|---|---|
-| 1 | deps-not-installed false-green fix | not built — do first |
-| 2 | baseline-delta trailer | not built — near-free |
-| 3 | ADR 019 Mode 2 gap report | ADR 019 DRAFT (rescoped), unbuilt |
-| 4 | deep-import provenance | roadmapped (pr-research Stage 1), needs ADR |
-| 5 | contract presets (+5a classification) | engine built (ADR 017, on stage0); presets/classification unbuilt |
+| 1 | deps-not-installed false-green fix | **BUILT** — scan-based collapse + `complete:false` (4205ca3, 5184c05) |
+| 2 | baseline-delta trailer | **BUILT** — `baselined debt: N → M (Δ)` + `baselineDebt` payload |
+| 3 | ADR 019 Mode 2 gap report | **BUILT** — `computeUngovernedEdgeGaps` → doctor advisory (be06c67, 2e74c13) |
+| 4 | deep-import provenance | **BUILT** — rescoped to a `doctor` advisory (ADR 020); `computeDeepImportHits` (67dbf05) |
+| 5 | contract presets (+5a classification) | **NEXT** — engine built (ADR 017, on stage0); presets/classification unbuilt |
 | 6 | background re-evaluation | DESIGN RESERVE, gated on #3 |
 
 ## The through-line
