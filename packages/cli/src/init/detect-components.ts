@@ -17,12 +17,44 @@ export interface DetectedComponent {
  * whichever package manager declared them (pnpm-workspace.yaml or package.json `workspaces`), read
  * once by the shared `readWorkspaceGlobs` — no PM-specific parsing duplicated here.
  */
+/** Above this many resolved packages, one-component-per-package produces an unreviewable starter
+ * config (backstage has 255) — the coarse prefix group is the better default there. Below it,
+ * naming each package is what makes inter-package boundaries governable at all. A starter-config
+ * heuristic the human reviews and edits, not a gating rule (cf. ADR 019's rejection of heuristics
+ * for enforcement — this is suggestion). */
+const MAX_PER_PACKAGE_COMPONENTS = 25;
+
 export function detectComponents(rootDir: string): DetectedComponent[] {
   const patterns = readWorkspaceGlobs(rootDir);
-  if (patterns.length > 0) return detectFromWorkspaceGlobs(patterns);
+  if (patterns.length > 0) {
+    const grouped = detectFromWorkspaceGlobs(patterns);
+    // A single fixed-prefix workspace (lerna's `packages/*`, a lone `packages/*` in package.json)
+    // lumps every member into one component, hiding exactly the inter-package boundaries a monorepo
+    // user wants to govern (the "nest = 1 component" collapse). When that lone group resolves to a
+    // reviewable number of packages, name them individually instead. Only the single-prefix case is
+    // touched — a multi-prefix workspace already yields >1 group and stays coarse, unchanged.
+    if (grouped.length === 1) {
+      const perPackage = detectPerPackage(rootDir);
+      if (perPackage.length >= 2 && perPackage.length <= MAX_PER_PACKAGE_COMPONENTS) return perPackage;
+    }
+    return grouped;
+  }
   const fromDirs = detectFromTopLevelPackageDirs(rootDir);
   if (fromDirs.length > 0) return fromDirs;
   return detectSinglePackage(rootDir);
+}
+
+/** One component per resolved workspace package, named from its directory's last segment and scoped
+ * to that directory — the granular alternative to prefix-grouping for small single-prefix
+ * workspaces. Disjoint package dirs never overlap, so classification order is cosmetic; sorted by
+ * name for deterministic, readable output. */
+function detectPerPackage(rootDir: string): DetectedComponent[] {
+  const components = loadWorkspacePackages(rootDir).map((p) => {
+    const dir = p.dir.replace(/\/$/, '');
+    return { name: sanitizeName(lastSegment(dir)), pattern: `${dir}/**` };
+  });
+  components.sort((a, b) => a.name.localeCompare(b.name));
+  return dedupeNames(components);
 }
 
 function detectFromWorkspaceGlobs(patterns: readonly string[]): DetectedComponent[] {
