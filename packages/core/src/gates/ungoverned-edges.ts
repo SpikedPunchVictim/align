@@ -56,13 +56,19 @@ function indexRulesetCoverage(ruleset: RulesetIR): RulesetCoverageIndex {
   const layerComponents = new Set<ComponentName>();
   for (const rule of ruleset.rules) {
     if (rule.kind === 'arch.no-dependency') {
+      // ADR 017 Part A widened `to` to `ComponentRef | ExternalSelector`; an external target
+      // constrains a *package* boundary (`graph.externalEdges`), not an internal component pair, so
+      // it says nothing about coverage of a component-to-component edge -- skip it, using the same
+      // `typeof === 'string'` discriminator the evaluators use (`rules/component-refs.ts:45`).
       // `RuleIR`'s ComponentRef fields are plain `string` at the zod-schema level (ir.ts's
       // `componentRef = componentName`, itself a regex-validated `z.string()`, not the branded
       // `ComponentName`) -- `toComponentName` is the established cast at this trusted boundary
       // (same convention as `components/registry.ts`'s `findUngroundedComponents`), since these
       // refs are already validated against the components registry by the time a `RulesetIR`
       // reaches here (`rules/component-refs.ts`'s `validateRuleComponentRefs`).
-      noDependencyPairs.add(unorderedPairKey(toComponentName(rule.from), toComponentName(rule.to)));
+      if (typeof rule.to === 'string') {
+        noDependencyPairs.add(unorderedPairKey(toComponentName(rule.from), toComponentName(rule.to)));
+      }
     } else if (rule.kind === 'arch.layers') {
       for (const layerDef of rule.layers) layerComponents.add(toComponentName(layerDef.layer));
     }
