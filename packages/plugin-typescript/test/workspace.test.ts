@@ -43,6 +43,27 @@ describe('readWorkspaceGlobs', () => {
     expect(readWorkspaceGlobs(dir)).toEqual(['pnpm-pkgs/*']);
   });
 
+  it('reads lerna.json `packages` when there is no pnpm/package.json workspace declaration (lerna monorepo, e.g. nest)', () => {
+    const dir = makeRepo({
+      'lerna.json': JSON.stringify({ packages: ['packages/*'], version: '11.0.0' }),
+      'package.json': JSON.stringify({ name: 'r' }), // no `workspaces` field — nest's exact shape
+    });
+    expect(readWorkspaceGlobs(dir)).toEqual(['packages/*']);
+  });
+
+  it("defaults a lerna.json with no `packages` field to lerna's own default ['packages/*']", () => {
+    const dir = makeRepo({ 'lerna.json': JSON.stringify({ version: '11.0.0' }) });
+    expect(readWorkspaceGlobs(dir)).toEqual(['packages/*']);
+  });
+
+  it('prefers a package.json workspaces field over lerna.json (the PM is what actually globs)', () => {
+    const dir = makeRepo({
+      'lerna.json': JSON.stringify({ packages: ['lerna-pkgs/*'] }),
+      'package.json': JSON.stringify({ name: 'r', workspaces: ['npm-pkgs/*'] }),
+    });
+    expect(readWorkspaceGlobs(dir)).toEqual(['npm-pkgs/*']);
+  });
+
   it('returns [] for a single-package repo with no workspace declaration', () => {
     const dir = makeRepo({ 'package.json': JSON.stringify({ name: 'r' }) });
     expect(readWorkspaceGlobs(dir)).toEqual([]);
