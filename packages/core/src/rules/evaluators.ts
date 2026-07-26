@@ -1,11 +1,12 @@
 import type { ComponentName, RepoRelativePath } from '../types/branded.js';
 import { toRuleId } from '../types/branded.js';
-import type { ArchLayersRule, ArchMetricRule, ArchNoCyclesRule, ArchNoDependencyRule, ComponentDefinitionIR, RuleIR } from '../types/ir.js';
+import type { ArchLayersRule, ArchMetricRule, ArchNoCyclesRule, ArchNoDependencyRule, ComponentDefinitionIR, ExternalSelector, RuleIR } from '../types/ir.js';
 import type { DependencyGraph, DependencyGraphEdge, EdgeKind } from '../types/graph.js';
 import type { CycleEdge, Violation } from '../types/violation.js';
 import { computeFingerprint } from '../baseline/fingerprint.js';
 import { extractCycleChainNodes, tarjanScc } from './tarjan.js';
 import { evaluateCustomHost, type HostPredicateRegistry } from './host-rules.js';
+import { externalSelectorMatchesNode } from './external-match.js';
 
 /** No predicates registered — the default for callers that don't pass a registry (most tests, and
  * any evaluation path that only exercises portable `arch.*` kinds). A `custom.host` rule
@@ -35,6 +36,15 @@ export function becauseField(because: string | undefined): { readonly because: s
 }
 
 export const evaluateNoDependency: RuleEvaluator<ArchNoDependencyRule> = (rule, graph) => {
+  // ADR 017 Part A: `to` widened to `ComponentRef | ExternalSelector`. An external target is
+  // matched against `graph.externalEdges` only — `graph.nodes`/`graph.edges` (the internal-only
+  // arm below) are untouched by construction, so a rule with a plain component `to` is byte-
+  // identical to pre-widening behavior (the `evaluators.test.ts` "external-package retention does
+  // not change arch.* evaluator semantics" regression suite pins this).
+  if (typeof rule.to !== 'string') {
+    return evaluateNoDependencyExternal(rule, rule.to, graph);
+  }
+
   const nodeByFile = new Map(graph.nodes.map((n) => [n.file, n]));
   const violations: Violation[] = [];
   for (const edge of graph.edges) {
@@ -65,6 +75,45 @@ export const evaluateNoDependency: RuleEvaluator<ArchNoDependencyRule> = (rule, 
   }
   return violations;
 };
+
+/** The external-edge arm of `evaluateNoDependency` (ADR 017 Part A). `includeTypeOnly` (default
+ * `false`, mirrors `arch.no-cycles`) gates whether a `type-only` external edge counts at all —
+ * everywhere else edge `kind` is ignored (unchanged from the internal arm above). */
+function evaluateNoDependencyExternal(rule: ArchNoDependencyRule, selector: ExternalSelector, graph: DependencyGraph): Violation[] {
+  const nodeByFile = new Map(graph.nodes.map((n) => [n.file, n]));
+  const externalNodeById = new Map(graph.externalNodes.map((n) => [n.id, n]));
+  const violations: Violation[] = [];
+
+  for (const edge of graph.externalEdges) {
+    const fromNode = nodeByFile.get(edge.from);
+    if (fromNode === undefined || fromNode.component !== rule.from) continue;
+    if (edge.kind === 'type-only' && !selector.includeTypeOnly) continue;
+    const targetNode = externalNodeById.get(edge.to);
+    if (targetNode === undefined) continue;
+    if (!externalSelectorMatchesNode(selector.pattern, targetNode)) continue;
+
+    const id = computeFingerprint(['no-dependency-external', rule.id, edge.from, edge.to, edge.specifier]);
+    violations.push({
+      id,
+      ruleId: toRuleId(rule.id),
+      category: 'architecture',
+      severity: 'error',
+      file: edge.from,
+      range: { startLine: edge.line, endLine: edge.line },
+      snippet: edge.snippet,
+      fixHint: { code: 'remove-import', file: edge.from, line: edge.line },
+      ...becauseField(rule.provenance.because),
+      kind: 'no-dependency-external',
+      fromFile: edge.from,
+      fromComponent: fromNode.component,
+      toExternal: edge.to,
+      externalPackageName: targetNode.packageName,
+      specifier: edge.specifier,
+      line: edge.line,
+    });
+  }
+  return violations;
+}
 
 const RUNTIME_KINDS: readonly EdgeKind[] = ['import', 'reexport', 'dynamic'];
 const ALL_KINDS: readonly EdgeKind[] = ['import', 'reexport', 'dynamic', 'type-only'];
@@ -136,17 +185,22 @@ export const evaluateNoCycles: RuleEvaluator<ArchNoCyclesRule> = (rule, graph) =
 
 export const evaluateLayers: RuleEvaluator<ArchLayersRule> = (rule, graph) => {
   const nodeByFile = new Map(graph.nodes.map((n) => [n.file, n]));
+  const externalNodeById = new Map(graph.externalNodes.map((n) => [n.id, n]));
   const violations: Violation[] = [];
 
   for (const layerDef of rule.layers) {
-    const allowed = new Set<ComponentName>(layerDef.canDependOn as ComponentName[]);
+    const allowedComponents = new Set<ComponentName>(
+      layerDef.canDependOn.filter((entry): entry is ComponentName => typeof entry === 'string'),
+    );
+    const externalSelectors = layerDef.canDependOn.filter((entry): entry is ExternalSelector => typeof entry !== 'string');
+
     for (const edge of graph.edges) {
       const fromNode = nodeByFile.get(edge.from);
       const toNode = nodeByFile.get(edge.to);
       if (fromNode === undefined || toNode === undefined) continue;
       if (fromNode.component !== layerDef.layer) continue;
       if (toNode.component === fromNode.component) continue; // intra-layer is always fine
-      if (allowed.has(toNode.component)) continue;
+      if (allowedComponents.has(toNode.component)) continue;
 
       const id = computeFingerprint(['layers', rule.id, edge.from, edge.to, edge.specifier]);
       violations.push({
@@ -164,6 +218,48 @@ export const evaluateLayers: RuleEvaluator<ArchLayersRule> = (rule, graph) => {
         toLayer: toNode.component,
         fromFile: edge.from,
         toFile: edge.to,
+        specifier: edge.specifier,
+        line: edge.line,
+      });
+    }
+
+    // ADR 017 Part A back-compat invariant: external edges are evaluated for this layer ONLY if
+    // it names >=1 external selector. Zero external selectors -> `continue` before touching
+    // `graph.externalEdges` at all, so a components-only allow-list is byte-identical to
+    // pre-widening behavior (the same-count regression test in evaluators.test.ts pins this).
+    if (externalSelectors.length === 0) continue;
+
+    for (const edge of graph.externalEdges) {
+      const fromNode = nodeByFile.get(edge.from);
+      if (fromNode === undefined || fromNode.component !== layerDef.layer) continue;
+
+      // `includeTypeOnly` (mirrors arch.no-cycles): a type-only edge is entirely out of scope for
+      // any selector that doesn't opt in — not "unmatched, hence forbidden", but excluded from
+      // this rule's consideration altogether, same as no-cycles excludes type-only edges from its
+      // scan by default.
+      const applicableSelectors = edge.kind === 'type-only' ? externalSelectors.filter((s) => s.includeTypeOnly) : externalSelectors;
+      if (edge.kind === 'type-only' && applicableSelectors.length === 0) continue;
+
+      const targetNode = externalNodeById.get(edge.to);
+      if (targetNode === undefined) continue;
+      if (applicableSelectors.some((sel) => externalSelectorMatchesNode(sel.pattern, targetNode))) continue;
+
+      const id = computeFingerprint(['layers-external', rule.id, edge.from, edge.to, edge.specifier]);
+      violations.push({
+        id,
+        ruleId: toRuleId(rule.id),
+        category: 'architecture',
+        severity: 'error',
+        file: edge.from,
+        range: { startLine: edge.line, endLine: edge.line },
+        snippet: edge.snippet,
+        fixHint: { code: 'remove-import', file: edge.from, line: edge.line },
+        ...becauseField(rule.provenance.because),
+        kind: 'layers-external',
+        fromLayer: fromNode.component,
+        fromFile: edge.from,
+        toExternal: edge.to,
+        externalPackageName: targetNode.packageName,
         specifier: edge.specifier,
         line: edge.line,
       });

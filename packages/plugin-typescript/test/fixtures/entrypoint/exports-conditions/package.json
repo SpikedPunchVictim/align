@@ -1,0 +1,15 @@
+{
+  "name": "@fixture/exports-conditions",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./output_parsers": {
+      "types": "./dist/output_parsers/index.d.ts",
+      "default": "./dist/output_parsers/index.js"
+    },
+    "./package.json": "./package.json"
+  }
+}

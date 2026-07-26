@@ -105,6 +105,17 @@ function printResult(result: AgentRunResult): void {
   console.log(`align agent run — verdict: ${result.verdict}`);
   if (result.refusalReason !== undefined) console.log(`  refused: ${result.refusalReason}`);
 
+  // When the refusal is an initial-check gate error, guide the user to the fix — this is
+  // environmental (config/scanner/deps), so the next steps are theirs, not the agent's.
+  const erroringGates = result.finalCheck?.gates.filter((g) => g.status === 'error') ?? [];
+  if (result.verdict === 'refused' && erroringGates.length > 0) {
+    console.log('  next steps:');
+    console.log('    1. run `align check` here to see the full gate output and reproduce the error.');
+    console.log('    2. common causes: align.config.ts fails to load; a tsconfig / path-alias cannot');
+    console.log('       resolve; or dependencies are not installed — run your package manager install.');
+    console.log('    3. re-run `align agent run` once `align check` is green.');
+  }
+
   for (const g of result.groups) {
     if (g.status === 'done') {
       console.log(`  DONE       ${g.file}  (${g.commitSha.slice(0, 7)}) ${g.rationale}`);

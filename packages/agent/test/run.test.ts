@@ -38,6 +38,11 @@ describe('runAgentLoop — safety rails', () => {
     const result = await runAgentLoop(handle.effects, emptyRuleset, opts());
     expect(result.verdict).toBe('refused');
     expect(fake.calls).toHaveLength(0);
+    // The refusal surfaces WHICH gate errored and its errorMessage — not a generic string — so the
+    // user can act (regression for the "environmental, not fixable" opaque message).
+    expect(result.refusalReason).toContain('architecture gate');
+    expect(result.refusalReason).toContain('eslint binary not found');
+    expect(result.finalCheck?.verdict).toBe('error');
   });
 
   it('reports nothing-to-fix when the initial check is green', async () => {

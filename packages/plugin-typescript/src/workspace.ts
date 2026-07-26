@@ -140,6 +140,19 @@ function isDirectory(p: string): boolean {
   }
 }
 
+/** A package's own-root (no subpath) entry-file candidates, relative to its directory, tried in
+ * this order. Shared between `resolveWorkspaceSpecifier`'s own-package branch below and
+ * `entrypoint.ts`'s convention-fallback resolver (ADR 016) — one list, not two copies that could
+ * silently drift apart (CODING_BEST_PRACTICES.md §26, "DRY the things that must change together"). */
+export const OWN_ENTRY_CANDIDATES: readonly string[] = [
+  'src/index.ts',
+  'src/index.tsx',
+  'index.ts',
+  'index.tsx',
+  'src/index.js',
+  'index.js',
+];
+
 /** Given a bare import specifier and the workspace inventory, finds the owning package and its
  * source-entry file (package-entry -> source mapping, ADR 004). Tries common TS monorepo entry
  * conventions rather than a full package.json `exports` map resolver — a deliberately boring
@@ -156,14 +169,7 @@ export function resolveWorkspaceSpecifier(
   const pkgAbsDir = path.join(rootDir, match.dir);
   const candidates =
     subpath === ''
-      ? [
-          path.join(pkgAbsDir, 'src', 'index.ts'),
-          path.join(pkgAbsDir, 'src', 'index.tsx'),
-          path.join(pkgAbsDir, 'index.ts'),
-          path.join(pkgAbsDir, 'index.tsx'),
-          path.join(pkgAbsDir, 'src', 'index.js'),
-          path.join(pkgAbsDir, 'index.js'),
-        ]
+      ? OWN_ENTRY_CANDIDATES.map((c) => path.join(pkgAbsDir, ...c.split('/')))
       : [
           `${path.join(pkgAbsDir, subpath)}.ts`,
           `${path.join(pkgAbsDir, subpath)}.tsx`,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defineProject } from '../src/dsl/index.js';
+import { external } from '../src/dsl/factories.js';
 
 describe('defineProject', () => {
   it('is valid with only components and no rules callback (zero-DSL day-one value, ADR 002/009)', () => {
@@ -71,6 +72,69 @@ describe('defineProject', () => {
     });
     expect(ir.rules).toHaveLength(2);
     expect(ir.rules.every((r) => r.kind === 'arch.no-dependency')).toBe(true);
+  });
+
+  describe('external(...) selectors (ADR 017 Part A)', () => {
+    it('cannotDependOn(external(...)) compiles to an arch.no-dependency rule with an external `to`', () => {
+      const ir = defineProject({
+        components: { core: 'packages/core/**' },
+        rules: (c) => [c.arch.layer(c.core).cannotDependOn(external('node:child_process'))],
+      });
+      expect(ir.rules).toHaveLength(1);
+      expect(ir.rules[0]).toMatchObject({
+        kind: 'arch.no-dependency',
+        from: 'core',
+        to: { kind: 'external', pattern: 'node:child_process', includeTypeOnly: false },
+      });
+    });
+
+    it('external(pattern, { includeTypeOnly: true }) carries includeTypeOnly through to the IR', () => {
+      const ir = defineProject({
+        components: { core: 'packages/core/**' },
+        rules: (c) => [c.arch.layer(c.core).cannotDependOn(external('react', { includeTypeOnly: true }))],
+      });
+      expect(ir.rules[0]).toMatchObject({ to: { kind: 'external', pattern: 'react', includeTypeOnly: true } });
+    });
+
+    it('cannotDependOn mixes components and external selectors, one rule per ref', () => {
+      const ir = defineProject({
+        components: { core: 'packages/core/**', ui: 'application/ui/**' },
+        rules: (c) => [c.arch.layer(c.core).cannotDependOn(c.ui, external('node:*'))],
+      });
+      expect(ir.rules).toHaveLength(2);
+      expect(ir.rules[0]).toMatchObject({ kind: 'arch.no-dependency', to: 'ui' });
+      expect(ir.rules[1]).toMatchObject({ kind: 'arch.no-dependency', to: { kind: 'external', pattern: 'node:*' } });
+    });
+
+    it('canOnlyDependOn(external(...)) compiles to an arch.layers rule whose canDependOn includes the external selector', () => {
+      const ir = defineProject({
+        components: { web: 'application/web/**', shared: 'packages/shared/**' },
+        rules: (c) => [c.arch.layer(c.web).canOnlyDependOn(c.shared, external('lodash'))],
+      });
+      expect(ir.rules).toHaveLength(1);
+      expect(ir.rules[0]).toMatchObject({
+        kind: 'arch.layers',
+        layers: [{ layer: 'web', canDependOn: ['shared', { kind: 'external', pattern: 'lodash', includeTypeOnly: false }] }],
+      });
+    });
+
+    it('canOnlyDependOn(external(...)) alone (no components) expresses a default-deny external allow-list', () => {
+      const ir = defineProject({
+        components: { web: 'application/web/**' },
+        rules: (c) => [c.arch.layer(c.web).canOnlyDependOn(external('lodash'))],
+      });
+      expect(ir.rules[0]).toMatchObject({
+        layers: [{ layer: 'web', canDependOn: [{ kind: 'external', pattern: 'lodash', includeTypeOnly: false }] }],
+      });
+    });
+
+    it('an external-targeting rule id embeds the pattern and stays distinct from a component-targeting one', () => {
+      const ir = defineProject({
+        components: { core: 'packages/core/**' },
+        rules: (c) => [c.arch.layer(c.core).cannotDependOn(external('node:child_process'))],
+      });
+      expect(ir.rules[0]?.id).toContain('node:child_process');
+    });
   });
 
   it('isIsolated compiles to bidirectional no-dependency rules against every other component', () => {

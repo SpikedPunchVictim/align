@@ -1,6 +1,6 @@
 {
   "irVersion": "1",
-  "exportedAt": 1784015972996,
+  "exportedAt": 1784673011419,
   "excludes": [
     "test-apps",
     "docs/evidence",
@@ -85,7 +85,7 @@
         "from": "core",
         "to": "pluginTypescript",
         "provenance": {
-          "because": "@spikedpunch/align-core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5). Enforced by docs/ARCHITECTURE-RULES.md:19: '- **Rule**: `core` must not depend on `pluginTypescript`.'",
+          "because": "@spikedpunch/align-core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5). The node:child_process arm is ADR 017 Part A's dogfood migration: core has no legitimate shell-out need, so this is a fully portable replacement for the corresponding slice of the no-child-process-outside-git-rails custom.host predicate below (survives `align check --untrusted`, unlike that predicate). Enforced by docs/ARCHITECTURE-RULES.md:19: '- **Rule**: `core` must not depend on `pluginTypescript`.'",
           "sourceFile": "docs/ARCHITECTURE-RULES.md",
           "sourceLineRange": {
             "startLine": 19,
@@ -100,7 +100,7 @@
         "from": "core",
         "to": "cli",
         "provenance": {
-          "because": "@spikedpunch/align-core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5). Enforced by docs/ARCHITECTURE-RULES.md:23: '- **Rule**: `core` must not depend on `cli`.'",
+          "because": "@spikedpunch/align-core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5). The node:child_process arm is ADR 017 Part A's dogfood migration: core has no legitimate shell-out need, so this is a fully portable replacement for the corresponding slice of the no-child-process-outside-git-rails custom.host predicate below (survives `align check --untrusted`, unlike that predicate). Enforced by docs/ARCHITECTURE-RULES.md:23: '- **Rule**: `core` must not depend on `cli`.'",
           "sourceFile": "docs/ARCHITECTURE-RULES.md",
           "sourceLineRange": {
             "startLine": 23,
@@ -131,7 +131,33 @@
         "from": "core",
         "to": "agent",
         "provenance": {
-          "because": "@spikedpunch/align-core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5)."
+          "because": "@spikedpunch/align-core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5). The node:child_process arm is ADR 017 Part A's dogfood migration: core has no legitimate shell-out need, so this is a fully portable replacement for the corresponding slice of the no-child-process-outside-git-rails custom.host predicate below (survives `align check --untrusted`, unlike that predicate)."
+        }
+      },
+      {
+        "kind": "arch.no-dependency",
+        "id": "arch.no-dependency:core->external:node:child_process",
+        "from": "core",
+        "to": {
+          "kind": "external",
+          "pattern": "node:child_process",
+          "includeTypeOnly": false
+        },
+        "provenance": {
+          "because": "@spikedpunch/align-core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5). The node:child_process arm is ADR 017 Part A's dogfood migration: core has no legitimate shell-out need, so this is a fully portable replacement for the corresponding slice of the no-child-process-outside-git-rails custom.host predicate below (survives `align check --untrusted`, unlike that predicate)."
+        }
+      },
+      {
+        "kind": "arch.no-dependency",
+        "id": "arch.no-dependency:pluginTypescript->external:node:child_process",
+        "from": "pluginTypescript",
+        "to": {
+          "kind": "external",
+          "pattern": "node:child_process",
+          "includeTypeOnly": false
+        },
+        "provenance": {
+          "because": "ADR 017 Part A dogfood migration: plugin-typescript (the TS scanner) has no legitimate child_process need — a portable replacement for the corresponding slice of no-child-process-outside-git-rails."
         }
       },
       {
@@ -149,6 +175,19 @@
         ],
         "provenance": {
           "because": "cli is the composition root — the only package that imports a concrete LanguagePlugin/FixProvider and wires it together (ARCHITECTURE.md §5)."
+        }
+      },
+      {
+        "kind": "arch.no-dependency",
+        "id": "arch.no-dependency:cli->external:node:child_process",
+        "from": "cli",
+        "to": {
+          "kind": "external",
+          "pattern": "node:child_process",
+          "includeTypeOnly": false
+        },
+        "provenance": {
+          "because": "ADR 017 Part A dogfood migration: the CLI composition root has zero legitimate child_process need today — a portable replacement for the corresponding slice of no-child-process-outside-git-rails."
         }
       },
       {
@@ -253,7 +292,7 @@
         "hostRuleName": "no-child-process-outside-git-rails",
         "portable": false,
         "provenance": {
-          "because": "node:child_process shell-outs in PRODUCTION code must stay confined to the audited, execFile-only rails (packages/agent/src/git.ts, packages/agent/src/format.ts, packages/create-align/src/nodeEffects.ts) — everywhere else, a child_process import is an unaudited shell-injection/supply-chain surface (test files are exempt; e2e-git.test.ts and packaging.test.ts have legitimate, reviewed test-time shell-outs). Only expressible since Stage 5's external-package retention gave custom.host predicates visibility into external edges (docs/proposals/rule-expansion-evaluation.md correction #2); predicate registered in this file's hostRules export."
+          "because": "node:child_process shell-outs in agent/createAlign PRODUCTION code must stay confined to the audited, execFile-only rails (packages/agent/src/git.ts, packages/agent/src/format.ts, packages/create-align/src/nodeEffects.ts) — everywhere else in those two components, a child_process import is an unaudited shell-injection/supply-chain surface (test files are exempt; e2e-git.test.ts has a legitimate, reviewed test-time shell-out). core/pluginTypescript/cli are now covered by the three portable cannotDependOn(external('node:child_process')) rules above instead (ADR 017 Part A, 2026-07-21 migration) — this predicate is narrowed to the two components with a genuine file-level exemption arch.no-dependency/arch.layers cannot express at whole-component grain (docs/proposals/rule-expansion-evaluation.md §A.2.2, same gap typesLayerIsLeaf documents). Predicate registered in this file's hostRules export."
         }
       },
       {

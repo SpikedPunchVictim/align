@@ -14,8 +14,10 @@ import type { TelemetryStateEntry } from './types.js';
 export function componentOfViolation(v: Violation): string | undefined {
   switch (v.kind) {
     case 'no-dependency':
+    case 'no-dependency-external':
       return v.fromComponent;
     case 'layers':
+    case 'layers-external':
       return v.fromLayer;
     case 'metric':
       return v.component;

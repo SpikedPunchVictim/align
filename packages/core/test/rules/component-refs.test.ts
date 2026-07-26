@@ -88,6 +88,58 @@ describe('validateRuleComponentRefs', () => {
     expect(() => validateRuleComponentRefs(rules, components())).not.toThrow();
   });
 
+  describe('external selectors (ADR 017 Part A) are not ComponentRefs', () => {
+    it('an arch.no-dependency `to` that is an external selector never throws, even against an empty registry', () => {
+      const rules: RuleIR[] = [
+        {
+          kind: 'arch.no-dependency',
+          id: 'r',
+          from: 'api',
+          to: { kind: 'external', pattern: 'node:child_process', includeTypeOnly: false },
+          provenance: {},
+        } satisfies ArchNoDependencyRule,
+      ];
+      expect(() => validateRuleComponentRefs(rules, components('api'))).not.toThrow();
+    });
+
+    it('still throws when `from` is an unknown component, even though `to` is external', () => {
+      const rules: RuleIR[] = [
+        {
+          kind: 'arch.no-dependency',
+          id: 'r',
+          from: 'ghost',
+          to: { kind: 'external', pattern: 'node:*', includeTypeOnly: false },
+          provenance: {},
+        } satisfies ArchNoDependencyRule,
+      ];
+      expect(() => validateRuleComponentRefs(rules, components('api'))).toThrow(UnknownComponentRefError);
+    });
+
+    it('an arch.layers canDependOn entry that is an external selector never throws', () => {
+      const rules: RuleIR[] = [
+        {
+          kind: 'arch.layers',
+          id: 'r',
+          layers: [{ layer: 'api', canDependOn: ['ui', { kind: 'external', pattern: 'lodash', includeTypeOnly: false }] }],
+          provenance: {},
+        } satisfies ArchLayersRule,
+      ];
+      expect(() => validateRuleComponentRefs(rules, components('api', 'ui'))).not.toThrow();
+    });
+
+    it('still throws when a canDependOn entry is an unknown component alongside a valid external selector', () => {
+      const rules: RuleIR[] = [
+        {
+          kind: 'arch.layers',
+          id: 'r',
+          layers: [{ layer: 'api', canDependOn: ['ghost', { kind: 'external', pattern: 'lodash', includeTypeOnly: false }] }],
+          provenance: {},
+        } satisfies ArchLayersRule,
+      ];
+      expect(() => validateRuleComponentRefs(rules, components('api'))).toThrow(UnknownComponentRefError);
+    });
+  });
+
   it('throws UnknownComponentRefError naming the rule id and the missing component for arch.metric `target`', () => {
     const rules: RuleIR[] = [
       { kind: 'arch.metric', id: 'ghost-metric', target: 'ghost', metric: 'loc', max: 800, provenance: {} } satisfies ArchMetricRule,

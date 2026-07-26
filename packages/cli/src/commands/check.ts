@@ -227,11 +227,32 @@ function emit(
   return run.verdict === 'green' ? 0 : 1;
 }
 
+/** Word-wrap `text` to the terminal width, prefixing every line with `indent` spaces. Keeps long
+ * violation/advisory prose readable instead of one jumbled wrapped line (machines use `--json`).
+ * Exported for unit testing (pure). */
+export function wrapMessage(text: string, indent: number): string[] {
+  const width = Math.max(40, Math.min(process.stdout.columns ?? 100, 120)) - indent;
+  const pad = ' '.repeat(indent);
+  const lines: string[] = [];
+  let cur = '';
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    if (cur === '') cur = word;
+    else if (cur.length + 1 + word.length <= width) cur += ` ${word}`;
+    else {
+      lines.push(pad + cur);
+      cur = word;
+    }
+  }
+  if (cur !== '') lines.push(pad + cur);
+  return lines;
+}
+
 function printHuman(run: CheckRun, generatedRules?: { readonly count: number; readonly doc: string; readonly builtAt: string }): void {
   for (const gate of run.gates) {
     const label = `${gate.gate}`.padEnd(12);
     if (gate.status === 'error') {
-      console.log(`  ${label} ERROR   ${gate.errorMessage ?? ''}`);
+      console.log(`  ${label} ERROR`);
+      for (const line of wrapMessage(gate.errorMessage ?? 'unknown error', 4)) console.log(line);
       continue;
     }
     if (gate.status === 'skipped') {
@@ -246,18 +267,27 @@ function printHuman(run: CheckRun, generatedRules?: { readonly count: number; re
     console.log(`  +${generatedRules.count} rules from ${generatedRules.doc} (built ${generatedRules.builtAt})`);
   }
 
-  const violations = run.gates.flatMap((g) => g.violations);
-  if (violations.length > 0) {
+  // Detail section — grouped by gate, each violation as a scannable header (location + rule id)
+  // followed by its word-wrapped message. Machines should read `--json` instead.
+  for (const gate of run.gates) {
+    if (gate.violations.length === 0) continue;
     console.log('');
-    for (const v of violations) {
-      console.log(`  ${v.file}:${v.range.startLine} [${v.ruleId}] ${renderViolationMessage(v)}`);
+    console.log(`  ${gate.gate} — ${gate.violations.length} violation(s)`);
+    for (const v of gate.violations) {
+      console.log('');
+      console.log(`    ✗ ${v.file}:${v.range.startLine}  ${v.ruleId}`);
+      for (const line of wrapMessage(renderViolationMessage(v), 6)) console.log(line);
     }
   }
 
-  console.log('');
   if (run.advisories.length > 0) {
-    for (const a of run.advisories) console.log(`  advisory (${a.kind}): ${a.message}`);
+    console.log('');
+    for (const a of run.advisories) {
+      const wrapped = wrapMessage(`advisory (${a.kind}): ${a.message}`, 2);
+      for (const line of wrapped) console.log(line);
+    }
   }
+  console.log('');
   // R1 (greenfield mode): a distinct line near the verdict — not buried in `align explain`/
   // `doctor` — so a check-agent's own loop sees "green because compliant" vs. "green because
   // empty" as different states (registry.ts's `findUngroundedComponents` doc comment names the

@@ -234,7 +234,15 @@ function scanFile(
   const lineOf = (node: ts.Node): number => sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
   const snippetAt = (line: number): string => (lines[line - 1] ?? '').trim();
 
-  const recordSpecifier = (specifier: string, kind: EdgeKind, line: number): void => {
+  const recordSpecifier = (
+    specifier: string,
+    kind: EdgeKind,
+    line: number,
+    // ADR 016 (public-surface inference): only meaningful for export-declaration call sites — see
+    // DependencyGraphEdge.isBarrelReexport's doc comment for why this bit can't be recovered from
+    // `kind` alone.
+    isBarrelReexport?: boolean,
+  ): void => {
     const target = resolver.resolveSpecifier(specifier, absPath);
     switch (target.kind) {
       case 'internal': {
@@ -252,7 +260,15 @@ function scanFile(
           uncertain.push({ file: relPath, specifier, line, reason: 'build-output-excluded' });
           return;
         }
-        edges.push({ from: relPath, to: targetRel, specifier, line, kind, snippet: snippetAt(line) });
+        edges.push({
+          from: relPath,
+          to: targetRel,
+          specifier,
+          line,
+          kind,
+          snippet: snippetAt(line),
+          ...(isBarrelReexport === undefined ? {} : { isBarrelReexport }),
+        });
         return;
       }
       case 'external': {
@@ -307,7 +323,9 @@ function scanFile(
       ts.isStringLiteral(node.moduleSpecifier)
     ) {
       const kind: EdgeKind = node.isTypeOnly ? 'type-only' : 'reexport';
-      recordSpecifier(node.moduleSpecifier.text, kind, lineOf(node));
+      // Mirrors exports.ts:44's exact bare-star check (`exportClause === undefined`) — the same
+      // AST fact, captured here too so the edge itself carries it (ADR 016).
+      recordSpecifier(node.moduleSpecifier.text, kind, lineOf(node), node.exportClause === undefined);
     } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       const arg = node.arguments[0];
       if (arg !== undefined && ts.isStringLiteralLike(arg)) {

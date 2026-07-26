@@ -1,4 +1,4 @@
-import { defineProject } from '@spikedpunch/align-core/dsl';
+import { defineProject, external } from '@spikedpunch/align-core/dsl';
 import { toRepoRelativePath, type HostPredicate, type HostRuleContext, type HostViolation, type RepoRelativePath } from '@spikedpunch/align-core';
 
 // align dogfoods itself (IMPLEMENTATION_PLAN.md Stage 1 success criteria): core never imports
@@ -33,13 +33,21 @@ export const excludes = [
 // from any sibling subdirectory of `packages/core/src/`. That's a real, already-true invariant
 // worth protecting from regression, not a fabricated violation to manufacture a "finding."
 //
-// `no-child-process-outside-git-rails` dogfood (Stage 5 infra, docs/proposals/
-// rule-expansion-evaluation.md correction #2 + the earlier coordinator misstatement it corrects):
-// the scanner used to classify every `node:*`/builtin specifier as `external` and discard it
-// before an edge was ever recorded (`packages/plugin-typescript/src/tsconfig-resolver.ts:30`,
-// pre-Stage-5), so this predicate was genuinely inexpressible — `ctx.graph` had zero visibility
-// into `child_process` imports. External-package retention (DependencyGraph.externalEdges) closes
-// that gap; this is the first predicate to exercise it.
+// `no-child-process-outside-git-rails` dogfood — PARTIALLY migrated to a portable `external()` rule
+// (ADR 017 Part A, 2026-07-21). The original predicate banned `node:child_process` repo-wide except
+// for an explicit rails allowlist + a test-file exemption; `core`/`pluginTypescript`/`cli` have ZERO
+// legitimate need for it (verified against the real import graph — neither production nor test code
+// in those three packages imports it) and no file-level exemption to express, so those three now
+// carry a fully portable `cannotDependOn(external('node:child_process'))` rule below instead
+// (survives `align check --untrusted`, unlike this predicate). This predicate is KEPT, narrowed to
+// `agent`/`createAlign` only: the file-level rails allowlist (specific files within a component may
+// import it, others in the same component may not) and the test-directory exemption are both
+// sub-component-granularity concerns `arch.no-dependency`/`arch.layers` cannot express at
+// whole-component grain (the same gap `typesLayerIsLeaf` below documents, ADR 017's own §A.2.2
+// callout) — genuinely out of Part A's scope, not a shortcut. Restructuring align's own component
+// map to carve out file-level sub-components was considered and rejected: it would reclassify real
+// files used by OTHER rules in this ruleset (`agent`/`createAlign`'s `canOnlyDependOn`/`isIsolated`),
+// widening blast radius for a single-rule simplification — not worth it for three files.
 //
 // Scoped to what's actually true, verified against the real import graph before writing this rule
 // (not assumed from the task brief, which proposed "git.ts + the CLI composition root"). The
@@ -47,13 +55,12 @@ export const excludes = [
 // execFile-only, no shell string) and `packages/agent/src/format.ts` (mechanical prettier
 // invocation against the TARGET repo being fixed, same execFile discipline); the CLI composition
 // root has zero `child_process` importers today, so the brief's assumed scope was corrected to
-// match reality. The first real run of this predicate also found two TEST-time importers —
-// `packages/agent/test/e2e-git.test.ts` (spawns real git for E2E verification) and
-// `packages/cli/test/packaging.test.ts` (spawns the real built binary to test packaging) — both
-// legitimate, reviewed shell-outs that exist only at test time and are never shipped. Rather than
-// hardcode an ever-growing per-file allowlist for future e2e tests, the predicate exempts test
-// files by path convention (`**/test/**`, this repo's one test-directory convention, confirmed
-// against every package) — the rule's actual concern is the PRODUCTION shell-out surface.
+// match reality. The first real run of this predicate also found one TEST-time importer —
+// `packages/agent/test/e2e-git.test.ts` (spawns real git for E2E verification) — a legitimate,
+// reviewed shell-out that exists only at test time and is never shipped. Rather than hardcode an
+// ever-growing per-file allowlist for future e2e tests, the predicate exempts test files by path
+// convention (`**/test/**`, this repo's one test-directory convention, confirmed against every
+// package) — the rule's actual concern is the PRODUCTION shell-out surface.
 //
 // `packages/create-align/src/nodeEffects.ts` joined this allowlist when `@spikedpunch/create-align`
 // shipped (`pnpm create @spikedpunch/align`): it's the one file that shells out to the target
@@ -70,11 +77,19 @@ function isTestFile(file: RepoRelativePath): boolean {
   return file.split('/').includes('test');
 }
 
+// Narrowed to `agent`/`createAlign` (ADR 017 Part A migration, 2026-07-21, see the doc comment
+// above): `core`/`pluginTypescript`/`cli` are now covered by a portable
+// `cannotDependOn(external('node:child_process'))` rule below instead — this predicate only still
+// needs to reason about the two components with a genuine file-level exemption.
+const CHILD_PROCESS_SCOPED_COMPONENTS: ReadonlySet<string> = new Set(['agent', 'createAlign']);
+
 export const hostRules: Record<string, HostPredicate> = {
   'no-child-process-outside-git-rails': (ctx: HostRuleContext): HostViolation[] => {
     const violations: HostViolation[] = [];
     for (const edge of ctx.graph.externalEdges) {
       if (edge.to !== 'external:node:child_process') continue;
+      const component = ctx.componentOf(edge.from);
+      if (component === undefined || !CHILD_PROCESS_SCOPED_COMPONENTS.has(component)) continue;
       if (CHILD_PROCESS_ALLOWED_FILES.has(edge.from)) continue;
       if (isTestFile(edge.from)) continue;
       violations.push({
@@ -119,12 +134,20 @@ export default defineProject({
     c.arch.noCycles(),
     c.arch
       .layer(c.core)
-      .cannotDependOn(c.pluginTypescript, c.cli, c.agent)
-      .because('@spikedpunch/align-core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5).'),
+      .cannotDependOn(c.pluginTypescript, c.cli, c.agent, external('node:child_process'))
+      .because('@spikedpunch/align-core has zero framework dependencies (zod only) so it stays importable by a future non-Node/non-TS consumer without dragging a compiler along — plugin-typescript, cli, and agent implement its interfaces, never the reverse (ARCHITECTURE.md §5). The node:child_process arm is ADR 017 Part A\'s dogfood migration: core has no legitimate shell-out need, so this is a fully portable replacement for the corresponding slice of the no-child-process-outside-git-rails custom.host predicate below (survives `align check --untrusted`, unlike that predicate).'),
+    c.arch
+      .layer(c.pluginTypescript)
+      .cannotDependOn(external('node:child_process'))
+      .because('ADR 017 Part A dogfood migration: plugin-typescript (the TS scanner) has no legitimate child_process need — a portable replacement for the corresponding slice of no-child-process-outside-git-rails.'),
     c.arch
       .layer(c.cli)
       .canOnlyDependOn(c.core, c.pluginTypescript, c.agent)
       .because('cli is the composition root — the only package that imports a concrete LanguagePlugin/FixProvider and wires it together (ARCHITECTURE.md §5).'),
+    c.arch
+      .layer(c.cli)
+      .cannotDependOn(external('node:child_process'))
+      .because('ADR 017 Part A dogfood migration: the CLI composition root has zero legitimate child_process need today — a portable replacement for the corresponding slice of no-child-process-outside-git-rails.'),
     c.arch
       .layer(c.agent)
       .canOnlyDependOn(c.core)
@@ -138,7 +161,7 @@ export default defineProject({
       .because("packages/core/src/types/ is align's foundation layer (branded types, IR zod schema, Violation model) and must not acquire a dependency on any sibling subdirectory of packages/core/src/ — a sub-path-scoped invariant arch.layers/arch.no-dependency can't express at core's whole-component granularity (docs/proposals/rule-expansion-evaluation.md §A.2.2). Predicate registered in this file's hostRules export."),
     c.custom
       .host('no-child-process-outside-git-rails')
-      .because('node:child_process shell-outs in PRODUCTION code must stay confined to the audited, execFile-only rails (packages/agent/src/git.ts, packages/agent/src/format.ts, packages/create-align/src/nodeEffects.ts) — everywhere else, a child_process import is an unaudited shell-injection/supply-chain surface (test files are exempt; e2e-git.test.ts and packaging.test.ts have legitimate, reviewed test-time shell-outs). Only expressible since Stage 5\'s external-package retention gave custom.host predicates visibility into external edges (docs/proposals/rule-expansion-evaluation.md correction #2); predicate registered in this file\'s hostRules export.'),
+      .because('node:child_process shell-outs in agent/createAlign PRODUCTION code must stay confined to the audited, execFile-only rails (packages/agent/src/git.ts, packages/agent/src/format.ts, packages/create-align/src/nodeEffects.ts) — everywhere else in those two components, a child_process import is an unaudited shell-injection/supply-chain surface (test files are exempt; e2e-git.test.ts has a legitimate, reviewed test-time shell-out). core/pluginTypescript/cli are now covered by the three portable cannotDependOn(external(\'node:child_process\')) rules above instead (ADR 017 Part A, 2026-07-21 migration) — this predicate is narrowed to the two components with a genuine file-level exemption arch.no-dependency/arch.layers cannot express at whole-component grain (docs/proposals/rule-expansion-evaluation.md §A.2.2, same gap typesLayerIsLeaf documents). Predicate registered in this file\'s hostRules export.'),
     // security.manifest gate dogfood (ADR 013, promoted 2026-07-12 on docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md
     // probe evidence): align adopts its own two rules. `newDependencyGate` fingerprints every
     // current runtime/dev dependency across root + every workspace member's package.json —
