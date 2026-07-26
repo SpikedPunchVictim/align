@@ -80,3 +80,49 @@ describe('detectComponents — single-prefix workspace expands per-package (the 
     ]);
   });
 });
+
+describe('detectComponents — top-level source dirs with no package.json (the "vscode = 6,234 unmapped" collapse)', () => {
+  it('maps a top-level source dir (src/) that has no package.json, alongside the package dirs', () => {
+    const dir = makeRepo({
+      'package.json': JSON.stringify({ name: 'vscode' }), // no `workspaces` — not a JS monorepo
+      'build/package.json': JSON.stringify({ name: 'build-tooling' }),
+      'build/gulpfile.ts': 'export const x = 1;\n',
+      'src/main.ts': 'export const m = 1;\n', // src/ has direct source but NO package.json
+      'src/vs/base/common/uri.ts': 'export const u = 1;\n',
+      'resources/icon.svg': '<svg/>\n', // no source -> not a component
+    });
+    const names = detectComponents(dir).map((c) => c.name).sort();
+    expect(names).toEqual(['build', 'src']); // src/ is now bound instead of left unmapped
+    expect(detectComponents(dir).find((c) => c.name === 'src')?.pattern).toBe('src/**');
+  });
+
+  it('detects a top-level dir whose source lives only under its own src/ subdir (no package.json at its root)', () => {
+    const dir = makeRepo({
+      'package.json': JSON.stringify({ name: 'app' }),
+      'tools/package.json': JSON.stringify({ name: 'tools' }),
+      'tools/index.ts': 'export const t = 1;\n',
+      'server/src/index.ts': 'export const s = 1;\n', // server/ has no package.json, source under src/
+    });
+    expect(detectComponents(dir).map((c) => c.name).sort()).toEqual(['server', 'tools']);
+  });
+
+  it('does not turn a build-output dir (dist/, out/) with loose .js into a component', () => {
+    const dir = makeRepo({
+      'package.json': JSON.stringify({ name: 'app' }),
+      'pkg/package.json': JSON.stringify({ name: 'pkg' }),
+      'pkg/index.ts': 'export const p = 1;\n',
+      'dist/bundle.js': 'module.exports = {};\n', // build output, no package.json -> skipped
+      'out/main.js': 'module.exports = {};\n',
+    });
+    expect(detectComponents(dir).map((c) => c.name).sort()).toEqual(['pkg']);
+  });
+
+  it('preserves the single-package `app` default when there are NO top-level package dirs (source-augment only fires alongside packages)', () => {
+    const dir = makeRepo({
+      'package.json': JSON.stringify({ name: 'app' }), // no workspaces, no sub-package dirs
+      'src/index.ts': 'export const a = 1;\n',
+    });
+    // No top-level package dir -> the source-dir augmentation must NOT fire and rename `app` to `src`.
+    expect(detectComponents(dir)).toEqual([{ name: 'app', pattern: 'src/**' }]);
+  });
+});

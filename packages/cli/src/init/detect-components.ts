@@ -103,6 +103,40 @@ function dedupeNames(components: DetectedComponent[]): DetectedComponent[] {
   });
 }
 
+const SOURCE_EXTENSIONS: readonly string[] = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'];
+
+/** Build-output dir names skipped by the source-dir branch — a `dist/`/`out/` full of emitted
+ * `.js` is not a source component. Kept minimal and unambiguously build-output (dotdirs are already
+ * skipped by the caller); mirrors the scanner/doctor exclusion intent without coupling to it. */
+const BUILD_OUTPUT_DIR_NAMES = new Set(['dist', 'build', 'out', 'coverage']);
+
+/** True if `absDir` (or its immediate `src/` subdir) directly contains a source file — the signal
+ * that a top-level directory is a source component even without a `package.json` of its own. */
+function containsSource(absDir: string): boolean {
+  return hasSourceFileDirectlyIn(absDir) || hasSourceFileDirectlyIn(path.join(absDir, 'src'));
+}
+
+function hasSourceFileDirectlyIn(dir: string): boolean {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  return entries.some((e) => e.isFile() && SOURCE_EXTENSIONS.some((ext) => e.name.endsWith(ext)));
+}
+
+/**
+ * Top-level directories as components, for a repo with no workspace declaration. A dir qualifies if
+ * it holds a `package.json` (the original behavior). Additionally — only when at least one such
+ * package dir exists — a top-level dir with NO `package.json` that directly contains source is also
+ * mapped: this is the "vscode = 6,234 unmapped" collapse, where the ~6k-file `src/` core has no
+ * `package.json` and was left unbound while `extensions/`/`build/` (which do) became components.
+ *
+ * The "alongside packages" guard matters: a plain single-package app (only `src/`, no package dirs)
+ * must keep falling through to `detectSinglePackage`'s `app` component rather than being renamed to
+ * `src`, so the source-dir branch is deliberately inert unless a package dir is already present.
+ */
 function detectFromTopLevelPackageDirs(rootDir: string): DetectedComponent[] {
   let entries: fs.Dirent[];
   try {
@@ -110,13 +144,19 @@ function detectFromTopLevelPackageDirs(rootDir: string): DetectedComponent[] {
   } catch {
     return [];
   }
-  const components: DetectedComponent[] = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === 'node_modules') continue;
-    if (fs.existsSync(path.join(rootDir, entry.name, 'package.json'))) {
-      components.push({ name: sanitizeName(entry.name), pattern: `${entry.name}/**` });
-    }
-  }
+  const dirs = entries.filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules');
+
+  const packageDirs = dirs.filter((e) => fs.existsSync(path.join(rootDir, e.name, 'package.json')));
+  if (packageDirs.length === 0) return []; // single-package repo — let detectSinglePackage name it `app`
+
+  const sourceDirs = dirs.filter(
+    (e) =>
+      !fs.existsSync(path.join(rootDir, e.name, 'package.json')) &&
+      !BUILD_OUTPUT_DIR_NAMES.has(e.name) &&
+      containsSource(path.join(rootDir, e.name)),
+  );
+
+  const components = [...packageDirs, ...sourceDirs].map((e) => ({ name: sanitizeName(e.name), pattern: `${e.name}/**` }));
   return dedupeNames(components);
 }
 
