@@ -112,39 +112,70 @@ pluginId exception is an edge backstage itself flags as TODO-debt.
 
 ---
 
-## Verdict
+## Verdict (revised after adversarial review — see corrections below): **DEFER**
 
-**Q1 favorable (strong), Q2 favorable (structural, caveated). The probe supports promoting Part B —
-but as a weaker, honest "yes" than the detection fixes, and squarely gated by prevalence.**
+The first draft of this probe concluded "promote-worthy, gated by prevalence." An adversarial Fable
+review — its empirical claims **independently re-run and verified** (`scratchpad/matrix_measure.js`,
+same-role-cell check) — corrected that to **DEFER**, and the corrections are sound. The honest
+verdict is **hold `manifestField` for a second exemplar.**
 
-- **For:** the field is genuinely non-redundant with path globs (73% structural ceiling — unlike the
-  cut probes); the real enforcement reduces cleanly to **already-shipped** rule kinds
-  (`cannotDependOn`, `external()`), so Part B is a **classification source, not a new rule kind** —
-  the cheap end of the cost ladder (a scan-time package.json read, IR-portable, inheriting the
-  untrusted story for free per ADR 017).
-- **Against / honest weaknesses:**
-  1. **Prevalence is thin — 1/10** (backstage only, per SURVEY §5). This is the load-bearing
-     weakness. ADR 017 already faced it: it **cut** vendored `backstageRoles()` and kept only the
-     *general* "classify by any manifest field" primitive. Justification therefore rests on
-     "thin-but-deep" (one rich exemplar) + the primitive's generality/cheapness — the same bar
-     external selectors cleared (1/10 vscode, "thin-but-deep", shipped).
-  2. **Fidelity < 100%** — the conditional pluginId exception is an unexpressible FP source; per-pair
-     exclusions become baseline debt.
-  3. No **second exemplar** yet demonstrates a non-backstage repo needing field-based classification.
+### Corrections that changed the verdict (all verified)
 
-**Recommended framing (for Fable review):** two defensible calls —
-- **(A) Promote now:** build `manifestField` as the general classification source. Cost is low (no
-  rule kind), the classification value is measured and real, and it unlocks the one survey
-  convention path globs provably can't reach. Ship the backstage role matrix as a **recipe** (ADR
-  017's decided vehicle), not vendored policy.
-- **(B) Hold for a second exemplar:** the ADR's own reserve-condition instinct ("wants plural"). Q1
-  proves the mechanism is *needed where field-roles exist*; it does not prove field-roles are
-  *prevalent*. Defer until a second repo demonstrates the need, keeping the bar identical to every
-  other promotion.
+1. **Q1's "27-pt structural gap" was an overclaim — it's ergonomics, not expressiveness.** The 73.4%
+   ceiling is real *for convention globs*, but the baseline was sandbagged: align classifies by path,
+   and a path may be a **literal** (`plugins/catalog-backend/**`). Enumerating the `packages/` tree +
+   convention rules for `plugins/` + first-match-wins ordering reaches **~100%** with no negation and
+   no new machinery — "an explicit path is a pattern, and first-match-wins substitutes for negation."
+   So `manifestField` closes a **maintenance/ergonomics** gap (author-owned, colocated, survives
+   package moves, no hand-maintained 200-line enumeration that drifts silently), **not** a capability
+   gap. That is materially weaker, and it is **not** "the opposite of the cut probes" — it is the same
+   shape (the dumb baseline reproduces the output), just with a real toil argument attached, on one
+   repo.
+2. **Q2 was never measured; measured, it catches ~1 live violation on the exemplar.** Declared-dep
+   graph over the 233 (proxy for align's import graph): **1,235 edges → 13 matrix hits → 11 already
+   in `excludedTargetPackages` (baseline debt) → 2 live, 1 of which is the eslint fixture
+   (`@internal/foo`).** So the role rule, deployed on backstage today, catches **one** real thing. The
+   value is entirely **prophylactic / for untooled adopters** — zero demonstrated catches on the
+   exemplar. ADR 017 Falsification §3 asked to "measure how much of the real role layering it
+   reproduces"; the code-reading argument (Q2 above) was not that measurement.
+3. **A real correctness gap `manifestField` cannot fix:** two of the matrix's cells are **same-role**
+   (`frontend-plugin ✗→ frontend-plugin`, `backend-plugin ✗→ backend-plugin`). Classifying by field
+   value makes all 28 frontend-plugins **one component**, so package-to-package imports inside it are
+   intra-component (self) edges `arch.no-dependency` cannot see. align would **silently
+   under-enforce** those cells. `manifestField(field, value)` as specced can't express them (you'd
+   need group-by-field-value → per-`pluginId` components).
+4. **The pluginId FP caveat was overstated.** The `useSamePluginId` carve-out applies **only** to
+   `frontend-plugin → frontend-plugin`, not a 163-package cross-role FP surface; realized exempt
+   edges in the graph = **0**. The 163 figure was an upper bound, not a rate. (Minor to the verdict,
+   but the draft implied a bigger FP risk than exists.)
+5. **Ground-truth contamination:** ~**11 of the 233** are test fixtures
+   (`packages/eslint-plugin/src/__fixtures__/monorepo/packages/*`, dynamic-feature-service fixtures).
+   Real ground truth ≈ 222. This also exposes a **spec hazard the draft never raised**: a naive
+   scan-time field read will classify nested fixture `package.json`s into real components unless
+   `manifestField` defines manifest ownership (nearest workspace ancestor / exclude non-workspace
+   manifests). The fixture `@internal/foo → @internal/bar` shows up as a "live violation" above —
+   exactly that garbage.
 
-The probe cleanly separates the two axes the decision turns on: **classification** (machinery beats
-baseline — promote-worthy) vs **prevalence** (1/10 — the reason to hesitate). That is the call for
-the owner + Fable, not the data.
+### The corrected call
+- **DEFER.** Q1 proves the mechanism is *nice-to-have where field-roles already exist*; it does not
+  prove field-roles are *prevalent* (1/10, backstage only) or that the primitive catches real
+  architecture drift (~1 live hit on the exemplar). Promoting on "cheap general primitive +
+  thin-but-deep" here is the rationalization promotion-on-evidence exists to stop — and the
+  external-selectors parallel is false: Part A **widened an existing rule's target** with multi-repo
+  intent evidence; `manifestField` is a **new classification axis** whose entire evidence base is one
+  repo that already ships strictly-more-expressive enforcement and would not switch to align's version.
+- **What flips it to PROMOTE:** a **second exemplar** — any non-backstage repo with a manifest-field
+  classification convention and no bespoke enforcement tooling (found by rerunning the SURVEY sweep on
+  a fresh cohort). One is enough, given the genuinely low cost (classification source, no rule kind).
+  If promoted then, the build must carry two spec requirements from this review: (a) **nested-manifest
+  ownership/exclusion** semantics (the fixture hazard), (b) **same-role cells documented as out of
+  scope** in the recipe, honestly.
+
+### What the probe got right (retained)
+The 73.4% *conventions-only* arithmetic (Fable's independent re-score: 74.3% on clean data); the
+`roleRules` matrix + CSS rule mapping to already-shipped kinds; `excludedTargetPackages`-as-baseline
+framing; and the cost-ladder point that this is a classification source, not a rule kind. The build,
+if it happens, is cheap — the reason to wait is evidence of **need**, not cost.
 
 ## Evidence / reproduction
 - Role extraction + glob scorer: run against `…/enterprise-apps/backstage`; raw
