@@ -68,16 +68,24 @@ check reads all three sources or sees ~nothing in the uninstalled repos it targe
 vscode 18 (`@vscode/prompt-tsx` ×12). First-class `arch.import-provenance` IR rule kind → Design Reserve
 behind a blocking-readiness + precision-with-allowlist trigger.
 
-### 5. Contract presets  — *after classification robustness*
-Ship generic (never vendored) preset packs on the existing engine: `contracts-purity`,
-`core-free-of-framework` (= ADR 017 external selectors, built), `no-cross-layer-test-imports`.
-Prerequisite: component-classification robustness (item 5a). On existing repos hits get baselined, so
-this guards *new* code, not existing. **Tier the TP bar:** ≥80% TP to ship as advisory/suggestion;
-~95%+ (or ship-baselined) to ship as a *blocking* default (ADR 008: a blocking rule at 1-in-5 FP is
-trust-destroying).
-- **5a. Component-classification robustness** (the prerequisite): improve `align init` component
-  detection on non-pnpm/npm setups (nest/vscode collapsed), and the `manifestField` classifier
-  (ADR 017 Part B) for convention-based classification. Without this, presets no-op or mis-bind.
+### 5. Contract presets  — *resolved to recipes; mostly evidence-blocked*
+The "preset packs" framing was superseded before this item was reached: **ADR 017 cut a `presets`
+mechanism** and made the vehicle **`docs/recipes/`** (align ships mechanism, the user authors policy).
+Two of the three named packs are already the shipped engine (`core-free-of-framework` = ADR 017
+external selectors; `no-cross-layer-test-imports` = `arch.layers`). So what remains of #5 is: write
+the recipes (cheap, low-risk, now possible since external selectors landed on main), and the
+classification prerequisite below — which the evidence has now largely settled.
+- **5a. Component-classification robustness** (the prerequisite), split by the evidence:
+  - **Detection — ✅ BUILT** (`8becd64`/`43c164f`/`2d643a1`): `align init` now reads `lerna.json`,
+    expands a single-prefix workspace to per-package components (nest 1→9), and maps top-level source
+    dirs with no `package.json` (vscode `src/` core, was 6,234 unmapped). This was the real collapse.
+  - **`manifestField` classifier (ADR 017 Part B) — DEFERRED on evidence** (`docs/evidence/
+    manifest-field-classification-probe/`). The gated falsification test was run + Fable-reviewed:
+    path enumeration reaches ~100% (so the field is an *ergonomics* gain, not a capability gap), the
+    role rule catches ~1 live violation on the exemplar, two matrix cells are same-role and
+    inexpressible, and prevalence is 1/10. **Flip-to-promote trigger: a second non-backstage exemplar
+    with a manifest-field convention and no bespoke tooling.** Build stays cheap (classification
+    source, no rule kind) — the missing thing is evidence of *need*.
 
 ### 6. Background periodic re-evaluation  — *DESIGN RESERVE (premature)*
 The owner idea: re-evaluate a repo on a cadence / change-delta so align keeps surfacing new findings.
@@ -100,7 +108,7 @@ trailer actually get acted on?) before building the acknowledged-state throttle.
 | 2 | baseline-delta trailer | **BUILT** — `baselined debt: N → M (Δ)` + `baselineDebt` payload |
 | 3 | ADR 019 Mode 2 gap report | **BUILT** — `computeUngovernedEdgeGaps` → doctor advisory (be06c67, 2e74c13) |
 | 4 | deep-import provenance | **BUILT** — rescoped to a `doctor` advisory (ADR 020); `computeDeepImportHits` (67dbf05) |
-| 5 | contract presets (+5a classification) | **NEXT** — engine built (ADR 017, on stage0); presets/classification unbuilt |
+| 5 | contract presets (+5a classification) | resolved: presets→recipes; 5a-detection **BUILT**; manifestField **DEFERRED** (probe→2nd exemplar) |
 | 6 | background re-evaluation | DESIGN RESERVE, gated on #3 |
 
 ## The through-line
