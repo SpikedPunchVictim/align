@@ -1,5 +1,6 @@
 export * from './types/index.js';
 export * from './scanner.js';
+export * from './surface/inferSurface.js';
 export * from './rules/index.js';
 export * from './components/registry.js';
 export * from './components/glob.js';

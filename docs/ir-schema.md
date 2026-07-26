@@ -19,6 +19,12 @@ ADR 013 and the two kinds' own sections below. `security.secrets` was reserved-o
 promotion and remains reserved (a different, unrelated rule shape — content scanning for leaked
 credentials, not manifest/lockfile inspection); it is now listed separately from `security.tool` in
 the reserved section below to avoid implying either is specified by this promotion.
+**`arch.no-dependency` and `arch.layers` widened for external selectors on 2026-07-21** (ADR 017 Part A,
+user-approved): `arch.no-dependency.to` and `arch.layers`' `canDependOn` entries additionally accept an
+`externalSelector` (`external(pattern, opts?)` in the DSL) alongside a `ComponentRef` — no new rule kind,
+both widenings additive and opt-in (see each kind's own section and the dedicated "External selectors"
+section below). Part B of ADR 017 (`manifestField` component classification) remains gated separately and
+is not specified here.
 
 Runtime validation of this shape is zod (ADR 002); the JSON Schema below is the portable, tool-agnostic
 description of the same contract — the substrate for the cache hash, the `align_explain_rule` payload, and
@@ -91,6 +97,21 @@ the baseline contract (locked decision #1, `IMPLEMENTATION_PLAN.md`).
       "$ref": "#/$defs/componentName",
       "description": "Rules reference components by name, never raw globs (ADR 003)."
     },
+    "externalSelector": {
+      "type": "object",
+      "required": ["kind", "pattern", "includeTypeOnly"],
+      "additionalProperties": false,
+      "description": "ADR 017 Part A: a permitted target alongside componentRef in archNoDependency.to and archLayers' canDependOn entries. Glob-matched against graph.externalEdges only — never graph.nodes/graph.edges.",
+      "properties": {
+        "kind": { "const": "external" },
+        "pattern": { "type": "string", "minLength": 1 },
+        "includeTypeOnly": { "type": "boolean", "description": "Default false — matches runtime edges only, mirrors archNoCycles.includeTypeOnly." }
+      }
+    },
+    "dependencyTarget": {
+      "oneOf": [{ "$ref": "#/$defs/componentRef" }, { "$ref": "#/$defs/externalSelector" }],
+      "description": "ADR 017 Part A widening: archNoDependency.to and archLayers' canDependOn entries accept either a component or an external selector."
+    },
     "sourceLineRange": {
       "type": "object",
       "required": ["startLine", "endLine"],
@@ -131,7 +152,7 @@ the baseline contract (locked decision #1, `IMPLEMENTATION_PLAN.md`).
         "kind": { "const": "arch.no-dependency" },
         "id": { "$ref": "#/$defs/ruleId" },
         "from": { "$ref": "#/$defs/componentRef" },
-        "to": { "$ref": "#/$defs/componentRef" },
+        "to": { "$ref": "#/$defs/dependencyTarget" },
         "provenance": { "$ref": "#/$defs/ruleProvenance" }
       }
     },
@@ -168,7 +189,7 @@ the baseline contract (locked decision #1, `IMPLEMENTATION_PLAN.md`).
             "additionalProperties": false,
             "properties": {
               "layer": { "$ref": "#/$defs/componentRef" },
-              "canDependOn": { "type": "array", "items": { "$ref": "#/$defs/componentRef" } }
+              "canDependOn": { "type": "array", "items": { "$ref": "#/$defs/dependencyTarget" } }
             }
           }
         },
@@ -255,6 +276,16 @@ in the `DependencyGraph` whose source file resolves to `from` and target file re
 `Violation` (kind `no-dependency`) unless the specific edge is baselined. Direction matters — `from`/`to` is
 strictly one-way; a bidirectional prohibition is two rules or an `isIsolated()`-shaped `layers` statement.
 
+**`to` as an external selector (ADR 017 Part A).** `to` may also be an `externalSelector`
+(`{ kind: 'external', pattern, includeTypeOnly }`, authored via the DSL's `external(pattern, opts?)`) instead
+of a `ComponentRef` — `c.core.cannotDependOn(external('node:child_process'))`. **Evaluation** then reads
+`graph.externalEdges` instead of `graph.edges`: for every external edge whose source file resolves to `from`,
+whose `kind` is not `'type-only'` (or is, when `includeTypeOnly` is `true`), and whose target
+(`graph.externalNodes` looked up by the edge's `to` id) matches `pattern`, emit one `Violation` (kind
+`no-dependency-external`, carrying `toExternal`/`externalPackageName` in place of `toFile`/`toComponent` —
+there is no component on the target side). A rule with a plain `ComponentRef` `to` is byte-identical to
+pre-widening behavior; only a rule naming an external selector ever touches `graph.externalEdges`.
+
 ### `arch.no-cycles`
 
 Detects strongly-connected components (Tarjan SCC) within `scope` (whole repo or a single component's file
@@ -271,6 +302,52 @@ on these layers," and everything outside that allowlist is forbidden. This is th
 `.canOnlyDependOn(...)` verb (ADR 002) at the IR level, and the shape `align init` generates for its starter
 ruleset (~3 layer statements rather than the 49 pairwise rules a full component-pair enumeration would
 produce — probe 5b).
+
+**`canDependOn` entries as external selectors (ADR 017 Part A) — opt-in, back-compat is the constraint.**
+An entry may be an `externalSelector` alongside `ComponentRef`s — `c.webShared.canOnlyDependOn(c.utils,
+external('lodash'))`, or an external-only allow-list for a default-deny shape (vscode's `browser`-layer
+pattern): `c.web.canOnlyDependOn(external('lodash'))`. **The back-compat rule**: a layer's external edges
+are evaluated **only if that layer's `canDependOn` names >=1 external selector** — a components-only
+`canDependOn` (today's only shape) never touches `graph.externalEdges` at all, so its result is
+byte-identical to pre-widening behavior (the same-count regression test in `evaluators.test.ts` pins this).
+When >=1 external selector is present, every external edge from that layer's files is checked: allowed if it
+matches at least one of the layer's external selectors under that selector's own `includeTypeOnly` (a
+`type-only` edge is entirely out of scope — not "unmatched, hence forbidden" — unless some selector in the
+layer opts in), otherwise one `Violation` (kind `layers-external`, `toExternal`/`externalPackageName` in
+place of `toLayer`/`toFile`) per offending edge. Internal (`graph.edges`) evaluation is completely
+unaffected by this arm — same allow-list logic as before, `ComponentRef` entries only.
+
+### External selectors (`external(...)`, ADR 017 Part A)
+
+Not a rule kind — a **target variant** shared by `arch.no-dependency`'s `to` and `arch.layers`' `canDependOn`
+entries (see both sections above). Authored via the DSL's `external(pattern: string, opts?: {
+includeTypeOnly?: boolean }): ExternalSelectorToken` (`packages/core/src/dsl/factories.ts`), producing a
+plain IR value — no host code, so a rule naming one stays portable to `align check --untrusted` (ADR 014;
+verified against `assertNoCustomHostRules`, which only ever refuses `custom.host` rules).
+
+**Matching semantics (pinned here so every IR consumer matches identically,
+`packages/core/src/rules/external-match.ts`'s `externalSelectorMatchesNode`):** glob over the normalized
+external id, matched against `graph.externalEdges`/`graph.externalNodes` (`types/graph.ts:59-65`'s existing
+`external:<name>` / `external:node:<name>` normalization) — never `graph.nodes`/`graph.edges`.
+- A `node:`-prefixed pattern (`external('node:*')`, `external('node:fs')`) matches only a Node builtin
+  (`ExternalPackageNode.isBuiltin`); the prefix is stripped and the remainder glob-matched against
+  `packageName`.
+- An unprefixed pattern (`external('fs')`, `external('lodash')`, `external('@scope/*')`) matches by
+  `packageName` alone, regardless of builtin-ness — so `external('fs')` also matches the Node builtin
+  (whose `packageName` is `'fs'`), same as a hypothetical npm package literally named `fs` would. This is a
+  deliberate, documented simplification, not a bug.
+- `includeTypeOnly` defaults `false` — matches runtime edges (`import`/`reexport`/`dynamic`) only, mirroring
+  `arch.no-cycles`' existing option and default. A `type-only` external edge is excluded from evaluation
+  entirely when no applicable selector opts in (not "unmatched, hence forbidden").
+
+**Ungrounded-selector visibility (the `ungroundedComponents` precedent, ADR 008's 2026-07-13 amendment).** An
+external selector matching **zero** nodes in `graph.externalNodes` skips ADR 008 reference-validity (banning
+an absent package is correctly, vacuously green) but is surfaced as a generic `Advisory` (`kind:
+'ungrounded-external-selector'`, `packages/core/src/gates/advisories.ts`'s
+`buildUngroundedExternalSelectorAdvisories`) rather than silently, permanently green — so a typo
+(`external('lodsh')`) is visible instead of an unnoticed false negative. Unlike `ungroundedComponents` (its
+own dedicated `CheckRun` field, feeding a distinct greenfield-mode UX), this rides the existing generic
+advisory bucket — `verdict` is never affected, only visibility.
 
 ### `custom.host`
 

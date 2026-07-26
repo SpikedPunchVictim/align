@@ -183,7 +183,9 @@ describe('align build --apply', () => {
       console.log = originalLog;
     }
     expect(code).toBe(1);
-    const output = logs.join('\n');
+    // The human renderer word-wraps long messages across lines; normalize whitespace so the
+    // assertion checks message content, not where the wrap happened to fall.
+    const output = logs.join(' ').replace(/\s+/g, ' ');
     expect(output).toContain(`Enforced by ${DOC}:5:`);
     expect(output).toContain('`api` must not depend on `ui`.');
   });

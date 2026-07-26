@@ -56,6 +56,98 @@ describe('evaluateNoDependency', () => {
   });
 });
 
+describe('evaluateNoDependency — external selector target (ADR 017 Part A)', () => {
+  it('flags an edge to a matching external package', () => {
+    const g = graph([node('core/a.ts', 'core')], [], { nodes: [externalNode('lodash')], edges: [externalEdge('core/a.ts', 'lodash')] });
+    const rule: ArchNoDependencyRule = {
+      kind: 'arch.no-dependency',
+      id: 'r1',
+      from: 'core',
+      to: { kind: 'external', pattern: 'lodash', includeTypeOnly: false },
+      provenance: {},
+    };
+    const violations = evaluateNoDependency(rule, g, {});
+    expect(violations).toHaveLength(1);
+    const v = violations[0];
+    expect(v?.kind).toBe('no-dependency-external');
+    if (v?.kind === 'no-dependency-external') {
+      expect(v.fromFile).toBe('core/a.ts');
+      expect(v.fromComponent).toBe('core');
+      expect(v.toExternal).toBe('external:lodash');
+      expect(v.externalPackageName).toBe('lodash');
+    }
+  });
+
+  it('matches a Node builtin via node:* and flags it', () => {
+    const g = graph([node('core/a.ts', 'core')], [], {
+      nodes: [externalNode('child_process', true)],
+      edges: [externalEdge('core/a.ts', 'child_process', { isBuiltin: true })],
+    });
+    const rule: ArchNoDependencyRule = {
+      kind: 'arch.no-dependency',
+      id: 'r1',
+      from: 'core',
+      to: { kind: 'external', pattern: 'node:*', includeTypeOnly: false },
+      provenance: {},
+    };
+    expect(evaluateNoDependency(rule, g, {})).toHaveLength(1);
+  });
+
+  it('does not flag an edge from an unrelated component', () => {
+    const g = graph([node('ui/a.ts', 'ui')], [], { nodes: [externalNode('lodash')], edges: [externalEdge('ui/a.ts', 'lodash')] });
+    const rule: ArchNoDependencyRule = {
+      kind: 'arch.no-dependency',
+      id: 'r1',
+      from: 'core',
+      to: { kind: 'external', pattern: 'lodash', includeTypeOnly: false },
+      provenance: {},
+    };
+    expect(evaluateNoDependency(rule, g, {})).toHaveLength(0);
+  });
+
+  it('does not flag a non-matching external package', () => {
+    const g = graph([node('core/a.ts', 'core')], [], { nodes: [externalNode('react')], edges: [externalEdge('core/a.ts', 'react')] });
+    const rule: ArchNoDependencyRule = {
+      kind: 'arch.no-dependency',
+      id: 'r1',
+      from: 'core',
+      to: { kind: 'external', pattern: 'lodash', includeTypeOnly: false },
+      provenance: {},
+    };
+    expect(evaluateNoDependency(rule, g, {})).toHaveLength(0);
+  });
+
+  it('includeTypeOnly defaults false: a type-only external edge is not flagged', () => {
+    const g = graph([node('core/a.ts', 'core')], [], {
+      nodes: [externalNode('react')],
+      edges: [externalEdge('core/a.ts', 'react', { kind: 'type-only' })],
+    });
+    const rule: ArchNoDependencyRule = {
+      kind: 'arch.no-dependency',
+      id: 'r1',
+      from: 'core',
+      to: { kind: 'external', pattern: 'react', includeTypeOnly: false },
+      provenance: {},
+    };
+    expect(evaluateNoDependency(rule, g, {})).toHaveLength(0);
+  });
+
+  it('includeTypeOnly: true catches a type-only external edge', () => {
+    const g = graph([node('core/a.ts', 'core')], [], {
+      nodes: [externalNode('react')],
+      edges: [externalEdge('core/a.ts', 'react', { kind: 'type-only' })],
+    });
+    const rule: ArchNoDependencyRule = {
+      kind: 'arch.no-dependency',
+      id: 'r1',
+      from: 'core',
+      to: { kind: 'external', pattern: 'react', includeTypeOnly: true },
+      provenance: {},
+    };
+    expect(evaluateNoDependency(rule, g, {})).toHaveLength(1);
+  });
+});
+
 describe('evaluateNoCycles', () => {
   it('detects a two-file cycle with per-edge chain detail', () => {
     const g = graph(
@@ -149,6 +241,123 @@ describe('evaluateLayers', () => {
     );
     const rule: ArchLayersRule = { kind: 'arch.layers', id: 'r1', layers: [{ layer: 'cli', canDependOn: [] }], provenance: {} };
     expect(evaluateLayers(rule, g, {})).toHaveLength(0);
+  });
+
+  describe('external selector entries (ADR 017 Part A)', () => {
+    it('a components-only canDependOn ignores external edges entirely (back-compat invariant)', () => {
+      const nodes = [node('cli/a.ts', 'cli')];
+      const gWithout = graph(nodes, []);
+      const gWith = graph(nodes, [], { nodes: [externalNode('lodash')], edges: [externalEdge('cli/a.ts', 'lodash')] });
+      const rule: ArchLayersRule = { kind: 'arch.layers', id: 'r1', layers: [{ layer: 'cli', canDependOn: [] }], provenance: {} };
+      expect(evaluateLayers(rule, gWith, {})).toEqual(evaluateLayers(rule, gWithout, {}));
+    });
+
+    it('flags an external edge to a package outside the external allow-list', () => {
+      const g = graph([node('cli/a.ts', 'cli')], [], { nodes: [externalNode('react')], edges: [externalEdge('cli/a.ts', 'react')] });
+      const rule: ArchLayersRule = {
+        kind: 'arch.layers',
+        id: 'r1',
+        layers: [{ layer: 'cli', canDependOn: [{ kind: 'external', pattern: 'lodash', includeTypeOnly: false }] }],
+        provenance: {},
+      };
+      const violations = evaluateLayers(rule, g, {});
+      expect(violations).toHaveLength(1);
+      const v = violations[0];
+      expect(v?.kind).toBe('layers-external');
+      if (v?.kind === 'layers-external') {
+        expect(v.fromLayer).toBe('cli');
+        expect(v.externalPackageName).toBe('react');
+      }
+    });
+
+    it('allows an external edge matching one of the layer external selectors', () => {
+      const g = graph([node('cli/a.ts', 'cli')], [], { nodes: [externalNode('lodash')], edges: [externalEdge('cli/a.ts', 'lodash')] });
+      const rule: ArchLayersRule = {
+        kind: 'arch.layers',
+        id: 'r1',
+        layers: [{ layer: 'cli', canDependOn: [{ kind: 'external', pattern: 'lodash', includeTypeOnly: false }] }],
+        provenance: {},
+      };
+      expect(evaluateLayers(rule, g, {})).toHaveLength(0);
+    });
+
+    it('mixes a component allow-list with an external selector', () => {
+      const g = graph(
+        [node('cli/a.ts', 'cli'), node('core/b.ts', 'core')],
+        [edge('cli/a.ts', 'core/b.ts')],
+        { nodes: [externalNode('lodash')], edges: [externalEdge('cli/a.ts', 'lodash')] },
+      );
+      const rule: ArchLayersRule = {
+        kind: 'arch.layers',
+        id: 'r1',
+        layers: [{ layer: 'cli', canDependOn: ['core', { kind: 'external', pattern: 'lodash', includeTypeOnly: false }] }],
+        provenance: {},
+      };
+      expect(evaluateLayers(rule, g, {})).toHaveLength(0);
+    });
+
+    it('supports a default-deny external allow-list (vscode browser-layer shape): empty external match set flags every external edge', () => {
+      const g = graph([node('web/a.ts', 'web')], [], {
+        nodes: [externalNode('child_process', true), externalNode('lodash')],
+        edges: [externalEdge('web/a.ts', 'child_process', { isBuiltin: true }), externalEdge('web/a.ts', 'lodash')],
+      });
+      const rule: ArchLayersRule = {
+        kind: 'arch.layers',
+        id: 'r1',
+        layers: [{ layer: 'web', canDependOn: [{ kind: 'external', pattern: 'lodash', includeTypeOnly: false }] }],
+        provenance: {},
+      };
+      const violations = evaluateLayers(rule, g, {});
+      expect(violations).toHaveLength(1);
+      if (violations[0]?.kind === 'layers-external') expect(violations[0].externalPackageName).toBe('child_process');
+    });
+
+    it('includeTypeOnly defaults false: a type-only external edge is excluded from evaluation entirely (no violation)', () => {
+      const g = graph([node('cli/a.ts', 'cli')], [], {
+        nodes: [externalNode('react')],
+        edges: [externalEdge('cli/a.ts', 'react', { kind: 'type-only' })],
+      });
+      const rule: ArchLayersRule = {
+        kind: 'arch.layers',
+        id: 'r1',
+        layers: [{ layer: 'cli', canDependOn: [{ kind: 'external', pattern: 'lodash', includeTypeOnly: false }] }],
+        provenance: {},
+      };
+      expect(evaluateLayers(rule, g, {})).toHaveLength(0);
+    });
+
+    it('includeTypeOnly: true on the matching selector catches a type-only external edge', () => {
+      const g = graph([node('cli/a.ts', 'cli')], [], {
+        nodes: [externalNode('react')],
+        edges: [externalEdge('cli/a.ts', 'react', { kind: 'type-only' })],
+      });
+      const rule: ArchLayersRule = {
+        kind: 'arch.layers',
+        id: 'r1',
+        layers: [{ layer: 'cli', canDependOn: [{ kind: 'external', pattern: 'lodash', includeTypeOnly: false }] }],
+        provenance: {},
+      };
+      // Not allowed (react doesn't match lodash) and type-only with no opted-in selector -> excluded, not flagged.
+      expect(evaluateLayers(rule, g, {})).toHaveLength(0);
+
+      const ruleTypeOnlyOk: ArchLayersRule = {
+        kind: 'arch.layers',
+        id: 'r2',
+        layers: [{ layer: 'cli', canDependOn: [{ kind: 'external', pattern: 'react', includeTypeOnly: true }] }],
+        provenance: {},
+      };
+      expect(evaluateLayers(ruleTypeOnlyOk, g, {})).toHaveLength(0); // matches and includeTypeOnly true -> allowed
+
+      const ruleTypeOnlyBanned: ArchLayersRule = {
+        kind: 'arch.layers',
+        id: 'r3',
+        layers: [{ layer: 'cli', canDependOn: [{ kind: 'external', pattern: 'lodash', includeTypeOnly: true }] }],
+        provenance: {},
+      };
+      // includeTypeOnly true somewhere in the layer brings the type-only edge into scope; it
+      // doesn't match 'lodash', so now it IS flagged.
+      expect(evaluateLayers(ruleTypeOnlyBanned, g, {})).toHaveLength(1);
+    });
   });
 });
 

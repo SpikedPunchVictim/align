@@ -4,3 +4,4 @@ export * from './rule-category.js';
 export * from './component-refs.js';
 export * from './host-rules.js';
 export * from './tarjan.js';
+export * from './external-match.js';

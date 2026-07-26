@@ -1,6 +1,6 @@
 {
   "name": "@spikedpunch/align-core",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Zero-dependency architecture-conformance rule engine for align: the DSL, JSON IR schema, gate stack, and baseline.",
   "license": "MIT",
   "repository": {
