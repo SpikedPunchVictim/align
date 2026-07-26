@@ -35,6 +35,15 @@ export interface LoadedConfig {
   // heuristic, so there is no other way to populate it. Read from an optional named
   // `compositionRoots` export; `[]` when absent.
   readonly compositionRoots: readonly string[];
+  // ADR 020 (the deep-import convention check, `doctor`-advisory-only, no rule kind): explicit,
+  // human-declared allowlist entries suppressing known-public deep-import conventions specific to
+  // this repo's dependencies, on top of the built-in seed (`typescript/lib/*`, `mocha/lib/*` --
+  // the measured vendor-convention FP class, `deep-imports.ts`'s `DEFAULT_ALLOWLIST`). Same
+  // deviation shape as `excludes`/`hostRules`/`telemetry`/`compositionRoots`: an
+  // advisory-computation input, not a rule-evaluation concern, so it doesn't belong in the
+  // portable `RulesetIR`. Read from an optional named `knownPublicDeepImports` export; `[]` when
+  // absent (the built-in seed still applies -- this list only ADDS to it, never replaces it).
+  readonly knownPublicDeepImports: readonly string[];
 }
 
 function toHostPredicateRegistry(hostRules: Record<string, HostPredicate> | undefined): HostPredicateRegistry {
@@ -74,6 +83,7 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
     hostRules?: Record<string, HostPredicate>;
     telemetry?: boolean;
     compositionRoots?: readonly string[];
+    knownPublicDeepImports?: readonly string[];
   };
   try {
     mod = (await import(pathToFileURL(configPath).href)) as typeof mod;
@@ -93,12 +103,24 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
   const hostRules = toHostPredicateRegistry(mod.hostRules);
   const telemetry = mod.telemetry !== undefined ? { telemetry: mod.telemetry } : {};
   const compositionRoots = mod.compositionRoots ?? [];
+  const knownPublicDeepImports = mod.knownPublicDeepImports ?? [];
 
-  if (!includeGenerated) return { ruleset: mod.default, excludes, hostRules, compositionRoots, ...telemetry };
+  if (!includeGenerated) {
+    return { ruleset: mod.default, excludes, hostRules, compositionRoots, knownPublicDeepImports, ...telemetry };
+  }
 
   const generated = readGeneratedRules(rootDir);
-  if (generated === undefined) return { ruleset: mod.default, excludes, hostRules, compositionRoots, ...telemetry };
+  if (generated === undefined) {
+    return { ruleset: mod.default, excludes, hostRules, compositionRoots, knownPublicDeepImports, ...telemetry };
+  }
 
   const mergedRules = mergeGeneratedRules(mod.default.rules, generated.rules);
-  return { ruleset: { ...mod.default, rules: [...mergedRules] }, excludes, hostRules, compositionRoots, ...telemetry };
+  return {
+    ruleset: { ...mod.default, rules: [...mergedRules] },
+    excludes,
+    hostRules,
+    compositionRoots,
+    knownPublicDeepImports,
+    ...telemetry,
+  };
 }
