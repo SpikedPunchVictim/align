@@ -74,7 +74,11 @@ export function buildMcpCheckPayload(run: CheckRun, options: BuildCheckPayloadOp
   const page = capped.slice(offset, offset + pageSize);
   const hasMore = offset + pageSize < capped.length;
 
-  const baselineDebt = options.baselineDebt ?? { previous: 0, current: 0, delta: 0 };
+  // When the caller didn't supply a baseline delta (e.g. MCP `align_violations`, which has no
+  // previous-baseline to diff against), don't fabricate zero DEBT — report the run's real current
+  // baselined count with an honest `delta: 0` (this path measures no change, it doesn't claim the
+  // debt is zero). On an error run the counts are untrustworthy (gates report 0), so stay at zeros.
+  const baselineDebt = options.baselineDebt ?? fallbackBaselineDebt(run);
   const complete = !run.advisories.some((a) => a.kind === 'missing-dependencies');
 
   return {
@@ -93,6 +97,12 @@ export function buildMcpCheckPayload(run: CheckRun, options: BuildCheckPayloadOp
     ungroundedComponents: run.ungroundedComponents,
     baselineDebt,
   };
+}
+
+function fallbackBaselineDebt(run: CheckRun): BaselineDebt {
+  if (run.verdict === 'error') return { previous: 0, current: 0, delta: 0 };
+  const current = run.gates.reduce((sum, g) => sum + g.baselinedCount, 0);
+  return { previous: current, current, delta: 0 };
 }
 
 function sortViolations(violations: readonly Violation[]): Violation[] {

@@ -222,6 +222,12 @@ function persistMovedBaseline(rootDir: string, run: CheckRun, baselineStore: InM
 
 function computeBaselineDebt(previousBaseline: readonly BaselineEntry[], run: CheckRun): BaselineDebt {
   const previous = previousBaseline.length;
+  // An errored gate reports `baselinedCount: 0` (orchestrator.ts) though its on-disk baseline
+  // entries still exist, so summing on an error run fabricates a debt DROP (`47 → 0 (−47)`) exactly
+  // when nothing was verified — a false "debt eliminated" ratchet signal in human + JSON + MCP
+  // output. The ratchet only moves on a fully-evaluated scan (any errored gate ⇒ `verdict:'error'`,
+  // deriveVerdict); otherwise report no change (current = previous, delta 0).
+  if (run.verdict === 'error') return { previous, current: previous, delta: 0 };
   const current = run.gates.reduce((sum, g) => sum + g.baselinedCount, 0);
   return { previous, current, delta: current - previous };
 }
@@ -318,7 +324,10 @@ function printHuman(
       `⚠ ${run.ungroundedComponents.length} component(s) matched no files (ungrounded, provisionally green): ${names}`,
     );
   }
-  if (baselineDebt !== undefined) {
+  // Suppress the ratchet trailer on an error run — the verdict is the headline, and the debt delta
+  // is unmeasurable (computeBaselineDebt reports no-change there anyway; printing `47 → 47 (0)`
+  // under a hard error is just noise).
+  if (baselineDebt !== undefined && run.verdict !== 'error') {
     const deltaStr = baselineDebt.delta === 0 ? '0' : `${baselineDebt.delta > 0 ? '+' : ''}${baselineDebt.delta}`;
     console.log(`baselined debt: ${baselineDebt.previous} → ${baselineDebt.current} (${deltaStr})`);
   }

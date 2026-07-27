@@ -46,6 +46,22 @@ export interface LoadedConfig {
   readonly knownPublicDeepImports: readonly string[];
 }
 
+/** Validates an optional `string[]` sibling export (`excludes`/`compositionRoots`/
+ * `knownPublicDeepImports`). These bypass zod — they're not part of the portable IR (see
+ * `LoadedConfig`) — so a malformed value (a bare string, a number, a non-array) would otherwise
+ * surface as a file-less `TypeError` deep in a consumer's `.map`/spread (e.g. `doctor.ts`'s
+ * `compositionRoots.map`), which crashes `align doctor` — a command whose contract is to ALWAYS
+ * exit 0. Fail fast HERE with a descriptive, actionable message; the doctor catch turns it into a
+ * `config-error` advisory (exit 0), and `check` reports a clean config error instead of a raw trace. */
+function readStringArrayExport(value: unknown, exportName: string): readonly string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    const got = Array.isArray(value) ? 'an array with non-string entries' : typeof value;
+    throw new Error(`\`${exportName}\` in ${CONFIG_FILENAME} must be a string[] — got ${got}.`);
+  }
+  return value;
+}
+
 function toHostPredicateRegistry(hostRules: Record<string, HostPredicate> | undefined): HostPredicateRegistry {
   return new Map(Object.entries(hostRules ?? {}));
 }
@@ -99,11 +115,11 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
   if (mod.default === undefined) {
     throw new Error(`${CONFIG_FILENAME} must have a default export (the result of defineProject(...)).`);
   }
-  const excludes = mod.excludes ?? [];
+  const excludes = readStringArrayExport(mod.excludes, 'excludes');
   const hostRules = toHostPredicateRegistry(mod.hostRules);
   const telemetry = mod.telemetry !== undefined ? { telemetry: mod.telemetry } : {};
-  const compositionRoots = mod.compositionRoots ?? [];
-  const knownPublicDeepImports = mod.knownPublicDeepImports ?? [];
+  const compositionRoots = readStringArrayExport(mod.compositionRoots, 'compositionRoots');
+  const knownPublicDeepImports = readStringArrayExport(mod.knownPublicDeepImports, 'knownPublicDeepImports');
 
   if (!includeGenerated) {
     return { ruleset: mod.default, excludes, hostRules, compositionRoots, knownPublicDeepImports, ...telemetry };

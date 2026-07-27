@@ -34,6 +34,14 @@ describe('buildUncertaintyAdvisories', () => {
     expect(remaining.some((a) => a.kind === 'uncertainty' && a.message.includes('reason: unresolvable-specifier'))).toBe(true);
   });
 
+  it('does NOT collapse a `#`-prefixed subpath import into missing-dependencies (package-internal, not an npm dep)', () => {
+    const advisories = buildUncertaintyAdvisories([marker('#internal/thing', 'unresolvable-specifier')]);
+    // A `#foo` import maps via the package's own `imports` field — an unresolvable one is not a
+    // missing dependency and must not flip the verdict provisional; it stays a plain uncertainty.
+    expect(advisories.some((a) => a.kind === 'missing-dependencies')).toBe(false);
+    expect(advisories.some((a) => a.kind === 'uncertainty' && a.message.includes('reason: unresolvable-specifier'))).toBe(true);
+  });
+
   it('collapses even a single external unresolvable specifier — the signal is the scan, not a node_modules check (partial-install regression)', () => {
     // Before the fix this only fired when a node_modules heuristic said "not installed"; a repo with
     // align installed but its own deps absent (one unresolvable external) was missed. Now the marker

@@ -54,6 +54,34 @@ describe('detectComponents — single-prefix workspace expands per-package (the 
     expect(detectComponents(dir).map((c) => c.name).sort()).toEqual(['core', 'platformExpress']);
   });
 
+  it('does not let a stale/config-only lerna.json (no packages, no packages/ tree) hijack a single-package repo', () => {
+    const dir = makeRepo({
+      'lerna.json': JSON.stringify({ lerna: '8.0.0' }), // no `packages` field -> synthetic packages/* default
+      'package.json': JSON.stringify({ name: 'app' }),
+      'src/index.ts': 'export const x = 1;\n', // real source, but nothing under packages/
+    });
+    // Regression: the synthetic default must not produce a `packages/**` component matching zero
+    // files while src/ goes unmapped — it must fall through to the single-package `app` default.
+    expect(detectComponents(dir)).toEqual([{ name: 'app', pattern: 'src/**' }]);
+  });
+
+  it('renames a per-package name collision to a valid DSL identifier (foo2, not foo-2)', () => {
+    const dir = makeRepo({
+      // A single RECURSIVE prefix (`packages/**`) -> one group -> per-package expansion; two nested
+      // packages share the leaf name `utils`, so their component names collide.
+      'lerna.json': JSON.stringify({ packages: ['packages/**'] }),
+      'package.json': JSON.stringify({ name: 'root' }),
+      'packages/a/utils/package.json': JSON.stringify({ name: '@a/utils' }),
+      'packages/a/utils/src/index.ts': 'export const a = 1;\n',
+      'packages/b/utils/package.json': JSON.stringify({ name: '@b/utils' }),
+      'packages/b/utils/src/index.ts': 'export const b = 1;\n',
+    });
+    // The rename must stay identifier-safe (`c.utils2`, not `c.utils-2` which parses as subtraction)
+    // — the sanitizeName hazard, now reachable via per-package expansion.
+    const names = detectComponents(dir).map((c) => c.name).sort();
+    expect(names).toEqual(['utils', 'utils2']);
+  });
+
   it('keeps the single lumped component when the workspace has too many packages to name individually', () => {
     const files: Record<string, string> = {
       'lerna.json': JSON.stringify({ packages: ['packages/*'] }),

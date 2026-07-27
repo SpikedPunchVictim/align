@@ -46,9 +46,13 @@ function packageNameFromSpecifier(specifier: string): string {
 }
 
 /** A deep-import convention is about *cross-package* reach only -- a relative (`./`) or absolute
- * (`/`) specifier never targets another package's internals, so it's out of scope entirely. */
+ * (`/`) specifier never targets another package's internals, and a `#`-prefixed specifier is a Node
+ * subpath import resolving WITHIN the importing package (via its own `imports` map), so it's
+ * package-internal by definition -- all out of scope. (tsconfig path aliases like `~/x` or `@/x`
+ * are indistinguishable from real package specifiers without resolver knowledge core doesn't hold;
+ * that FP class is documented in ADR 020 as repo-dependent, advisory-only.) */
 function isPackageSpecifier(specifier: string): boolean {
-  return !specifier.startsWith('.') && !specifier.startsWith('/');
+  return !specifier.startsWith('.') && !specifier.startsWith('/') && !specifier.startsWith('#');
 }
 
 /** Splits a package specifier into its package name and subpath (everything after). A bare

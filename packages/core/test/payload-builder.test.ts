@@ -105,3 +105,22 @@ describe('buildMcpCheckPayload — complete flag (reconciled-build-order #1 foll
     expect(payload.complete).toBe(false);
   });
 });
+
+describe('buildMcpCheckPayload — baselineDebt fallback (no caller-supplied delta, e.g. MCP align_violations)', () => {
+  it('reports the run’s real current baselined count with an honest delta:0, not a fabricated {0,0,0}', () => {
+    const run = runWith([], {
+      gates: [
+        { gate: 'parse', status: 'green', violations: [], baselinedCount: 0, durationMs: 1, cacheHits: 0, dependsOn: [] },
+        { gate: 'architecture', status: 'green', violations: [], baselinedCount: 5, durationMs: 1, cacheHits: 0, dependsOn: ['parse'] },
+      ],
+    });
+    // Regression: builder previously defaulted omitted baselineDebt to {0,0,0}, reporting zero debt
+    // while gates held real baselined counts. Now current reflects the run; delta 0 (no prior).
+    expect(buildMcpCheckPayload(run).baselineDebt).toEqual({ previous: 5, current: 5, delta: 0 });
+  });
+
+  it('stays at zeros on an error run (gate baselinedCounts are untrustworthy)', () => {
+    const run = runWith([], { verdict: 'error' });
+    expect(buildMcpCheckPayload(run).baselineDebt).toEqual({ previous: 0, current: 0, delta: 0 });
+  });
+});

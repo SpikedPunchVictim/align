@@ -86,4 +86,40 @@ describe('align doctor — deep-import advisory (ADR 020)', () => {
     const hits = payload.advisories.filter((a) => a.kind === 'deep-import');
     expect(hits).toHaveLength(0);
   });
+
+  it('a malformed sibling export (compositionRoots: string) yields exit 0 + a config-error advisory, never a raw crash', async () => {
+    // Doctrine: `align doctor` ALWAYS exits 0. A non-array `compositionRoots`/`knownPublicDeepImports`
+    // bypasses zod and previously crashed deep in `compositionRoots.map` with a file-less TypeError
+    // (exit 1). loadConfig now validates the shape and throws a descriptive error the doctor catch
+    // turns into a `config-error` advisory.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-doctor-badcfg-test-'));
+    tmpDir = dir;
+    fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'src/index.ts'), 'export const x = 1;\n', 'utf8');
+    writeTsconfig(dir, { compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext' } });
+    fs.writeFileSync(
+      path.join(dir, 'align.config.ts'),
+      `import { defineProject } from '@spikedpunch/align-core/dsl';\n` +
+        `export const compositionRoots = 'api';\n` + // string, not string[]
+        `export default defineProject({ components: { app: 'src/**' } });\n`,
+      'utf8',
+    );
+    fs.symlinkSync(path.join(process.cwd(), 'node_modules'), path.join(dir, 'node_modules'), 'dir');
+
+    const jsonLogs: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string) => {
+      jsonLogs.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+    let code: number;
+    try {
+      code = await runDoctor(dir, { json: true });
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+    const payload = JSON.parse(jsonLogs.join('')) as { advisories: { kind: string; message: string }[] };
+    expect(code).toBe(0);
+    expect(payload.advisories.some((a) => a.kind === 'config-error' && a.message.includes('compositionRoots'))).toBe(true);
+  });
 });

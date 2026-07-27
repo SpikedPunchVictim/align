@@ -66,9 +66,12 @@ export function buildUncertaintyAdvisories(uncertain: readonly UncertaintyMarker
 /** A specifier that is not relative and not absolute is treated as an external package import for
  * the missing-dependencies collapse. Node builtins (`node:fs`, bare `fs`) resolve to `external` in
  * the scanner and therefore never appear as `unresolvable-specifier`; anything left in that reason
- * that isn't a relative/absolute path is assumed to be a missing npm package. */
+ * that isn't a relative/absolute path is assumed to be a missing npm package. A `#`-prefixed
+ * specifier is a Node subpath import (package-INTERNAL, mapped via the package's own `imports`
+ * field), not an external dependency — so an unresolvable `#foo` must NOT collapse into
+ * `missing-dependencies` (which would wrongly flag the verdict provisional). */
 function isExternalPackageSpecifier(specifier: string): boolean {
-  return !specifier.startsWith('.') && !specifier.startsWith('/');
+  return !specifier.startsWith('.') && !specifier.startsWith('/') && !specifier.startsWith('#');
 }
 
 /**

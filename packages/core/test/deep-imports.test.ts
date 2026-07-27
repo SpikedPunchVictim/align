@@ -75,6 +75,20 @@ describe('computeDeepImportHits (ADR 020)', () => {
       const g = graph([node('src/a.ts', 'app')], [edge('src/a.ts', 'x', { specifier: 'mocha/dist/foo' })]);
       expect(computeDeepImportHits(g, { allowlist: ['typescript/lib/*', 'mocha/lib/*'] })).toHaveLength(1);
     });
+
+    it('suppresses a MULTI-SEGMENT subpath with a `**` allowlist (the mocha/lib/reporters/base FP class)', () => {
+      // align glob `*` is single-segment, so a `pkg/lib/*` entry would NOT match `pkg/lib/a/b` —
+      // the real vendor-convention FP the seed exists to suppress is exactly a deep subpath. The
+      // shipped seed uses `**`; verify a two-segment subpath is suppressed and a `*` entry is not.
+      const g = graph([node('src/a.ts', 'app')], [edge('src/a.ts', 'x', { specifier: 'mocha/lib/reporters/base' })]);
+      expect(computeDeepImportHits(g, { allowlist: ['mocha/lib/**'] })).toHaveLength(0);
+      expect(computeDeepImportHits(g, { allowlist: ['mocha/lib/*'] })).toHaveLength(1);
+    });
+  });
+
+  it('ignores a `#`-prefixed Node subpath import (package-internal, not cross-package)', () => {
+    const g = graph([node('src/a.ts', 'app')], [edge('src/a.ts', 'src/b.ts', { specifier: '#internal/dist/thing' })]);
+    expect(computeDeepImportHits(g)).toHaveLength(0);
   });
 
   describe('the false-quiet fix (ADR 020 critical regression test)', () => {

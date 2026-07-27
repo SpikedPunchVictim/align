@@ -34,7 +34,10 @@ const DOCTOR_HUMAN_DISPLAY_CAP = 10;
  * this seed (same "user list adds to a built-in default" shape as `DEFAULT_MARKERS` in
  * `deep-imports.ts`), it never replaces it -- a repo can suppress its OWN conventions without
  * having to also re-declare the two everyone hits. */
-const DEFAULT_DEEP_IMPORT_ALLOWLIST: readonly string[] = ['typescript/lib/*', 'mocha/lib/*'];
+// `**`, not `*`: align's glob `*` is single-segment (`glob.ts` → `[^/]*`), so `typescript/lib/*`
+// would match `typescript/lib/foo` but NOT the deeper `mocha/lib/reporters/base` this seed exists to
+// suppress (the measured FP class, deep-import-provenance-probe/PROBE.md). `**` matches any depth.
+const DEFAULT_DEEP_IMPORT_ALLOWLIST: readonly string[] = ['typescript/lib/**', 'mocha/lib/**'];
 
 export interface DoctorOptions {
   readonly json: boolean;
