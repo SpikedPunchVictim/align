@@ -2,6 +2,7 @@ import {
   assertNoCustomHostRules,
   buildMcpCheckPayload,
   renderViolationMessage,
+  type BaselineDebt,
   type BaselineEntry,
   type CheckRun,
   type ExportedRuleset,
@@ -71,11 +72,6 @@ export async function runCheck(rootDir: string, options: CheckOptions): Promise<
   return options.untrusted === true ? runUntrustedCheck(rootDir, options) : runTrustedCheck(rootDir, options);
 }
 
-export interface BaselineDebt {
-  readonly previous: number;
-  readonly current: number;
-  readonly delta: number;
-}
 
 async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<number> {
   const { ruleset, excludes, hostRules, telemetry } = await loadConfig(rootDir);
@@ -220,7 +216,10 @@ function persistMovedBaseline(rootDir: string, run: CheckRun, baselineStore: InM
   }
 }
 
-function computeBaselineDebt(previousBaseline: readonly BaselineEntry[], run: CheckRun): BaselineDebt {
+/** The one baseline-debt computation shared by `align check`, MCP `align_check`, and the payload
+ * builder's fallback — a single guarded function so the error-run correction (below) can't drift
+ * across copies (it did: three inline `Σ baselinedCount` sites, and only two were first fixed). */
+export function computeBaselineDebt(previousBaseline: readonly BaselineEntry[], run: CheckRun): BaselineDebt {
   const previous = previousBaseline.length;
   // An errored gate reports `baselinedCount: 0` (orchestrator.ts) though its on-disk baseline
   // entries still exist, so summing on an error run fabricates a debt DROP (`47 → 0 (−47)`) exactly

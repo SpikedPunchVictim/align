@@ -17,6 +17,7 @@ import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, writeBaseline } from '../align-dir.js';
 import { buildExplainPayload } from '../commands/explain.js';
+import { computeBaselineDebt } from '../commands/check.js';
 import { DEFAULT_DOC_PATH, proposeFromClientSubmission, writeBuildArtifacts, type DryRunResult } from '../commands/build.js';
 import { renderCondensedFixingSkill } from '../skill/condensed.js';
 
@@ -32,11 +33,10 @@ async function freshCheck(rootDir: string): Promise<{ readonly run: CheckRun; re
   if (run.advisories.some((a) => a.kind === 'baseline-moved')) {
     writeBaseline(rootDir, baselineStore.snapshot());
   }
-  const current = run.gates.reduce((sum, g) => sum + g.baselinedCount, 0);
-  return {
-    run,
-    baselineDebt: { previous: previousBaseline.length, current, delta: current - previousBaseline.length },
-  };
+  // Shared, error-run-guarded computation (check.ts) — NOT an inline `Σ baselinedCount`, which
+  // fabricates a `−N` debt drop on error runs (gates report 0 baselined then). This was the third
+  // copy the first fix missed (NEW-1).
+  return { run, baselineDebt: computeBaselineDebt(previousBaseline, run) };
 }
 
 /** Builds the McpServer with tools registered but no transport attached — split out from
