@@ -77,17 +77,20 @@ function indexRulesetCoverage(ruleset: RulesetIR): RulesetCoverageIndex {
 }
 
 /**
- * ADR 019's governed computation, literally: a directed edge from->to is GOVERNED if any existing
- * rule constrains that pair -- an arch.no-dependency naming the pair in EITHER direction, or an
- * arch.layers rule whose `layer` field is either endpoint. A layers rule fully enumerates its
- * layer's allowed outbound set (canOnlyDependOn), so it settles every edge touching that component
- * on either side -- deliberately direction-symmetric, matching the ADR's stated computation rather
- * than re-deriving enforcement semantics a second time (that's align check's job; this is a
- * coverage question, not a compliance one).
+ * ADR 019's governed computation: a directed edge from->to is GOVERNED if an existing rule has
+ * already decided that boundary --
+ * - an arch.no-dependency naming the pair in EITHER direction (deciding `A cannotDependOn B` means
+ *   the human considered the A/B boundary, so the pair is settled regardless of edge direction), or
+ * - an arch.layers rule whose declared `layer` is the edge's SOURCE. `layer(L).canOnlyDependOn(...)`
+ *   fully enumerates L's allowed *outbound* set, so every edge L->X is decided (allowed if listed,
+ *   a violation otherwise) -- but the rule says NOTHING about who may import L, so an edge Y->L from
+ *   an unruled Y is still an undecided boundary. Coverage is therefore SOURCE-directional for
+ *   layers (an earlier version also matched `to`, which hid exactly the partial-layering gaps this
+ *   report exists to surface -- e.g. `apiPlugins -> apiDb` when only `apiDb`'s layer is declared).
  */
 function isGoverned(from: ComponentName, to: ComponentName, coverage: RulesetCoverageIndex): boolean {
   if (coverage.noDependencyPairs.has(unorderedPairKey(from, to))) return true;
-  return coverage.layerComponents.has(from) || coverage.layerComponents.has(to);
+  return coverage.layerComponents.has(from);
 }
 
 /**

@@ -71,13 +71,18 @@ describe('computeUngovernedEdgeGaps (ADR 019 Mode 2)', () => {
     expect(computeUngovernedEdgeGaps(g, rs)).toHaveLength(0);
   });
 
-  it('does not report a pair where the TARGET component has an arch.layers rule (symmetric governed check)', () => {
+  it('DOES report an edge whose TARGET (not source) has an arch.layers rule — layers constrains only the layer’s OUTBOUND edges, so an inbound edge from an unruled source is still an undecided boundary', () => {
     const g = graph(
       [node('apiDomain/a.ts', 'apiDomain'), node('apiDb/b.ts', 'apiDb')],
       [edge('apiDomain/a.ts', 'apiDb/b.ts')],
     );
+    // apiDb has a layers rule (its outbound set is enumerated), but nothing constrains what may
+    // IMPORT apiDb — apiDomain -> apiDb is an unreviewed boundary. (Directional coverage fix, #7:
+    // an earlier symmetric version wrongly suppressed this, hiding partial-layering retrofit gaps.)
     const rs = ruleset(['apiDomain', 'apiDb'], [layers('apiDb', [])]);
-    expect(computeUngovernedEdgeGaps(g, rs)).toHaveLength(0);
+    const gaps = computeUngovernedEdgeGaps(g, rs);
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0]).toMatchObject({ from: 'apiDomain', to: 'apiDb' });
   });
 
   it('the kluster ADR-019 demo shape: apiDomain->apiDb governed, apiPlugins->apiDb a gap', () => {

@@ -82,6 +82,14 @@ computation). Rank by edge-weight/fan-in. This is ongoing rule-*health*, `align 
 (dev-loop lever 3b). On kluster this yields the real `apiPlugins → apiDb` / `apiPlugins → apiServices`
 gaps once composition roots are excluded (below).
 
+**"Covered" is direction-aware for `arch.layers`.** A `layer(L).canOnlyDependOn(...)` rule fully
+enumerates L's allowed *outbound* set, so it covers every edge `L → X` — but it says nothing about
+who may import L, so an inbound edge `Y → L` from an unruled `Y` remains an undecided boundary and
+IS reported. (An `arch.no-dependency` naming a pair, by contrast, marks that pair decided in either
+direction — deciding `A cannotDependOn B` means the A/B boundary was considered.) Target-side
+suppression for layers would hide exactly the partial-layering gaps this report exists to surface
+(the common retrofit state: a few layer rules declared, most boundaries still open).
+
 ### Precision-critical
 - **Exclude composition roots by explicit declaration, not a heuristic.** kluster's `api` catch-all
   legitimately depends on every sub-layer; a fan-out/glob-breadth heuristic can't distinguish a
