@@ -5,8 +5,16 @@ baseline, MCP server, `align build`, and the BYOK agent loop is **complete and s
 its full staged record is archived verbatim at [`history/07.05.26/IMPLEMENTATION_PLAN.md`](history/07.05.26/IMPLEMENTATION_PLAN.md).
 Do not re-litigate that work here.
 
-**Authoritative state lives in the repo, not this file:** `ARCHITECTURE.md`, `docs/adr/001–016`,
+**Authoritative state lives in the repo, not this file:** `ARCHITECTURE.md`, `docs/adr/001–020`,
 `docs/proposals/`, and the evidence under `docs/evidence/`. Read those before acting.
+
+**Two parallel tracks — this file is the rules track.** This plan tracks **net-new rules and
+capabilities** (public-surface inference, deep-import, `@internal`, semantic-boundary facts). The
+**adoption / legibility track** — making align keep talking after day one, without new rule kinds —
+lives in [`docs/proposals/reconciled-build-order.md`](docs/proposals/reconciled-build-order.md): the
+deps-not-installed false-green fix (#1), the baseline-delta ratchet (#2), the ungoverned-edge gap
+report (#3, ADR 019), the deep-import advisory (#4, ADR 020 — the shipped form of Stage 1 below), and
+`align init` detection robustness (#5a). Items #1–#5 are **resolved there** — do not re-plan them here.
 
 **Doctrine (unchanged):** arch-first, **promotion-on-evidence** — nothing ships from the Design
 Reserve without repo-measured need; landscape/market suggestions are not evidence. Implementation is
@@ -41,21 +49,26 @@ tooled and untooled repos.
 
 ---
 
-## Stage 1: Deep-import provenance (detect-only)
+## Stage 1: Deep-import convention check (ADR 020) — ✅ SHIPPED, rescoped
 
-**Goal**: flag imports reaching past a package's entrypoint into `/src`|`/dist`|`/lib`|`/internal`
-or an undeclared subpath; respect Node `exports` wildcards; fold in the manifest-join
-(phantom-dependency detection). The strongest market-confirmed signal in the PR-research, and it
-needs no new symbol layer beyond Stage 0's graph data.
+**Goal (as built)**: flag cross-package imports reaching past a package's surface into a
+`src`/`dist`/`lib`/`internal` subpath segment — the strongest market-confirmed net-new signal in the
+PR-research, needing no symbol layer beyond the scanner's existing edges.
 
-**Success Criteria**: on n8n, flags the real `n8n-workflow/src` / `n8n-core/dist/...` reaches and does
-NOT flag `@n8n/rest-api-client/api/*` (its `./*` export wildcard); phantom-dep that is also a
-wrong-direction edge routes to "delete the import," never "add the dep" (per Fable round-2 §2).
-
-**Tests**: `exports`-wildcard FP rate 0 on n8n; TP on the `/src`|`/dist` reaches across n8n + vscode;
-wrong-direction phantom import → delete-suggestion.
-
-**Status**: Not Started — needs its own ADR (rule kind + IR + evaluator) before build.
+**Status**: ✅ **SHIPPED as a `doctor` advisory (ADR 020, reconciled-build-order #4).** Deliberately
+RESCOPED from the rule-kind design this stage originally described — the changes are the point, not a
+gap:
+- **Not a rule kind.** The placebo test (`docs/evidence/deep-import-provenance-probe/`) cut the
+  `exports`-aware machinery (~2% swing in both samples) and measured repo-dependent precision (~31% on
+  vscode) below ADR 008's blocking bar. It ships advisory-only — `computeDeepImportHits` +
+  a `doctor` advisory (the #3 shape) — **not** IR + evaluator. First-class `arch.import-provenance` is
+  held in **Design Reserve** behind a blocking-readiness + precision-with-allowlist trigger.
+- **Manifest-join / phantom-dependency is OUT**, not "folded in" as the original text assumed —
+  contested (3/10, owned by depcheck/knip), scoped out of ADR 020.
+- **`exports`-wildcard respect deferred** with Arm B (the exports-aware machinery); a `**`-scoped
+  `knownPublicDeepImports` allowlist covers the measured vendor-convention FP class instead.
+- Reads `edges + externalEdges + uncertain` (the false-quiet fix: unresolved deep imports route to
+  `uncertain` in uninstalled repos). Live: n8n 178 hits, vscode 18 (`@vscode/prompt-tsx` ×12).
 
 ---
 
@@ -72,9 +85,13 @@ one-hop detector missed); FP rate acceptable on a hand-checked sample; autofix i
 **Tests**: the backstage `InternalCookieAuthRedirect`-class transitive leak flags; a sibling-importable
 `@internal` (intentional) does not become a false positive.
 
-**Status**: Not Started — its own ADR, gated on Stage 1 landing and a repo-measured FP assessment.
-Note: the PR-research shows this rule is market-mismatched in untooled repos (they don't write
-`@internal`); it is the tooled-repo case. Stage 1 carries the untooled market; this stage follows.
+**Status**: Not Started — its own ADR, gated on a repo-measured FP assessment. (Originally sequenced
+"after Stage 1," but Stage 1 shipped as a `doctor` advisory with **no rule-kind machinery to inherit**
+— so this is now an *independent* decision consuming Stage 0's inferred surface directly, not a
+follow-on from Stage 1.) The PR-research shows this rule is market-mismatched in untooled repos (they
+don't write `@internal`); it is the tooled-repo case. If it graduates, it is the first real consumer
+of Stage 0's `PackagePublicSurface` and a candidate to co-establish the reserved
+`arch.import-provenance` rule kind (Stage 1's Design-Reserve half).
 
 ---
 
@@ -121,11 +138,19 @@ Held with triggers, not committed (see `docs/proposals/rule-expansion-evaluation
 - **`fixHint` remediation recipes** on the `align explain` prose surface (the actionable residue of the
   external feedback's "explain it to the agent" — align already ships the payloads per ADR 007).
 - **Version-drift / standalone manifest checks** — rejected on evidence (0.07% of commits; owned by
-  syncpack/pnpm catalogs); the useful half (phantom-dep) folds into Stage 1.
+  syncpack/pnpm catalogs). The phantom-dep half was considered for Stage 1 but scoped **out** of ADR
+  020 (contested 3/10; owned by depcheck/knip); it has no current home.
+- **First-class `arch.import-provenance` rule kind** — the blocking version of Stage 1's deep-import
+  advisory. Trigger: an adopter wanting the blocking ratchet on a workspace monorepo AND ≥80% measured
+  precision with the allowlist on a vscode-class repo (ADR 020).
+- **`manifestField` component classification (ADR 017 Part B)** — DEFERRED on evidence
+  (`docs/evidence/manifest-field-classification-probe/`): path enumeration reaches ~100% (an
+  ergonomics gain, not a capability gap), ~1 live catch on the exemplar, 1/10 prevalence. Trigger: a
+  second non-backstage repo with a manifest-field classification convention and no bespoke tooling.
 
 ## Key risks
 | Risk | Mitigation |
 | --- | --- |
 | Surface confidence contract degenerate in untooled market | Resolved: graded contract; nest's `inferred-unique` scored 100% (ADR 016 Round-2 amendment). |
 | Building persistence/rules ahead of evidence | Stages 3–4 are promotion-gated with explicit triggers; each new rule gets its own ADR. |
-| `@internal` rule market-mismatch | Sequenced after Stage 1 (which carries the untooled market); documented as the tooled-repo case. |
+| `@internal` rule market-mismatch | The untooled market is served by the shipped deep-import advisory (Stage 1); the `@internal` rule is documented as the independent tooled-repo case, gated on its own FP assessment. |
