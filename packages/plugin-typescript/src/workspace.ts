@@ -21,10 +21,13 @@ const asStringArray = (value: unknown): string[] =>
  * The workspace glob-pattern list, read from whichever package manager's declaration exists:
  * pnpm's `pnpm-workspace.yaml` `packages:` (authoritative for pnpm — package.json `workspaces` is
  * ignored by pnpm, so it wins when both are present), or npm/yarn/bun's `package.json`
- * `workspaces` field (array form, or yarn-classic's `{ packages: [...] }` object form). The glob
- * vocabulary is identical across all four, so `expandPattern` consumes the result unchanged. Deno
- * (`deno.json`'s `workspace` field) is intentionally not read here — see the PM-support notes.
- * Read-only survey posture: a malformed file yields `[]`, never a thrown scan.
+ * `workspaces` field (array form, or yarn-classic's `{ packages: [...] }` object form), or, as a
+ * last fallback, lerna's `lerna.json` `packages` field — a lerna monorepo (e.g. NestJS) declares
+ * its members there and often ships no `workspaces` field at all, so without this its whole
+ * `packages/*` tree collapses to a single `app` component. The glob vocabulary is identical across
+ * all of them, so `expandPattern` consumes the result unchanged. Deno (`deno.json`'s `workspace`
+ * field) is intentionally not read here — see the PM-support notes. Read-only survey posture: a
+ * malformed file yields `[]`, never a thrown scan.
  */
 export function readWorkspaceGlobs(rootDir: string): string[] {
   const pnpmWsPath = path.join(rootDir, 'pnpm-workspace.yaml');
@@ -46,6 +49,19 @@ export function readWorkspaceGlobs(rootDir: string): string[] {
       if (ws !== null && typeof ws === 'object') return asStringArray((ws as { packages?: unknown }).packages);
     } catch {
       // malformed package.json: read-only survey posture
+    }
+  }
+
+  // lerna.json — reached only when no PM workspace declaration won above (a repo using both a real
+  // `workspaces` field and lerna delegates globbing to the PM, so that wins). Lerna defaults an
+  // omitted `packages` to `['packages/*']`, so an existing lerna.json always yields a usable glob.
+  const lernaPath = path.join(rootDir, 'lerna.json');
+  if (fs.existsSync(lernaPath)) {
+    try {
+      const patterns = asStringArray((JSON.parse(fs.readFileSync(lernaPath, 'utf8')) as { packages?: unknown }).packages);
+      return patterns.length > 0 ? patterns : ['packages/*'];
+    } catch {
+      // malformed lerna.json: read-only survey posture
     }
   }
 

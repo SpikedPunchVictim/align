@@ -1,6 +1,14 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { buildUncertaintyAdvisories, findUngroundedComponents, toComponentName, type Advisory, type UncertaintyMarker } from '@spikedpunch/align-core';
+import {
+  buildUncertaintyAdvisories,
+  computeDeepImportHits,
+  computeUngovernedEdgeGaps,
+  findUngroundedComponents,
+  toComponentName,
+  type Advisory,
+  type UncertaintyMarker,
+} from '@spikedpunch/align-core';
 import { TypeScriptPlugin, UNMAPPED_COMPONENT, findDeadAliases, findOrphanedPackages } from '@spikedpunch/align-plugin-typescript';
 import { loadConfig } from '../config.js';
 import { ALIGN_VERSION } from '../telemetry/index.js';
@@ -20,6 +28,16 @@ const UNCERTAINTY_DETAIL_CAP = 50;
  * pointer to `--json`, which stays complete (uncapped except for the pre-existing per-specifier
  * uncertainty detail cap above). */
 const DOCTOR_HUMAN_DISPLAY_CAP = 10;
+/** ADR 020's v1 allowlist seed -- the measured vendor-convention FP class (probe: 69% of vscode's
+ * raw hits were `typescript`'s and `mocha`'s pre-`exports` multi-entrypoint convention, neither
+ * ships an `exports` field). `align.config.ts`'s optional `knownPublicDeepImports` export EXTENDS
+ * this seed (same "user list adds to a built-in default" shape as `DEFAULT_MARKERS` in
+ * `deep-imports.ts`), it never replaces it -- a repo can suppress its OWN conventions without
+ * having to also re-declare the two everyone hits. */
+// `**`, not `*`: align's glob `*` is single-segment (`glob.ts` → `[^/]*`), so `typescript/lib/*`
+// would match `typescript/lib/foo` but NOT the deeper `mocha/lib/reporters/base` this seed exists to
+// suppress (the measured FP class, deep-import-provenance-probe/PROBE.md). `**` matches any depth.
+const DEFAULT_DEEP_IMPORT_ALLOWLIST: readonly string[] = ['typescript/lib/**', 'mocha/lib/**'];
 
 export interface DoctorOptions {
   readonly json: boolean;
@@ -122,6 +140,48 @@ async function collectDoctorReport(rootDir: string): Promise<DoctorReport> {
         advisories.push({
           kind: 'ungrounded-component',
           message: `Component '${ungrounded.name}' (selector: ${ungrounded.selector}, empty: '${ungrounded.policy}') matched zero files — ${suggestion}`,
+        });
+      }
+
+      // ADR 019 Mode 2 (ACCEPTED, v1 = import-graph-only), docs/proposals/reconciled-build-order.md
+      // #3, "the real silence-fixer": component import edges that exist but aren't covered by any
+      // existing arch.no-dependency/arch.layers rule — boundaries the human hasn't decided on yet.
+      // Pure graph computation (edges-minus-ruleset), already ranked by edge-weight/fan-in by
+      // `computeUngovernedEdgeGaps`; pushed here in that ranked order so the generic per-kind
+      // human-display cap below (`DOCTOR_HUMAN_DISPLAY_CAP`) naturally shows the top N with an
+      // "and M more" pointer to `--json`, same as every other advisory kind — no bespoke
+      // truncation needed for this one.
+      const compositionRoots = new Set(loaded.compositionRoots.map(toComponentName));
+      for (const gap of computeUngovernedEdgeGaps(graph, ruleset, compositionRoots)) {
+        const weightNote = `${gap.edgeWeight} import site${gap.edgeWeight === 1 ? '' : 's'}, fan-in ${gap.fanIn}`;
+        const cycleNote = gap.bidirectional ? '; bidirectional — cycle risk' : '';
+        advisories.push({
+          kind: 'ungoverned-edge',
+          message: `${gap.from} -> ${gap.to} (${weightNote}${cycleNote}) — no existing rule governs this dependency; an undecided architectural boundary.`,
+        });
+      }
+
+      // ADR 020 (ACCEPTED, RESCOPED to a doctor advisory) -- the deep-import convention check: a
+      // cross-package import reaching past a package's declared public surface into its internals
+      // (a specifier subpath containing a src/dist/lib/internal segment). Pure graph computation
+      // over edges+externalEdges+uncertain (the false-quiet fix: an unbuilt/uninstalled repo's
+      // deep imports route to `graph.uncertain`, not edges), already ranked by
+      // `computeDeepImportHits`; pushed here in that ranked order for the same reason as the
+      // ungoverned-edge gaps above -- the generic per-kind human-display cap needs no bespoke
+      // truncation logic for this kind either.
+      const deepImportAllowlist = [...DEFAULT_DEEP_IMPORT_ALLOWLIST, ...loaded.knownPublicDeepImports];
+      // Degraded-completeness note (mirrors #1's `missing-dependencies` handling, check.ts:298):
+      // when the repo's own deps aren't installed, unresolved deep-subpath specifiers still
+      // surface via the uncertain-source path above, but resolution (and therefore precision) is
+      // necessarily partial -- flag it the same way a provisional `align check` verdict does.
+      const deepImportsIncomplete = advisories.some((a) => a.kind === 'missing-dependencies');
+      for (const hit of computeDeepImportHits(graph, { allowlist: deepImportAllowlist })) {
+        const partialNote = deepImportsIncomplete ? ' (results partial — dependencies not fully installed)' : '';
+        advisories.push({
+          kind: 'deep-import',
+          message:
+            `${hit.from}:${hit.line} imports '${hit.specifier}' — reaches past ${hit.targetPackage}'s ` +
+            `public surface via '${hit.marker}' (subpath: ${hit.subpath})${partialNote}.`,
         });
       }
 

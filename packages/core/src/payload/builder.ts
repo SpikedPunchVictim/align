@@ -15,6 +15,12 @@ const CATEGORY_PRIORITY: Readonly<Record<Category, number>> = {
   format: 4,
 };
 
+export interface BaselineDebt {
+  readonly previous: number;
+  readonly current: number;
+  readonly delta: number;
+}
+
 export interface McpCheckPayload {
   readonly verdict: 'green' | 'red' | 'error';
   readonly gates: readonly {
@@ -33,12 +39,23 @@ export interface McpCheckPayload {
    * `green` (an empty greenfield component is not a failure); this field is what makes that green
    * distinguishable from a fully-grounded one. */
   readonly ungroundedComponents: readonly UngroundedComponent[];
+  /** Change in baselined debt since the last persisted baseline: `47 → 45 (−2)`
+   * (docs/proposals/reconciled-build-order.md #2). Structured so agents can read the ratchet
+   * without parsing prose. */
+  readonly baselineDebt: BaselineDebt;
+  /** `false` when the graph was built without the repo's external dependencies (a
+   * `missing-dependencies` advisory fired) — external-edge rules could not be fully evaluated, so a
+   * `green` verdict here is provisional, not authoritative. Structured so a consumer reading
+   * `verdict` alone isn't misled by a lying green (same false-green doctrine as `--frozen-rules`,
+   * docs/proposals/reconciled-build-order.md #1). `true` for a normal, dependency-complete scan. */
+  readonly complete: boolean;
 }
 
 export interface BuildCheckPayloadOptions {
   readonly maxPerRule?: number; // first-N-per-rule cap (ADR 007 rule 5); default 10, spike-validated
   readonly cursor?: string; // opaque offset string from a previous page
   readonly pageSize?: number; // max violations in this page across all rules
+  readonly baselineDebt?: BaselineDebt;
 }
 
 /**
@@ -57,8 +74,16 @@ export function buildMcpCheckPayload(run: CheckRun, options: BuildCheckPayloadOp
   const page = capped.slice(offset, offset + pageSize);
   const hasMore = offset + pageSize < capped.length;
 
+  // When the caller didn't supply a baseline delta (e.g. MCP `align_violations`, which has no
+  // previous-baseline to diff against), don't fabricate zero DEBT — report the run's real current
+  // baselined count with an honest `delta: 0` (this path measures no change, it doesn't claim the
+  // debt is zero). On an error run the counts are untrustworthy (gates report 0), so stay at zeros.
+  const baselineDebt = options.baselineDebt ?? fallbackBaselineDebt(run);
+  const complete = !run.advisories.some((a) => a.kind === 'missing-dependencies');
+
   return {
     verdict: run.verdict,
+    complete,
     gates: run.gates.map((g) => ({
       gate: g.gate,
       status: g.status,
@@ -70,7 +95,14 @@ export function buildMcpCheckPayload(run: CheckRun, options: BuildCheckPayloadOp
     ...(capped.length > pageSize ? { pagination: { cursor: String(offset + pageSize), hasMore } } : {}),
     advisories: run.advisories,
     ungroundedComponents: run.ungroundedComponents,
+    baselineDebt,
   };
+}
+
+function fallbackBaselineDebt(run: CheckRun): BaselineDebt {
+  if (run.verdict === 'error') return { previous: 0, current: 0, delta: 0 };
+  const current = run.gates.reduce((sum, g) => sum + g.baselinedCount, 0);
+  return { previous: current, current, delta: 0 };
 }
 
 function sortViolations(violations: readonly Violation[]): Violation[] {

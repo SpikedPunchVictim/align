@@ -12,25 +12,31 @@ import * as path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { buildMcpCheckPayload, proposeRulesFromDoc, ruleFragmentSchema, toRepoRelativePath, type CheckRun } from '@spikedpunch/align-core';
+import { buildMcpCheckPayload, proposeRulesFromDoc, ruleFragmentSchema, toRepoRelativePath, type BaselineDebt, type CheckRun } from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, writeBaseline } from '../align-dir.js';
 import { buildExplainPayload } from '../commands/explain.js';
+import { computeBaselineDebt } from '../commands/check.js';
 import { DEFAULT_DOC_PATH, proposeFromClientSubmission, writeBuildArtifacts, type DryRunResult } from '../commands/build.js';
 import { renderCondensedFixingSkill } from '../skill/condensed.js';
 
 /** Shared by `align_check`/`align_violations`: runs a fresh check and persists any move-transfer
  * (ADR 006) the run performed, so a renamed file's baselined violation doesn't need a separate
- * `align baseline prune` to stop being re-reported on the next call. */
-async function freshCheck(rootDir: string): Promise<CheckRun> {
+ * `align baseline prune` to stop being re-reported on the next call. Also returns the
+ * baseline-debt delta for the `align_check` payload (docs/proposals/reconciled-build-order.md #2). */
+async function freshCheck(rootDir: string): Promise<{ readonly run: CheckRun; readonly baselineDebt: BaselineDebt }> {
   const { ruleset, excludes, hostRules } = await loadConfig(rootDir);
-  const { orchestrator, baselineStore } = createOrchestrator(ruleset, readBaseline(rootDir), hostRules);
+  const previousBaseline = readBaseline(rootDir);
+  const { orchestrator, baselineStore } = createOrchestrator(ruleset, previousBaseline, hostRules);
   const run = await orchestrator.check({ rootDir, excludes });
   if (run.advisories.some((a) => a.kind === 'baseline-moved')) {
     writeBaseline(rootDir, baselineStore.snapshot());
   }
-  return run;
+  // Shared, error-run-guarded computation (check.ts) — NOT an inline `Σ baselinedCount`, which
+  // fabricates a `−N` debt drop on error runs (gates report 0 baselined then). This was the third
+  // copy the first fix missed (NEW-1).
+  return { run, baselineDebt: computeBaselineDebt(previousBaseline, run) };
 }
 
 /** Builds the McpServer with tools registered but no transport attached — split out from
@@ -56,8 +62,8 @@ export function createMcpServer(rootDir: string): McpServer {
       inputSchema: {},
     },
     async () => {
-      const run = await freshCheck(rootDir);
-      const payload = buildMcpCheckPayload(run, { maxPerRule: 10, pageSize: 50 });
+      const { run, baselineDebt } = await freshCheck(rootDir);
+      const payload = buildMcpCheckPayload(run, { maxPerRule: 10, pageSize: 50, baselineDebt });
       return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
     },
   );
@@ -74,7 +80,7 @@ export function createMcpServer(rootDir: string): McpServer {
       inputSchema: { cursor: z.string().optional() },
     },
     async ({ cursor }) => {
-      const run = await freshCheck(rootDir);
+      const { run } = await freshCheck(rootDir);
       const payload = buildMcpCheckPayload(run, { maxPerRule: 10, pageSize: 50, ...(cursor === undefined ? {} : { cursor }) });
       return {
         content: [

@@ -6,6 +6,8 @@ import type {
   EdgeKind,
   ExternalDependencyEdge,
   ExternalPackageNode,
+  UncertaintyMarker,
+  UncertaintyReason,
 } from '../src/types/graph.js';
 
 export function node(file: string, component: string, loc = 10, snippet?: string): DependencyGraphNode {
@@ -55,17 +57,34 @@ export function externalEdge(
   };
 }
 
+export function uncertainMarker(
+  file: string,
+  specifier: string,
+  opts: { line?: number; reason?: UncertaintyReason } = {},
+): UncertaintyMarker {
+  return {
+    file: toRepoRelativePath(file),
+    specifier,
+    line: opts.line ?? 1,
+    reason: opts.reason ?? 'unresolvable-specifier',
+  };
+}
+
 export function graph(
   nodes: DependencyGraphNode[],
   edges: DependencyGraphEdge[],
-  external: { readonly nodes?: ExternalPackageNode[]; readonly edges?: ExternalDependencyEdge[] } = {},
+  external: {
+    readonly nodes?: ExternalPackageNode[];
+    readonly edges?: ExternalDependencyEdge[];
+    readonly uncertain?: UncertaintyMarker[];
+  } = {},
 ): DependencyGraph {
   return {
     nodes,
     edges,
     externalNodes: external.nodes ?? [],
     externalEdges: external.edges ?? [],
-    uncertain: [],
+    uncertain: external.uncertain ?? [],
     scannedAt: Date.now(),
   };
 }

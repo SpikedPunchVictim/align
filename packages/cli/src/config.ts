@@ -25,6 +25,41 @@ export interface LoadedConfig {
   // `telemetry/resolve.ts`, treats "config didn't say" as "no" only after `--telemetry`/
   // `--no-telemetry`/`ALIGN_TELEMETRY` have all already been checked).
   readonly telemetry?: boolean;
+  // ADR 019 Mode 2 (the ungoverned-edge gap report, docs/proposals/reconciled-build-order.md #3):
+  // explicit, human-declared composition-root component names (e.g. kluster's catch-all `api`,
+  // which legitimately depends on every sub-layer) — excluded as a gap-report edge SOURCE so a
+  // deliberate catch-all's expected fan-out isn't reported as noise. Same deviation shape as
+  // `excludes`/`hostRules`/`telemetry`: this is an advisory-computation input, not a
+  // rule-evaluation concern, so it doesn't belong in the portable `RulesetIR` — and ADR 019's
+  // Precision-critical section explicitly rejects inferring this from a fan-out/glob-breadth
+  // heuristic, so there is no other way to populate it. Read from an optional named
+  // `compositionRoots` export; `[]` when absent.
+  readonly compositionRoots: readonly string[];
+  // ADR 020 (the deep-import convention check, `doctor`-advisory-only, no rule kind): explicit,
+  // human-declared allowlist entries suppressing known-public deep-import conventions specific to
+  // this repo's dependencies, on top of the built-in seed (`typescript/lib/*`, `mocha/lib/*` --
+  // the measured vendor-convention FP class, `deep-imports.ts`'s `DEFAULT_ALLOWLIST`). Same
+  // deviation shape as `excludes`/`hostRules`/`telemetry`/`compositionRoots`: an
+  // advisory-computation input, not a rule-evaluation concern, so it doesn't belong in the
+  // portable `RulesetIR`. Read from an optional named `knownPublicDeepImports` export; `[]` when
+  // absent (the built-in seed still applies -- this list only ADDS to it, never replaces it).
+  readonly knownPublicDeepImports: readonly string[];
+}
+
+/** Validates an optional `string[]` sibling export (`excludes`/`compositionRoots`/
+ * `knownPublicDeepImports`). These bypass zod — they're not part of the portable IR (see
+ * `LoadedConfig`) — so a malformed value (a bare string, a number, a non-array) would otherwise
+ * surface as a file-less `TypeError` deep in a consumer's `.map`/spread (e.g. `doctor.ts`'s
+ * `compositionRoots.map`), which crashes `align doctor` — a command whose contract is to ALWAYS
+ * exit 0. Fail fast HERE with a descriptive, actionable message; the doctor catch turns it into a
+ * `config-error` advisory (exit 0), and `check` reports a clean config error instead of a raw trace. */
+function readStringArrayExport(value: unknown, exportName: string): readonly string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    const got = Array.isArray(value) ? 'an array with non-string entries' : typeof value;
+    throw new Error(`\`${exportName}\` in ${CONFIG_FILENAME} must be a string[] — got ${got}.`);
+  }
+  return value;
 }
 
 function toHostPredicateRegistry(hostRules: Record<string, HostPredicate> | undefined): HostPredicateRegistry {
@@ -63,6 +98,8 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
     excludes?: readonly string[];
     hostRules?: Record<string, HostPredicate>;
     telemetry?: boolean;
+    compositionRoots?: readonly string[];
+    knownPublicDeepImports?: readonly string[];
   };
   try {
     mod = (await import(pathToFileURL(configPath).href)) as typeof mod;
@@ -78,15 +115,28 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
   if (mod.default === undefined) {
     throw new Error(`${CONFIG_FILENAME} must have a default export (the result of defineProject(...)).`);
   }
-  const excludes = mod.excludes ?? [];
+  const excludes = readStringArrayExport(mod.excludes, 'excludes');
   const hostRules = toHostPredicateRegistry(mod.hostRules);
   const telemetry = mod.telemetry !== undefined ? { telemetry: mod.telemetry } : {};
+  const compositionRoots = readStringArrayExport(mod.compositionRoots, 'compositionRoots');
+  const knownPublicDeepImports = readStringArrayExport(mod.knownPublicDeepImports, 'knownPublicDeepImports');
 
-  if (!includeGenerated) return { ruleset: mod.default, excludes, hostRules, ...telemetry };
+  if (!includeGenerated) {
+    return { ruleset: mod.default, excludes, hostRules, compositionRoots, knownPublicDeepImports, ...telemetry };
+  }
 
   const generated = readGeneratedRules(rootDir);
-  if (generated === undefined) return { ruleset: mod.default, excludes, hostRules, ...telemetry };
+  if (generated === undefined) {
+    return { ruleset: mod.default, excludes, hostRules, compositionRoots, knownPublicDeepImports, ...telemetry };
+  }
 
   const mergedRules = mergeGeneratedRules(mod.default.rules, generated.rules);
-  return { ruleset: { ...mod.default, rules: [...mergedRules] }, excludes, hostRules, ...telemetry };
+  return {
+    ruleset: { ...mod.default, rules: [...mergedRules] },
+    excludes,
+    hostRules,
+    compositionRoots,
+    knownPublicDeepImports,
+    ...telemetry,
+  };
 }

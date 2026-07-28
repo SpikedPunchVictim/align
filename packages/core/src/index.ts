@@ -6,6 +6,8 @@ export * from './components/registry.js';
 export * from './components/glob.js';
 export * from './gates/types.js';
 export * from './gates/advisories.js';
+export * from './gates/ungoverned-edges.js';
+export * from './gates/deep-imports.js';
 export * from './baseline/store.js';
 export * from './baseline/fingerprint.js';
 export * from './plugin/registry.js';
