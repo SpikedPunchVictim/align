@@ -13,6 +13,7 @@ import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, readGeneratedRules, readRulesetIr, readRulesLock, writeBaseline } from '../align-dir.js';
 import { verifyFrozenRules } from './build.js';
 import { buildCheckEvent, computeAndPersistViolationTransitions, computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
+import { detectVersionSkewAdvisory } from '../version-skew.js';
 
 /** Carried Stage 3 affordance (approved ahead of Stage 4): when generated rules are active
  * (`.align/generated-rules.json` + `.align/rules.lock.json` both present, ADR 011), surface a
@@ -102,7 +103,7 @@ async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<
 
   recordCheckTelemetry(rootDir, recorder, effectiveRun, wallMs, rulesetIrHash, 'check');
 
-  return emit(effectiveRun, options, generatedRulesSummary(rootDir), computeBaselineDebt(previousBaseline, run));
+  return emit(withVersionSkew(effectiveRun, rootDir), options, generatedRulesSummary(rootDir), computeBaselineDebt(previousBaseline, run));
 }
 
 /**
@@ -205,7 +206,15 @@ async function runUntrustedCheck(rootDir: string, options: CheckOptions): Promis
 
   recordCheckTelemetry(rootDir, recorder, run, wallMs, rulesetIrHash, 'check --untrusted');
 
-  return emit(run, options, undefined, computeBaselineDebt(previousBaseline, run));
+  return emit(withVersionSkew(run, rootDir), options, undefined, computeBaselineDebt(previousBaseline, run));
+}
+
+/** Prepend a global-vs-local version-skew advisory (running binary ≠ this repo's installed
+ * align-core) so a stale global align shadowing the project-local one is a visible one-liner, not a
+ * silent behavior change (e.g. a pre-brace global matching a `{a,b}` selector to zero files). */
+function withVersionSkew(run: CheckRun, rootDir: string): CheckRun {
+  const skew = detectVersionSkewAdvisory(rootDir);
+  return skew === undefined ? run : { ...run, advisories: [skew, ...run.advisories] };
 }
 
 function persistMovedBaseline(rootDir: string, run: CheckRun, baselineStore: InMemoryBaselineStore): void {

@@ -13,6 +13,7 @@ import { TypeScriptPlugin, UNMAPPED_COMPONENT, findDeadAliases, findOrphanedPack
 import { loadConfig } from '../config.js';
 import { ALIGN_VERSION } from '../telemetry/index.js';
 import { parseSkillVersionMarker } from '../skill/version-stamp.js';
+import { detectVersionSkewAdvisory } from '../version-skew.js';
 
 const UNMAPPED_EXAMPLES = 5;
 /** Stage 2 live-probe DX finding, carried into Stage 3: the agent had to script against the
@@ -91,6 +92,12 @@ function buildStaleSkillAdvisory(rootDir: string): Advisory | undefined {
 async function collectDoctorReport(rootDir: string): Promise<DoctorReport> {
   const advisories: Advisory[] = [];
   let uncertain: readonly UncertaintyMarker[] = [];
+
+  // Version skew first — a stale global align shadowing the project-local one changes matcher/rule
+  // behavior, so it reframes every advisory below (doctor is the natural home for "why is my
+  // result weird").
+  const versionSkew = detectVersionSkewAdvisory(rootDir);
+  if (versionSkew !== undefined) advisories.push(versionSkew);
 
   const staleSkill = buildStaleSkillAdvisory(rootDir);
   if (staleSkill !== undefined) advisories.push(staleSkill);
