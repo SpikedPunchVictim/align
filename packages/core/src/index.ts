@@ -10,6 +10,7 @@ export * from './gates/ungoverned-edges.js';
 export * from './gates/deep-imports.js';
 export * from './baseline/store.js';
 export * from './baseline/fingerprint.js';
+export * from './baseline/schema.js';
 export * from './plugin/registry.js';
 export * from './orchestrator.js';
 export * from './payload/builder.js';

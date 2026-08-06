@@ -1,8 +1,25 @@
-import { InMemoryBaselineStore, toRuleId } from '@spikedpunch/align-core';
+import { InMemoryBaselineStore, toRuleId, type BaselineEntry } from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, writeBaseline } from '../align-dir.js';
 import { computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
+
+/**
+ * `readBaseline` throws on a corrupted `.align/baseline.json` (bug hunt 2026-08-03, BUG #1) rather
+ * than silently returning `[]` — silently reading it as empty is exactly what let `align baseline
+ * accept`'s full-snapshot overwrite (`writeBaseline(rootDir, store.snapshot())`, below) permanently
+ * destroy every previously-accepted entry. Every command in this file reads the baseline before it
+ * ever writes it, so catching the throw HERE — before `InMemoryBaselineStore` is even constructed —
+ * guarantees a corrupt file is reported and left untouched on disk, never overwritten.
+ */
+function tryReadBaseline(rootDir: string, command: string): { readonly ok: true; readonly entries: BaselineEntry[] } | { readonly ok: false; readonly code: number } {
+  try {
+    return { ok: true, entries: readBaseline(rootDir) };
+  } catch (err) {
+    console.error(`${command}: ${err instanceof Error ? err.message : String(err)}`);
+    return { ok: false, code: 1 };
+  }
+}
 
 async function currentViolations(rootDir: string) {
   const { ruleset, excludes, hostRules, telemetry } = await loadConfig(rootDir);
@@ -16,7 +33,9 @@ async function currentViolations(rootDir: string) {
 export async function baselineAccept(rootDir: string, ruleId?: string, telemetryPreConfig?: boolean): Promise<number> {
   const { violations, ruleset, telemetry } = await currentViolations(rootDir);
   const targeted = ruleId === undefined ? violations : violations.filter((v) => v.ruleId === toRuleId(ruleId));
-  const store = new InMemoryBaselineStore(readBaseline(rootDir));
+  const previous = tryReadBaseline(rootDir, 'align baseline accept');
+  if (!previous.ok) return previous.code;
+  const store = new InMemoryBaselineStore(previous.entries);
   store.accept(targeted, 'manual');
   writeBaseline(rootDir, store.snapshot());
   console.log(`Accepted ${targeted.length} violation(s)${ruleId === undefined ? '' : ` for rule '${ruleId}'`} into the baseline.`);
@@ -36,7 +55,9 @@ export async function baselineAccept(rootDir: string, ruleId?: string, telemetry
 
 export async function baselinePrune(rootDir: string, telemetryPreConfig?: boolean): Promise<number> {
   const { ruleset, excludes, hostRules, telemetry } = await loadConfig(rootDir);
-  const store = new InMemoryBaselineStore(readBaseline(rootDir));
+  const previous = tryReadBaseline(rootDir, 'align baseline prune');
+  if (!previous.ok) return previous.code;
+  const store = new InMemoryBaselineStore(previous.entries);
   const { orchestrator } = createOrchestrator(ruleset, [], hostRules);
   const run = await orchestrator.check({ rootDir, excludes });
   const allViolations = run.gates.flatMap((g) => g.violations);
@@ -59,7 +80,9 @@ export async function baselinePrune(rootDir: string, telemetryPreConfig?: boolea
 }
 
 export async function baselineShow(rootDir: string, ruleId?: string): Promise<number> {
-  const store = new InMemoryBaselineStore(readBaseline(rootDir));
+  const previous = tryReadBaseline(rootDir, 'align baseline show');
+  if (!previous.ok) return previous.code;
+  const store = new InMemoryBaselineStore(previous.entries);
   const entries = store.show(ruleId === undefined ? undefined : { ruleId: toRuleId(ruleId) });
   if (entries.length === 0) {
     console.log('Baseline is empty.');

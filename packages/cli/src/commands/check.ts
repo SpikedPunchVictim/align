@@ -76,7 +76,16 @@ export async function runCheck(rootDir: string, options: CheckOptions): Promise<
 
 async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<number> {
   const { ruleset, excludes, hostRules, telemetry } = await loadConfig(rootDir);
-  const previousBaseline = readBaseline(rootDir);
+  let previousBaseline: BaselineEntry[];
+  try {
+    previousBaseline = readBaseline(rootDir);
+  } catch (err) {
+    // readBaseline throws on a corrupted `.align/baseline.json` (bug hunt 2026-08-03, BUG #1) —
+    // caught here the same way `runUntrustedCheck` below catches `readRulesetIr`, instead of an
+    // unattributed Node stack trace.
+    console.error(`align check: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
   const { orchestrator, baselineStore } = createOrchestrator(ruleset, previousBaseline, hostRules);
 
   const recorder = createTelemetryRecorder(rootDir, 'check', options.telemetryPreConfig, telemetry);
@@ -197,7 +206,17 @@ async function runUntrustedCheck(rootDir: string, options: CheckOptions): Promis
   }
 
   const rulesetIrHash = computeRulesetIrHash(exported.ruleset);
-  const previousBaseline = readBaseline(rootDir);
+  let previousBaseline: BaselineEntry[];
+  try {
+    previousBaseline = readBaseline(rootDir);
+  } catch (err) {
+    // Same discipline as the `readRulesetIr` catch above — a corrupted `.align/baseline.json`
+    // (bug hunt 2026-08-03, BUG #1) is a refusal, not a raw Node stack trace.
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`align check --untrusted: ${message}`);
+    recorder.record({ kind: 'error', errorKind: 'untrusted-refusal', message: shortMessage(message), command: 'check --untrusted' });
+    return 1;
+  }
   const { orchestrator, baselineStore } = createOrchestrator(exported.ruleset, previousBaseline, new Map());
   const wallStart = performance.now();
   const run = await orchestrator.check({ rootDir, excludes: exported.excludes });

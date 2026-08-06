@@ -5,6 +5,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
+  baselineFileSchema,
   exportedRulesetSchema,
   generatedRulesFileSchema,
   rulesLockSchema,
@@ -53,15 +54,36 @@ export function ensureAlignDir(rootDir: string): void {
   fs.mkdirSync(alignDirPath(rootDir), { recursive: true });
 }
 
+/**
+ * Reads and zod-validates `.align/baseline.json`. A missing file returns `[]` (nothing has been
+ * accepted yet), but a file that exists and fails to parse as JSON or fails schema validation
+ * throws — a corrupted baseline is never treated as empty (bug hunt 2026-08-03, BUG #1): silently
+ * reading it as `[]` would make `align check` report every previously-accepted violation as new
+ * with no warning, and the next `align baseline accept` (bare or `--rule`-scoped) would rebuild
+ * the store from that empty read and overwrite the file via `writeBaseline`, permanently
+ * destroying every entry not visible in that scan. Mirrors `readRulesetIr`'s discipline, not
+ * `readTelemetryState`'s — this file holds irreplaceable human consent decisions, not a
+ * regenerable cache.
+ */
 export function readBaseline(rootDir: string): BaselineEntry[] {
   const file = baselinePath(rootDir);
   if (!fs.existsSync(file)) return [];
+  let parsed: unknown;
   try {
-    const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
-    return Array.isArray(raw) ? (raw as BaselineEntry[]) : [];
-  } catch {
-    return [];
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    throw new Error(
+      `${file} is not valid JSON: ${err instanceof Error ? err.message : String(err)}. ` +
+        'A corrupted baseline is never treated as empty — that would silently discard accepted ' +
+        'debt, and the next `align baseline accept` would overwrite the file. Most likely cause: ' +
+        'an unresolved git merge conflict. Resolve it, or restore the file from git.',
+    );
   }
+  // `baselineFileSchema`'s inferred element type is plain strings (fingerprint/ruleId/file); `BaselineEntry`
+  // brands those same fields (`ViolationId`/`RuleId`/`RepoRelativePath`). `as BaselineEntry[]` alone doesn't
+  // satisfy TS's overlap check across a branded intersection type — the boundary cast goes through `unknown`,
+  // same as every other brand-construction site (`types/branded.ts`'s `toXxx` helpers).
+  return baselineFileSchema.parse(parsed) as unknown as BaselineEntry[];
 }
 
 export function writeBaseline(rootDir: string, entries: readonly BaselineEntry[]): void {

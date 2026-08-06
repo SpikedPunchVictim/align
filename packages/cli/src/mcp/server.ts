@@ -62,8 +62,18 @@ export function createMcpServer(rootDir: string): McpServer {
       inputSchema: {},
     },
     async () => {
-      const { run, baselineDebt } = await freshCheck(rootDir);
-      const payload = buildMcpCheckPayload(run, { maxPerRule: 10, pageSize: 50, baselineDebt });
+      // `freshCheck` reads `.align/baseline.json` (`readBaseline`), which throws on a corrupted
+      // file (bug hunt 2026-08-03, BUG #1) instead of silently treating it as empty — an uncaught
+      // throw here would crash this tool call instead of returning a proper MCP error response, so
+      // it's caught the same way `align_explain_rule`'s "unknown rule id" and `align_propose_rules`'
+      // grounding failure already report theirs.
+      let checked: Awaited<ReturnType<typeof freshCheck>>;
+      try {
+        checked = await freshCheck(rootDir);
+      } catch (err) {
+        return { isError: true, content: [{ type: 'text', text: err instanceof Error ? err.message : String(err) }] };
+      }
+      const payload = buildMcpCheckPayload(checked.run, { maxPerRule: 10, pageSize: 50, baselineDebt: checked.baselineDebt });
       return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
     },
   );
@@ -80,8 +90,13 @@ export function createMcpServer(rootDir: string): McpServer {
       inputSchema: { cursor: z.string().optional() },
     },
     async ({ cursor }) => {
-      const { run } = await freshCheck(rootDir);
-      const payload = buildMcpCheckPayload(run, { maxPerRule: 10, pageSize: 50, ...(cursor === undefined ? {} : { cursor }) });
+      let checked: Awaited<ReturnType<typeof freshCheck>>;
+      try {
+        checked = await freshCheck(rootDir);
+      } catch (err) {
+        return { isError: true, content: [{ type: 'text', text: err instanceof Error ? err.message : String(err) }] };
+      }
+      const payload = buildMcpCheckPayload(checked.run, { maxPerRule: 10, pageSize: 50, ...(cursor === undefined ? {} : { cursor }) });
       return {
         content: [
           {
@@ -205,7 +220,16 @@ export function createMcpServer(rootDir: string): McpServer {
         return { content: [{ type: 'text', text: JSON.stringify(diffPayload, null, 2) }] };
       }
 
-      const applied = writeBuildArtifacts(rootDir, result, { acceptNewIntoBaseline: accept_new_into_baseline === true });
+      // `writeBuildArtifacts` throws (rather than returning `{ ok: false }`) when it reads a
+      // corrupted `.align/baseline.json` while seeding new violations (bug hunt 2026-08-03, BUG
+      // #1) — caught here the same way the `proposeFromClientSubmission` call above is, so it
+      // becomes a proper MCP error response instead of crashing this tool call.
+      let applied: { readonly ok: boolean; readonly message: string };
+      try {
+        applied = writeBuildArtifacts(rootDir, result, { acceptNewIntoBaseline: accept_new_into_baseline === true });
+      } catch (err) {
+        return { isError: true, content: [{ type: 'text', text: err instanceof Error ? err.message : String(err) }] };
+      }
       if (!applied.ok) {
         return { isError: true, content: [{ type: 'text', text: applied.message }] };
       }
