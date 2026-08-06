@@ -181,3 +181,43 @@ function git_branches(cwd: string): string[] {
 function git_log(cwd: string): string[] {
   return git(cwd, ['log', '--oneline']).split('\n').filter((l) => l.trim().length > 0);
 }
+
+describe('createNodeGitEffects.createBranch — real git (bug hunt 2026-08-03, BUG #13)', () => {
+  // The reported crash, against real git: a second `align agent run` the same day reuses the
+  // date-granular branch name, `git checkout -b` exits 128 ("a branch named ... already exists"),
+  // and the rejection used to escape as a raw Node stack trace.
+  it('is idempotent — a second call with the same name resumes onto the existing branch', async () => {
+    tmpDir = initRepo();
+    const effects = createNodeGitEffects(tmpDir);
+    const name = defaultWorkBranchName();
+
+    await effects.createBranch(name);
+    expect(await effects.currentBranch()).toBe(name);
+
+    git(tmpDir, ['checkout', '-q', 'main']);
+    await expect(effects.createBranch(name)).resolves.toBeUndefined(); // used to reject with code 128
+    expect(await effects.currentBranch()).toBe(name);
+  });
+
+  // The safety property: when the branch cannot be reached at all, createBranch must throw rather
+  // than return while HEAD is still on the caller's branch — `runAgentLoop` commits immediately
+  // after this call, and doing that on `main` is not recoverable by re-running.
+  it('throws, leaving HEAD untouched, when the work branch cannot be reached', async () => {
+    tmpDir = initRepo();
+    const effects = createNodeGitEffects(tmpDir);
+    const name = defaultWorkBranchName();
+
+    // Checked out in a separate worktree — both `checkout -b` and the fallback `checkout` fail.
+    const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'align-agent-e2e-wt-'));
+    fs.rmSync(worktree, { recursive: true, force: true });
+    git(tmpDir, ['worktree', 'add', '-b', name, worktree]);
+
+    try {
+      await expect(effects.createBranch(name)).rejects.toThrow();
+      expect(await effects.currentBranch()).toBe('main'); // never moved off the caller's branch
+    } finally {
+      git(tmpDir, ['worktree', 'remove', '--force', worktree]);
+      fs.rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+});

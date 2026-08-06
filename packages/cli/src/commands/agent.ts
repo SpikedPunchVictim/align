@@ -186,7 +186,19 @@ export async function runAgentCommand(rootDir: string, options: AgentRunCliOptio
     baseBranch,
   };
 
-  const result = await runAgentLoop(effects, ruleset, runOptions);
+  // `runAgentLoop` can reject — most concretely, `effects.git.createBranch` throwing when it can't
+  // land on the work branch at all (bug hunt 2026-08-03, BUG #13). Nothing between here and
+  // `program.ts`'s action handler catches that, so an uncaught rejection would surface as a raw
+  // Node stack trace instead of a clean CLI error. Caught here and reported the same way
+  // `runBuild` reports its own caught errors (`commands/build.ts`'s `ComponentValidationError`
+  // catch): a one-line message plus a non-zero exit code.
+  let result: AgentRunResult;
+  try {
+    result = await runAgentLoop(effects, ruleset, runOptions);
+  } catch (err) {
+    console.error(`align agent run: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
   printResult(result);
   recordAgentTelemetry(rootDir, result, memoizingProvider, anthropicProvider, ruleset, options.telemetryPreConfig, telemetry);
   return exitCodeFor(result);

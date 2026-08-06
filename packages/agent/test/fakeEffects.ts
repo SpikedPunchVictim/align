@@ -24,6 +24,15 @@ export class FakeGitEffects implements GitEffects {
   public readonly revertedShas: string[] = [];
   public ffMerged = false;
   public deletedBranch: string | undefined;
+  /** Failure mode for `createBranch` (bug hunt 2026-08-03, BUG #13's test double gap — the real
+   * `createNodeGitEffects.createBranch` can reject on a branch-name collision, or land somewhere
+   * other than the requested branch, and nothing exercised either path before this):
+   * - `'none'` (default): succeeds and switches `branch` to the requested name, like real git.
+   * - `'collision-then-resume'`: mimics a prior run's branch already existing — `checkout -b`
+   *   fails, but the fallback plain `checkout` lands on it correctly, so the call still succeeds.
+   * - `'stuck'`: neither checkout would land on the requested branch — `branch` stays wherever it
+   *   was, and the call throws, matching the real implementation's post-condition assert. */
+  public createBranchMode: 'none' | 'collision-then-resume' | 'stuck' = 'none';
 
   private pendingUndo: UndoEntry[] = [];
   private readonly commitUndo = new Map<string, UndoEntry[]>();
@@ -44,6 +53,18 @@ export class FakeGitEffects implements GitEffects {
     return this.branch;
   }
   async createBranch(name: string): Promise<void> {
+    if (this.createBranchMode === 'stuck') {
+      // Neither `checkout -b <name>` nor the fallback `checkout <name>` would land on `name` —
+      // simulates the real implementation's post-condition assert firing (e.g. every branch name
+      // is somehow unreachable). `branch` deliberately does NOT change: this is the case the
+      // real `createBranch` must never silently proceed from.
+      throw new Error(
+        `align agent could not switch to work branch '${name}' (still on '${this.branch}'). Refusing ` +
+          `to continue — every apply must land on the work branch, never on your current branch.`,
+      );
+    }
+    // Both 'none' and 'collision-then-resume' end up on `name` — the real implementation's
+    // fallback `checkout <name>` succeeds when the branch already exists from a prior run.
     this.branch = name;
   }
   async commit(message: string, paths: readonly RepoRelativePath[]): Promise<GitCommitResult> {

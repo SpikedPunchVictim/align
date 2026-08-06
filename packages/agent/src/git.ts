@@ -24,6 +24,11 @@ async function commandExists(cmd: string): Promise<boolean> {
   }
 }
 
+async function currentBranchOf(rootDir: string): Promise<string> {
+  const { stdout } = await git(rootDir, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  return stdout.trim();
+}
+
 export function createNodeGitEffects(rootDir: string): GitEffects {
   return {
     async isWorktreeClean(): Promise<boolean> {
@@ -32,12 +37,32 @@ export function createNodeGitEffects(rootDir: string): GitEffects {
     },
 
     async currentBranch(): Promise<string> {
-      const { stdout } = await git(rootDir, ['rev-parse', '--abbrev-ref', 'HEAD']);
-      return stdout.trim();
+      return currentBranchOf(rootDir);
     },
 
     async createBranch(name: string): Promise<void> {
-      await git(rootDir, ['checkout', '-b', name]);
+      try {
+        await git(rootDir, ['checkout', '-b', name]);
+        return;
+      } catch {
+        // Branch already exists — most commonly a prior `align agent run` the same day
+        // (`defaultWorkBranchName` is date-granular, bug hunt 2026-08-03 BUG #13). Resume onto it
+        // rather than creating a second one. NEVER swallow this and let the caller proceed on
+        // whatever branch it started on — `runAgentLoop` commits LLM-authored changes right after
+        // this call, and doing that on `main` is not recoverable by re-running.
+        await git(rootDir, ['checkout', name]);
+      }
+      // Post-condition, not an exit-code inference: assert the tree is actually on `name` before
+      // returning success. A silently-successful `checkout -b`/`checkout` that somehow leaves HEAD
+      // elsewhere (detached HEAD, a hook redirecting the checkout, etc.) must fail loudly here
+      // rather than let the caller assume it's safe to commit.
+      const current = await currentBranchOf(rootDir);
+      if (current !== name) {
+        throw new Error(
+          `align agent could not switch to work branch '${name}' (still on '${current}'). Refusing ` +
+            `to continue — every apply must land on the work branch, never on your current branch.`,
+        );
+      }
     },
 
     async commit(message: string, paths: readonly RepoRelativePathLike[]): Promise<GitCommitResult> {

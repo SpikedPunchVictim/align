@@ -315,3 +315,67 @@ describe('defaultWorkBranchName', () => {
     expect(defaultWorkBranchName(fixed)).toBe('align/fixes-2026-07-12');
   });
 });
+
+describe('runAgentLoop — work-branch safety (bug hunt 2026-08-03, BUG #13)', () => {
+  const file = toRepoRelativePath('src/a.ts');
+  const v1 = violation({ id: 'v1', ruleId: 'arch.no-dependency', file: 'src/a.ts' });
+
+  function scriptedFix(): FakeFixProvider {
+    const fake = new FakeFixProvider();
+    fake.script(file, [
+      {
+        files: [{ path: 'src/a.ts', edits: [{ search: 'import { bad } from "./bad.js";\n', replace: '' }] }],
+        rationale: 'remove forbidden import',
+      },
+    ]);
+    return fake;
+  }
+
+  // The reported crash: a second `align agent run` the same day collides on the date-granular
+  // branch name, `git checkout -b` exits 128, and nothing caught it. `createBranch` now falls back
+  // to a plain checkout of the existing branch, so the run proceeds instead of throwing.
+  it('a same-day branch-name collision resumes onto the existing work branch instead of crashing', async () => {
+    const handle = createFakeEffects(scriptedFix(), {
+      'src/a.ts': 'import { bad } from "./bad.js";\nexport const ok = 1;\n',
+    });
+    handle.git.createBranchMode = 'collision-then-resume';
+    handle.setCheckRuns([checkRun([v1]), checkRun([])]);
+
+    const result = await runAgentLoop(handle.effects, emptyRuleset, opts());
+
+    expect(result.verdict).toBe('done');
+    expect(handle.git.commitLog).toHaveLength(1);
+  });
+
+  // The post-condition, not an exit-code inference: after createBranch returns, the tree really is
+  // on the work branch, so every commit below lands there rather than on whatever branch the user
+  // started on.
+  it('lands on the work branch before any commit is made', async () => {
+    const handle = createFakeEffects(scriptedFix(), {
+      'src/a.ts': 'import { bad } from "./bad.js";\nexport const ok = 1;\n',
+    });
+    handle.git.branch = 'main';
+    handle.setCheckRuns([checkRun([v1]), checkRun([])]);
+
+    await runAgentLoop(handle.effects, emptyRuleset, opts({ workBranchName: 'align/fixes-test' }));
+
+    expect(await handle.effects.git.currentBranch()).toBe('align/fixes-test');
+  });
+
+  // The safety property this fix exists for. If the branch switch cannot land, the run must abort
+  // having committed NOTHING — swallowing the failure and continuing would commit LLM-authored
+  // changes to the branch the user was already on (typically main), which re-running cannot undo.
+  it('commits nothing when the work-branch switch cannot land', async () => {
+    const handle = createFakeEffects(scriptedFix(), {
+      'src/a.ts': 'import { bad } from "./bad.js";\nexport const ok = 1;\n',
+    });
+    handle.git.branch = 'main';
+    handle.git.createBranchMode = 'stuck';
+    handle.setCheckRuns([checkRun([v1]), checkRun([])]);
+
+    await expect(runAgentLoop(handle.effects, emptyRuleset, opts())).rejects.toThrow(/could not switch to work branch/);
+
+    expect(handle.git.commitLog).toHaveLength(0);
+    expect(handle.git.branch).toBe('main'); // never moved off the user's branch
+  });
+});
