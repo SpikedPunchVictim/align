@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { dryRunBuild, runBuild, verifyFrozenRules, writeBuildArtifacts } from '../src/commands/build.js';
 import { runCheck } from '../src/commands/check.js';
-import { generatedRulesPath, rulesLockPath, lastBuildReportPath } from '../src/align-dir.js';
+import { generatedRulesPath, rulesLockPath, lastBuildReportPath, readBaseline } from '../src/align-dir.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.join(here, 'fixtures');
@@ -387,6 +387,70 @@ describe('writeBuildArtifacts (shared apply pipeline)', () => {
     expect(result.impact.addedNew.length).toBeGreaterThan(0);
     const applied = writeBuildArtifacts(tmpDir, result, { acceptNewIntoBaseline: false });
     expect(applied.ok).toBe(false);
+    expect(fs.existsSync(generatedRulesPath(tmpDir))).toBe(false);
+  });
+
+  // Caller-contract half of the marker-splice fix (bug hunt 2026-08-03, BUG #10/#11/#12, Step 6
+  // check 7): `writeGeneratedRulesNote` changed from void-and-never-throwing to throwing on a
+  // malformed marker state. `writeBuildArtifacts` must catch that and report it through its normal
+  // `ApplyResult` failure shape — the same shape the consent-refusal case above already uses —
+  // never let it escape `runBuild`'s caller as an unhandled promise rejection.
+  //
+  // It must also fail the WHOLE multi-write sequence atomically: `.align/generated-rules.json` is
+  // written before the config note, so a naive try/catch around only the note write would leave
+  // generated-rules.json (silently merged into the ruleset at the next `loadConfig`, `config.ts:
+  // 128-141`) and possibly an unbaselined new violation on disk while reporting failure. The fix
+  // validates the config's marker state up front, before any artifact write.
+  it('a malformed align.config.ts note-block state reports a clean failure and writes NOTHING — not generated-rules.json, not rules.lock.json', async () => {
+    tmpDir = copyFixture('build-app');
+    const configPath = path.join(tmpDir, 'align.config.ts');
+    const before = fs.readFileSync(configPath, 'utf8');
+    fs.writeFileSync(configPath, `${before}\n// align:generated-rules-note:start\n// stale, no closing marker\n`, 'utf8');
+    const corrupted = fs.readFileSync(configPath, 'utf8');
+
+    const result = await dryRunBuild(tmpDir, DOC);
+    const applied = writeBuildArtifacts(tmpDir, result, { acceptNewIntoBaseline: false });
+    expect(applied.ok).toBe(false);
+    expect(applied.message).toMatch(/malformed align block/);
+    // The note-writer's own file must be untouched.
+    expect(fs.readFileSync(configPath, 'utf8')).toBe(corrupted);
+    // Nothing else in the sequence ran either — no orphaned generated-rules.json silently in force
+    // at the next `align check`, no lockfile, no baseline write.
+    expect(fs.existsSync(generatedRulesPath(tmpDir))).toBe(false);
+    expect(fs.existsSync(rulesLockPath(tmpDir))).toBe(false);
+    expect(readBaseline(tmpDir)).toEqual([]);
+  });
+
+  it('does not overwrite a pre-existing generated-rules.json/rules.lock.json when a later --apply hits a malformed config note', async () => {
+    tmpDir = copyFixture('build-app');
+    // A prior successful --apply.
+    const firstCode = await runBuild(tmpDir, { apply: true, ifChanged: false, verify: false, acceptNewIntoBaseline: false });
+    expect(firstCode).toBe(0);
+    const generatedBefore = fs.readFileSync(generatedRulesPath(tmpDir), 'utf8');
+    const lockBefore = fs.readFileSync(rulesLockPath(tmpDir), 'utf8');
+
+    // Now corrupt the config's note block (e.g. a bad merge resolution) and try to --apply again.
+    const configPath = path.join(tmpDir, 'align.config.ts');
+    fs.writeFileSync(configPath, `${fs.readFileSync(configPath, 'utf8')}\n// align:generated-rules-note:start\n// stale\n`, 'utf8');
+
+    const result = await dryRunBuild(tmpDir, DOC);
+    const applied = writeBuildArtifacts(tmpDir, result, { acceptNewIntoBaseline: false });
+    expect(applied.ok).toBe(false);
+
+    // The artifacts from the prior successful build survive byte-for-byte — not silently
+    // rewritten, not silently stale-but-untouched-on-purpose: genuinely never reached.
+    expect(fs.readFileSync(generatedRulesPath(tmpDir), 'utf8')).toBe(generatedBefore);
+    expect(fs.readFileSync(rulesLockPath(tmpDir), 'utf8')).toBe(lockBefore);
+  });
+
+  it('`runBuild --apply` resolves (never rejects) and exits non-zero on a malformed align.config.ts note block', async () => {
+    tmpDir = copyFixture('build-app');
+    const configPath = path.join(tmpDir, 'align.config.ts');
+    const before = fs.readFileSync(configPath, 'utf8');
+    fs.writeFileSync(configPath, `${before}\n// align:generated-rules-note:start\n// stale, no closing marker\n`, 'utf8');
+
+    const code = await runBuild(tmpDir, { apply: true, ifChanged: false, verify: false, acceptNewIntoBaseline: false });
+    expect(code).toBe(1);
     expect(fs.existsSync(generatedRulesPath(tmpDir))).toBe(false);
   });
 });

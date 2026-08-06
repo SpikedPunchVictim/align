@@ -216,3 +216,91 @@ describe('align init — npm-script offer', () => {
     expect(fs.existsSync(path.join(tmpDir, 'package.json'))).toBe(false);
   });
 });
+
+// Caller-contract half of the marker-splice fix (bug hunt 2026-08-03, BUG #10/#11/#12, Step 6
+// check 7): `writeAgentInstructions`/`writeGeneratedRulesNote` changed from void-and-never-throwing
+// to throwing on a malformed marker state. `runInit` must catch that and report it the same way it
+// reports its other refusals — a printed message plus a non-zero exit code — never let it escape
+// as an unhandled promise rejection.
+describe('align init — malformed marker block fails cleanly (caller-contract fix)', () => {
+  function captureLog(): { logs: string[]; restore: () => void } {
+    const logs: string[] = [];
+    const original = console.log;
+    console.log = ((...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    }) as typeof console.log;
+    return { logs, restore: () => (console.log = original) };
+  }
+
+  it('a malformed CLAUDE.md marker state (orphan START) exits non-zero with a printed message, not a throw', async () => {
+    tmpDir = makeSinglePackageRepo();
+    const claudeMdPath = path.join(tmpDir, 'CLAUDE.md');
+    const original = '# Notes\n\n<!-- align:start -->\nstale, no closing marker\n';
+    fs.writeFileSync(claudeMdPath, original, 'utf8');
+
+    const { logs, restore } = captureLog();
+    let code: number;
+    try {
+      code = await runInit(tmpDir, { acceptExisting: false, nonInteractive: true });
+    } finally {
+      restore();
+    }
+
+    expect(code).not.toBe(0);
+    expect(logs.join('\n')).toMatch(/malformed align block/);
+    // Refused, not guessed: the file is untouched, not corrupted or duplicated into.
+    expect(fs.readFileSync(claudeMdPath, 'utf8')).toBe(original);
+  });
+
+  it('a malformed align.config.ts note-block state exits non-zero and never destroys the ruleset', async () => {
+    tmpDir = makeSinglePackageRepo();
+    const configPath = path.join(tmpDir, 'align.config.ts');
+    const original =
+      `import { defineProject } from '@spikedpunch/align-core/dsl';\n\n` +
+      `export default defineProject({\n` +
+      `  components: { app: 'src/**' },\n` +
+      `  rules: [{ kind: 'arch.no-cycles', components: ['app'] }],\n` +
+      `});\n\n` +
+      `// align:generated-rules-note:start\nstale, no closing marker\n`;
+    fs.writeFileSync(configPath, original, 'utf8');
+
+    const { logs, restore } = captureLog();
+    let code: number;
+    try {
+      code = await runInit(tmpDir, { acceptExisting: false, nonInteractive: true });
+    } finally {
+      restore();
+    }
+
+    expect(code).not.toBe(0);
+    expect(logs.join('\n')).toMatch(/malformed align block/);
+    // This is the destructive case BUG #10 describes for align.config.ts specifically: the
+    // ruleset must survive, byte-for-byte, rather than being silently spliced away.
+    expect(fs.readFileSync(configPath, 'utf8')).toBe(original);
+  });
+
+  // `runInit` writes the config note THEN CLAUDE.md (`init.ts:81-82`) — a naive per-call try/catch
+  // would let a malformed CLAUDE.md throw only after the config note write already ran, silently
+  // annotating align.config.ts on a run that reports overall failure. Both files' marker states are
+  // validated up front, before either write, so the whole prelude is atomic: on failure, NEITHER
+  // file is touched.
+  it('a malformed CLAUDE.md never touches align.config.ts either — the whole prelude validates before writing anything', async () => {
+    tmpDir = makeSinglePackageRepo();
+    fs.writeFileSync(path.join(tmpDir, 'CLAUDE.md'), '# Notes\n\n<!-- align:start -->\nstale, no closing marker\n', 'utf8');
+
+    const { restore } = captureLog();
+    let code: number;
+    try {
+      code = await runInit(tmpDir, { acceptExisting: false, nonInteractive: true });
+    } finally {
+      restore();
+    }
+
+    expect(code).not.toBe(0);
+    // `runInit` still creates align.config.ts fresh (that write is unrelated to the marker fix —
+    // it happens before the prelude and unconditionally on a repo with no config yet), but the
+    // generated-rules-note comment must never have been appended to it.
+    const configTs = fs.readFileSync(path.join(tmpDir, 'align.config.ts'), 'utf8');
+    expect(configTs).not.toContain('align:generated-rules-note:start');
+  });
+});

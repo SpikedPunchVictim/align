@@ -30,7 +30,7 @@ import {
 } from '@spikedpunch/align-core';
 import { TypeScriptPlugin } from '@spikedpunch/align-plugin-typescript';
 import { loadConfig, CONFIG_FILENAME } from '../config.js';
-import { writeGeneratedRulesNote } from '../init/config-comment.js';
+import { assertGeneratedRulesNoteWellFormed, writeGeneratedRulesNote } from '../init/config-comment.js';
 import { printDryRunReport, renderBuildReport } from './build-report.js';
 import {
   readBaseline,
@@ -237,6 +237,23 @@ export function writeBuildArtifacts(
     };
   }
 
+  // This function writes three artifacts in sequence — `.align/generated-rules.json`,
+  // `align.config.ts`'s note comment (`writeGeneratedRulesNote`), then `.align/rules.lock.json`
+  // (and optionally the baseline) — and `loadConfig` silently merges generated-rules.json into the
+  // effective ruleset on every load (`config.ts:128-141`) regardless of whether the lockfile or
+  // baseline write ever happened. `writeGeneratedRulesNote` throws on a malformed marker state
+  // (bug hunt 2026-08-03, BUG #10/#11/#12) — validated HERE, before any of the three writes, so a
+  // malformed align.config.ts fails this whole sequence atomically. Catching the throw only around
+  // the note write (the first fix attempt) left a window where generated-rules.json was already on
+  // disk — silently in force at the next `align check` — while `writeBuildArtifacts` reported
+  // failure and never wrote the matching lockfile or (with `--accept-new-into-baseline`) baseline
+  // entries.
+  try {
+    assertGeneratedRulesNoteWellFormed(path.join(rootDir, CONFIG_FILENAME));
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
+
   // Only groundable rules are ever written — `proposal.rules` already excludes everything in
   // `proposal.flagged` (ADR 011: ungroundable -> flagged, never silently written).
   const generatedFile: GeneratedRulesFile = {
@@ -383,6 +400,9 @@ export async function runBuild(rootDir: string, options: BuildOptions): Promise<
   // zero-`empty:'fail'`-component throws the same `ComponentValidationError` — caught here the
   // same way `orchestrator.ts` catches it, instead of a raw Node stack trace
   // (GREENFIELD_TRIAD_REPORT.md §3). `'until-populated'`/`'allow'` components never throw at all.
+  // `computeBuildResult` (inside `dryRunBuild`) also reads `.align/baseline.json` via
+  // `readBaseline`, which throws on a corrupted file (bug hunt 2026-08-03, BUG #1) — reported the
+  // same clean way rather than left to become an unattributed Node stack trace.
   let result: DryRunResult;
   try {
     result = await dryRunBuild(rootDir, docRelPath);
@@ -391,7 +411,8 @@ export async function runBuild(rootDir: string, options: BuildOptions): Promise<
       console.error(`align build: ${err.message}`);
       return 1;
     }
-    throw err;
+    console.error(`align build: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
   }
   printDryRunReport(result);
   await recordBuildTelemetry(rootDir, docRelPath, result, options.telemetryPreConfig);
@@ -413,7 +434,17 @@ export async function runBuild(rootDir: string, options: BuildOptions): Promise<
     }
   }
 
-  const applied = writeBuildArtifacts(rootDir, result, { acceptNewIntoBaseline });
+  // `writeBuildArtifacts` reads `.align/baseline.json` via `readBaseline` when seeding new
+  // violations (`acceptNewIntoBaseline`), which throws on a corrupted file (bug hunt 2026-08-03,
+  // BUG #1) rather than the `{ ok: false, message }` shape it uses for its own recoverable
+  // refusals — caught here the same way, not left as a raw Node stack trace.
+  let applied: ApplyResult;
+  try {
+    applied = writeBuildArtifacts(rootDir, result, { acceptNewIntoBaseline });
+  } catch (err) {
+    console.error(`align build: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
   console.log(`\n${applied.message}`);
   return applied.ok ? 0 : 1;
 }

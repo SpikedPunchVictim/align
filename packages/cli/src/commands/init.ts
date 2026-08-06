@@ -7,8 +7,8 @@ import { TypeScriptPlugin } from '@spikedpunch/align-plugin-typescript';
 import { detectComponents } from '../init/detect-components.js';
 import { suggestLayers } from '../init/suggest-layers.js';
 import { renderConfig } from '../init/render-config.js';
-import { writeAgentInstructions } from '../init/claude-md.js';
-import { writeGeneratedRulesNote } from '../init/config-comment.js';
+import { assertAgentInstructionsWellFormed, writeAgentInstructions } from '../init/claude-md.js';
+import { assertGeneratedRulesNoteWellFormed, writeGeneratedRulesNote } from '../init/config-comment.js';
 import { ensureTelemetryGitignored } from '../init/gitignore.js';
 import { offerAlignScript } from '../init/npm-script.js';
 import { createOrchestrator } from '../composition-root.js';
@@ -78,8 +78,24 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     console.log(`${CONFIG_FILENAME} already exists — leaving it as-is.`);
   }
 
-  writeGeneratedRulesNote(configPath);
-  writeAgentInstructions(rootDir);
+  // `writeGeneratedRulesNote`/`writeAgentInstructions` throw on a malformed marker state (bug hunt
+  // 2026-08-03, BUG #10/#11/#12) — align refuses to guess which content is the human's rather than
+  // silently deleting or duplicating it. Both files' marker states are validated up front, before
+  // either write, so a malformed CLAUDE.md can't leave align.config.ts silently annotated (or vice
+  // versa) on a run that reports overall failure — the two writes below are individually
+  // self-atomic (each throws before touching its own file) but validating first makes the *pair*
+  // atomic too. Caught here and reported the same way `runInit`'s other refusals are (a printed
+  // message plus a non-zero exit), never left to escape as an unhandled rejection out of
+  // `program.ts`'s action handler.
+  try {
+    assertGeneratedRulesNoteWellFormed(configPath);
+    assertAgentInstructionsWellFormed(rootDir);
+    writeGeneratedRulesNote(configPath);
+    writeAgentInstructions(rootDir);
+  } catch (err) {
+    console.log(err instanceof Error ? err.message : String(err));
+    return 1;
+  }
   console.log('Wrote/updated CLAUDE.md agent-instructions block.');
 
   if (ensureTelemetryGitignored(rootDir)) {

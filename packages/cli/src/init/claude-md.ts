@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { assertBlockWellFormed, spliceOrAppendBlock } from './marker-block.js';
 
 const START_MARKER = '<!-- align:start -->';
 const END_MARKER = '<!-- align:end -->';
@@ -22,7 +23,10 @@ function block(): string {
 
 /**
  * Idempotent, HTML-comment-delimited write (ADR 009 consequence): re-running `align init` never
- * duplicates or corrupts human-authored instructions around the block.
+ * duplicates or corrupts human-authored instructions around the block. Throws — via
+ * `spliceOrAppendBlock` — when the file has a malformed marker arrangement (an orphan START or
+ * END, END before START, or more than one pair); callers must catch and report this rather than
+ * let it escape as an unhandled rejection (bug hunt 2026-08-03, BUG #10/#11/#12).
  */
 export function writeAgentInstructions(rootDir: string, filename = 'CLAUDE.md'): void {
   const filePath = path.join(rootDir, filename);
@@ -34,15 +38,19 @@ export function writeAgentInstructions(rootDir: string, filename = 'CLAUDE.md'):
   }
 
   const existing = fs.readFileSync(filePath, 'utf8');
-  const startIdx = existing.indexOf(START_MARKER);
-  const endIdx = existing.indexOf(END_MARKER);
-  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-    const before = existing.slice(0, startIdx);
-    const after = existing.slice(endIdx + END_MARKER.length);
-    fs.writeFileSync(filePath, `${before}${newBlock}${after}`, 'utf8');
-    return;
-  }
+  const next = spliceOrAppendBlock(existing, newBlock, filePath, START_MARKER, END_MARKER);
+  fs.writeFileSync(filePath, next, 'utf8');
+}
 
-  const separator = existing.endsWith('\n') ? '\n' : '\n\n';
-  fs.writeFileSync(filePath, `${existing}${separator}${newBlock}\n`, 'utf8');
+/**
+ * Pre-flight check for `writeAgentInstructions`: throws if `filePath` exists and its block is
+ * malformed, without writing anything. `runInit` (`commands/init.ts`) calls this — alongside
+ * `config-comment.ts`'s `assertGeneratedRulesNoteWellFormed` — before writing either file, so a
+ * malformed marker state in one file can't leave the other silently modified while the run reports
+ * failure.
+ */
+export function assertAgentInstructionsWellFormed(rootDir: string, filename = 'CLAUDE.md'): void {
+  const filePath = path.join(rootDir, filename);
+  if (!fs.existsSync(filePath)) return;
+  assertBlockWellFormed(fs.readFileSync(filePath, 'utf8'), filePath, START_MARKER, END_MARKER);
 }
