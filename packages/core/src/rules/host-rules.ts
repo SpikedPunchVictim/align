@@ -72,6 +72,16 @@ export interface HostRuleContext {
  * the predicate) fingerprints the violation, defaults `fixHint` to `'manual-review'`, and hoists
  * the rule's `.because()` text, mirroring exactly what every other `RuleEvaluator` does for its
  * own violations.
+ *
+ * **`message` — not `range` — is what makes two findings distinct across baseline checks.**
+ * Every `computeFingerprint` call site in this codebase deliberately excludes line numbers
+ * (`baseline/fingerprint.ts:8-9`: "never line numbers"), `custom.host` included: the fingerprint
+ * is `['custom', rule.id, file, message]`. This keeps a baseline entry alive across a line shift
+ * (a comment or import inserted above the violation), but it means two `HostViolation`s from the
+ * same predicate, same `file`, same `message`, on different lines are indistinguishable to the
+ * baseline and collapse to one entry. If a predicate can emit more than one *distinct* finding
+ * per file, put the distinguishing detail in `message` (e.g. the symbol name, the offending
+ * value) — do not rely on `range`/line number to separate them.
  */
 export interface HostViolation {
   readonly file: RepoRelativePath;
@@ -162,7 +172,13 @@ function normalizeHostViolation(
   // captured once at scan time, same field `arch.metric` reuses for its own file-level
   // violations) rather than re-reading the file.
   const snippet = hv.snippet ?? nodeByFile.get(hv.file)?.snippet ?? hv.message;
-  const id = computeFingerprint(['custom', rule.id, hv.file, String(range.startLine), hv.message]);
+  // Deliberately excludes range.startLine (fingerprint.ts:8-9's "never line numbers" — every other
+  // computeFingerprint call site in this codebase upholds this; this one used to be the exception).
+  // A line shift (a comment or import inserted above the violation) must not orphan the baseline
+  // entry. Trade-off: two HostViolations in the same file with the same message on different lines
+  // now collapse to one baseline entry — see the HostViolation.message doc comment above for the
+  // authoring guidance this implies.
+  const id = computeFingerprint(['custom', rule.id, hv.file, hv.message]);
   return {
     id,
     ruleId: toRuleId(rule.id),

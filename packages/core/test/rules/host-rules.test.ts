@@ -155,6 +155,56 @@ describe('evaluateCustomHost', () => {
     expect(id1).toBe(id2);
   });
 
+  it('produces a stable fingerprint across a line shift — same file, same message, only range.startLine differs (BUG #3 regression)', () => {
+    const g = graph([node('api/routes.ts', 'api')], []);
+    const predicateAt = (startLine: number): HostPredicate => () => [
+      { file: 'api/routes.ts', range: { startLine, endLine: startLine }, message: 'too fat' },
+    ];
+    // Simulates inserting a comment/import above the violation, shifting it from line 5 to line 6.
+    // The fingerprint must not fold in the line number (fingerprint.ts:8-9, "never line numbers")
+    // or a purely cosmetic edit would orphan the baseline entry and turn `align check` red.
+    const idAtLine5 = evaluateCustomHost(ROUTE_THINNESS_RULE, g, registryOf('route-thinness', predicateAt(5)))[0]?.id;
+    const idAtLine6 = evaluateCustomHost(ROUTE_THINNESS_RULE, g, registryOf('route-thinness', predicateAt(6)))[0]?.id;
+    expect(idAtLine5).toBeDefined();
+    expect(idAtLine5).toBe(idAtLine6);
+  });
+
+  it('collapses two same-file, same-message findings on different lines into one fingerprint — intended, not accidental', () => {
+    // This is a deliberate consequence of dropping the line number from the fingerprint, not a
+    // bug: it is the same collision behavior every other rule family already has (two identical
+    // no-dependency edges from one file with the same specifier collide too, evaluators.ts:56).
+    // A predicate that needs two findings in the same file to stay distinct must put the
+    // distinguishing detail in `message` — see the HostViolation doc comment in host-rules.ts.
+    const g = graph([node('api/routes.ts', 'api')], []);
+    const predicate: HostPredicate = () => [
+      { file: 'api/routes.ts', range: { startLine: 3, endLine: 3 }, message: 'too fat' },
+      { file: 'api/routes.ts', range: { startLine: 30, endLine: 30 }, message: 'too fat' },
+    ];
+    const violations = evaluateCustomHost(ROUTE_THINNESS_RULE, g, registryOf('route-thinness', predicate));
+    expect(violations).toHaveLength(2);
+    expect(violations[0]?.id).toBe(violations[1]?.id);
+  });
+
+  it('still differs when file, message, or rule.id differ (only the line number is excluded)', () => {
+    const g = graph([node('api/routes.ts', 'api'), node('api/other.ts', 'api')], []);
+    const base = { range: { startLine: 5, endLine: 5 }, message: 'too fat' };
+    const otherRule: CustomHostRule = { ...ROUTE_THINNESS_RULE, id: 'custom.host:other-rule', hostRuleName: 'route-thinness' };
+
+    const byFile: HostPredicate = () => [{ file: 'api/routes.ts', ...base }];
+    const byOtherFile: HostPredicate = () => [{ file: 'api/other.ts', ...base }];
+    const byMessage: HostPredicate = () => [{ file: 'api/routes.ts', ...base, message: 'different message' }];
+
+    const idBase = evaluateCustomHost(ROUTE_THINNESS_RULE, g, registryOf('route-thinness', byFile))[0]?.id;
+    const idDiffFile = evaluateCustomHost(ROUTE_THINNESS_RULE, g, registryOf('route-thinness', byOtherFile))[0]?.id;
+    const idDiffMessage = evaluateCustomHost(ROUTE_THINNESS_RULE, g, registryOf('route-thinness', byMessage))[0]?.id;
+    const idDiffRule = evaluateCustomHost(otherRule, g, registryOf('route-thinness', byFile))[0]?.id;
+
+    expect(idBase).toBeDefined();
+    expect(idDiffFile).not.toBe(idBase);
+    expect(idDiffMessage).not.toBe(idBase);
+    expect(idDiffRule).not.toBe(idBase);
+  });
+
   it('returns zero violations when the predicate finds nothing (a clean run is not an error)', () => {
     const g = graph([node('api/routes.ts', 'api')], []);
     const predicate: HostPredicate = () => [];

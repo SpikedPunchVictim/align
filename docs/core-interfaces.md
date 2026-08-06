@@ -431,7 +431,16 @@ interface HostViolation {
 
 type HostPredicate = (ctx: HostRuleContext) => readonly HostViolation[];
 type HostPredicateRegistry = ReadonlyMap<string, HostPredicate>;
+```
 
+**The fingerprint is `['custom', rule.id, file, message]` — `range` is never part of it**, matching
+every other `computeFingerprint` call site in this codebase (`baseline/fingerprint.ts`: "never line
+numbers"). This keeps a baselined `custom.host` finding alive across a line shift, but it also means
+two `HostViolation`s from the same predicate with the same `file` and `message` on different lines
+collapse to one baseline entry. If your predicate can report more than one distinct finding per
+file, encode what makes them distinct in `message` — don't rely on `range` to separate them.
+
+```ts
 // Authored in align.config.ts's sibling `hostRules` export (never passed through `defineProject`
 // itself — RulesetIR is portable JSON, ADR 002, and functions can't survive that boundary), keyed
 // by the name a `c.custom.host(name)` rule references. The CLI composition root extracts this map
