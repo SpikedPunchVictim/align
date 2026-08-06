@@ -19,20 +19,20 @@ Guard locations consulted during verification (Step 4.2) and refutation (Step 5.
 - **validation modules:** `core/src/components/registry.ts` (`validateSelectorSyntax`, `validateComponents`, `validateClassifiedComponents`), `core/src/rules/component-refs.ts`, `core/src/rules/host-rules.ts` (`validateHostRules`, `assertNoCustomHostRules`), `cli/src/config.ts` (`readStringArrayExport`)
 - **guard/interception points:** `core/src/orchestrator.ts:119-137` (the vacuous-green guard step), `core/src/gates/advisories.ts`, `cli/src/commands/check.ts:220-226` (`persistMovedBaseline`)
 - **config defaults & limits:** `core/src/types/branded.ts`, `core/src/types/ir.ts:10-12` (component-name regex), `plugin-typescript/src/scanner.ts:42-78` (`SOURCE_EXTENSIONS`, `DEFAULT_EXCLUDED_DIR_NAMES`, `ASSET_EXTENSIONS`), `core/src/gates/deep-imports.ts` (`DEFAULT_ALLOWLIST`)
-- **sibling implementations (the highest-yield guard source here):** two glob matchers (`core/components/glob.ts` vs `plugin-typescript/scanner.ts:206`); nine `computeFingerprint` call sites across three evaluator families; three `.align/` artifact readers (`readBaseline` / `readGeneratedRules` / `readRulesetIr`); three marker-delimited block writers (`init/claude-md.ts`, `init/config-comment.ts`, `skill/install.ts`)
+- **sibling implementations (the highest-yield guard source here):** **three** glob matchers, not two as originally recorded (`core/components/glob.ts`, `plugin-typescript/scanner.ts:206`, and — missed in the original sweep, found during BUG #4's implementation — `plugin-typescript/doctor.ts:35-48`); nine `computeFingerprint` call sites across three evaluator families; three `.align/` artifact readers (`readBaseline` / `readGeneratedRules` / `readRulesetIr`); three marker-delimited block writers (`init/claude-md.ts`, `init/config-comment.ts`, `skill/install.ts`)
 - **tests:** `core/test/{glob,evaluators,baseline,orchestrator,components-registry}.test.ts`, `cli/test/{check,check-false-green,untrusted,baseline-debt}.test.ts`, `agent/test/run.test.ts`
 
 ## Summary
 
 | Status | Count |
 |--------|-------|
-| Bugs Found | 12 |
+| Bugs Found | 13 |
 | Fragile Code | 2 |
 | OK (Already Guarded) | 10 |
 | Needs Review | 2 |
-| Killed in Refutation | 7 |
+| Killed in Refutation | 8 |
 
-All 12 bugs and both fragile findings are **Confirmed (empirical)** — every one has a reproduction against real compiled code, not a trace alone.
+All 13 bugs and both fragile findings are **Confirmed (empirical)** — every one has a reproduction against real compiled code, not a trace alone.
 
 ## Implementation Status
 
@@ -43,10 +43,11 @@ All work below is **uncommitted, in the working tree on branch `fix`**. Gate bas
 | **#1** | ✅ **Implemented + verified** | new `core/src/baseline/schema.ts` (+ core index export); `cli/src/align-dir.ts` `readBaseline` throws; caller sweep across `commands/baseline.ts`, `commands/check.ts`, `commands/build.ts`, `mcp/server.ts`. Tests: `core/test/baseline/schema.test.ts` (10), `cli/test/baseline-corruption.test.ts` (11). Back-compat (legacy entries lacking `contentFingerprint`, unknown keys) independently re-verified. |
 | **#10 / #11 / #12** | ✅ **Implemented + verified** | new `cli/src/init/marker-block.ts` (`locateBlock`, `spliceOrAppendBlock`, `assertBlockWellFormed`); `claude-md.ts` + `config-comment.ts` both use it; pre-flight validation added to `commands/init.ts` and `commands/build.ts` so a malformed file aborts before any write. Tests: `cli/test/init/{marker-block,claude-md,config-comment}.test.ts` + additions to `init.test.ts` / `build.test.ts`. |
 | **#13** | ✅ **Implemented + verified** | `agent/src/git.ts` `createBranch` is idempotent with a `currentBranch()` post-condition; `cli/src/commands/agent.ts` catches. Tests: 3 in `agent/test/run.test.ts` (via `FakeGitEffects.createBranchMode`), 2 real-git in `agent/test/e2e-git.test.ts`. |
-| **#2 + #4** | ⬜ Not started — **next** | Verified fixes + full Step 6 checklists below. Ship together (one release, one baseline-churn migration note). |
+| **#2 + #4** | ✅ **Implemented + verified** | `core/src/components/glob.ts` interior `**/` → `(?:.*/)?`; `plugin-typescript/src/scanner.ts` `globLikeMatch` deleted in favour of core's `globMatch` (literal-prefix arms kept). Tests: 8-row boundary table in `core/test/glob.test.ts` (3 pre-existing assertions untouched and passing), 3 real-scan exclude tests in `plugin-typescript/test/scanner.test.ts`. **BUG #4 ships at two divergences, not three** — see Refutation Log #8. |
 | **#3** | ⬜ Not started | One-liner (drop `String(range.startLine)`) + a one-time re-accept note + a doc line for predicate authors about the message-collision trade-off. |
 | **#5** | ⬜ Not started | Trivial, but **must ship with a `baseline prune` instruction** — see the ordering constraint against #7. |
 | **#6** | ⬜ Not started | Trivial schema refinement. |
+| **#15** | ⬜ Not started | Third copy of the divergent matcher in `plugin-typescript/src/doctor.ts:35-48`. Same fix as #4. Deliberately not swept into #4's commit. |
 | **#14** | ⬜ Not started | Catch around `loadConfig` at each command entry. **Fix is a sketch, not Step-6-verified** — added after the fix-verification pass. |
 | **#7 / #8 / #9** | 🔵 Blocked on design decisions | Not implementable as written; each needs a product call. See their sections. |
 | **Needs Review 1 / 2** | 🔵 Blocked on product decisions | Root-workspace-package support; repo-scoped vs directory-scoped commands. |
@@ -354,7 +355,7 @@ pattern                file                    core globMatch   plugin globLikeM
 
 1. **Root-level files escape a leading `**/` exclude.** `globLikeMatch` rewrites `**` → `' '` → `.*` *without* consuming the following `/`, so `**/*.generated.ts` compiles to `^.*/[^/]*\.generated\.ts$` — the `/` is mandatory. A generated file at the repo root is scanned despite the exclude. Consequence: spurious violations on files the user explicitly excluded.
 2. **No brace expansion.** `expandBraces` is core-only (`glob.ts:53`). `{dist,build}/**` works in a component selector and silently matches nothing in `excludes` — a *silently ineffective exclude*, the worse direction.
-3. **A literal space in a pattern becomes a wildcard.** The implementation uses `' '` as an intermediate placeholder for `**` (`.replace(/\*\*/g, ' ')`) and then converts *every* space to `.*` (`.replace(/ /g, '.*')`). A pattern for a directory containing a space — `test apps/**` — compiles to `^test.*apps/.*$` and over-matches unrelated paths. An over-broad exclude means files are silently **not scanned**, which is the false-green class this codebase is built to prevent.
+3. ~~**A literal space in a pattern becomes a wildcard.**~~ **RETRACTED — this sub-claim was wrong. See the Refutation Log entry #8.** The placeholder is not a space; it is a literal **NUL byte** (`\x00`), which both `Read` and `cat -e` render as a space. `od -c` on the pre-fix file shows `'\0'`. NUL cannot appear in a real path or pattern, so the placeholder is safe and the substitution is sound. My "empirical" evidence for this sub-claim tested a hand-retyped copy of the function in which I had transcribed the invisible NUL as a space — I was measuring my own transcription, not the code. Divergences 1 and 2 above were re-verified against the real NUL-based implementation and both hold.
 
 **Verified fix:** delete `globLikeMatch` and call core's `globMatch`. The plugin already imports from `@spikedpunch/align-core` (`scanner.ts:11-27`), so this adds no dependency and makes the comment's parity claim true.
 
@@ -702,6 +703,26 @@ Error: /…/.align/generated-rules.json is not valid JSON: Expected property nam
 
 **Fix:** catch around `loadConfig` at each command entry, converting to a printed message plus a non-zero exit — the same shape already used for `readBaseline` (`check.ts:79-84`), `writeGeneratedRulesNote` (`init.ts`), and `runAgentLoop` (`agent.ts`). Since `loadConfig` can throw for several reasons (missing default export, malformed sibling exports via `readStringArrayExport`, a genuine syntax error in `align.config.ts`, plus this), a single catch at each entry point covers a whole family, not just this reader — likely a better shape than guarding `readGeneratedRules` alone. Full Step 6 checklist not yet worked: **this finding was added after the audit's fix-verification pass, so its fix is a sketch, not a verified fix.** Treat it accordingly.
 
+### BUG #15 — A third copy of the divergent glob matcher, in `align doctor`, still unfixed
+
+**Lens:** Cross-Implementation Divergence
+**File:** `packages/plugin-typescript/src/doctor.ts:35-48` (`isExcluded` + `globLikeMatch`)
+**Confidence:** Confirmed (empirical)
+**Found:** during BUG #4's implementation — **this is a gap in the original audit, not a new regression.**
+
+BUG #4's guard map recorded "two glob matchers" and its finding named only `scanner.ts:206-214`. There are three. `plugin-typescript/src/doctor.ts` carries a byte-identical `isExcluded`/`globLikeMatch` pair, with the same two surviving divergences from core's dialect:
+
+1. a leading `**/` does not consume the following `/`, so `**/*.generated.ts` fails to match a root-level `foo.generated.ts`
+2. no brace expansion, so `{dist,build}/**` silently matches nothing
+
+Both re-verified against the real implementation (see the Refutation Log for why the originally-claimed third divergence does not exist).
+
+**Consequence:** `align doctor` applies a different, laxer exclude vocabulary than `align check` does. The function's own doc comment states the intent it fails to meet: *"a repo's own align.config.ts excludes … must apply here too, or `align doctor` reports noise the repo owner already told align to ignore."* Advisory-only surface, so no false-green in the gate — hence Medium, not High.
+
+**Fix:** identical to BUG #4 — delete `globLikeMatch`, call core's `globMatch`, keep the two literal-prefix arms in `isExcluded`. Deliberately left out of BUG #4's commit rather than swept in, because it was outside the scoped, checklisted work that had been verified; it gets its own entry and its own verification instead.
+
+**Why the original sweep missed it:** the Lens 8 pass searched for *implementors of a shared interface* and for the specific pair `core glob` vs `scanner glob`. `doctor.ts`'s copy is a private module-level function with no shared type binding it to the others — invisible to an interface-based sweep, findable only by grepping the function body or the `.replace(/\*\*/g` idiom. A duplicated-body grep belongs in the Lens 8 checklist alongside the interface sweep.
+
 ## Fragile Code
 
 ### FRAGILE #7 — Move-transfer can silently baseline a genuinely new violation
@@ -773,6 +794,8 @@ Findings and sub-claims killed in Step 5, and what killed them:
 4. **"`computeBaselineDebt` reads the pre-frozen `run`, under-reporting debt under `--frozen-rules`."** REFUTED — the function's only verdict-sensitive branch is `verdict === 'error'` (`check.ts:238`), and `--frozen-rules` only ever flips `green → red` (`check.ts:99`), never to `error`. `run` and `effectiveRun` are indistinguishable to this function.
 5. **"`persistMovedBaseline` can write a truncated baseline when the parse gate errored."** REFUTED — `applyMoves` deletes an entry only when it has a matched replacement to `set` (`store.ts:143-144`); unmatched orphans are pushed to `unmatchedOrphans` and left in the map by `reconcileMoves` (`store.ts:97-99`). `snapshot()` is never lossy on that path.
 6. **"Tarjan propagates a child's lowlink to its parent before the SCC-root check, corrupting parent lowlinks."** REFUTED — that is classical Tarjan's order. When the child is an SCC root, `child.lowlink === child.index > parent.index`, so `Math.min` is a no-op. Traced against `tarjan.ts:51-57`.
+8. **"A literal space in an exclude pattern becomes a wildcard" (BUG #4, divergence 3).** REFUTED during implementation — and this one is worth dwelling on, because the failure mode was mine, not the code's. `globLikeMatch`'s intermediate placeholder for `**` is a literal **NUL byte**, not a space; `Read` and `cat -e` both render `\x00` as a space, and `od -c` on the pre-fix file confirms `'\0'`. NUL is unrepresentable in a real path, so the substitution is safe. The reason I reported it as real is that my empirical harness *retyped* the function by hand rather than importing it, and the retyped copy had a genuine space where the original had NUL — so the test that "confirmed" the bug was exercising my transcription. Re-run against the real implementation: `"test apps/**"` vs `"testXapps/secret.ts"` → `false` (correct), where my copy returned `true`. **Lesson for this report's methodology: an empirical check that copies code instead of importing it is not empirical about the code.** Divergences 1 (root-level `**/` misses) and 2 (no brace expansion) were re-verified against the real implementation and both hold, so BUG #4 stands — at two divergences, not three.
+
 7. **Severity correction on BUG #6 (not a kill, a downgrade).** The original claim was "a silently partial fix ships green." Refuted in part: `run.ts:199-207`'s VERIFY step re-runs `align check` and only returns `done` when the touched files are clean, so a partial fix is caught and retried. The surviving mechanism — a partial edit set is *committed* (`run.ts:197`) before VERIFY, and attempts are burned — is real but is 🟢 Medium, not 🔴 Critical. Reported at its true severity.
 
 ## Needs Human Review

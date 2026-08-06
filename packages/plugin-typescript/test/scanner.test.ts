@@ -218,3 +218,58 @@ describe('TypeScriptScanner — rootDir under a symlinked ancestor (e.g. macOS /
     }
   });
 });
+
+describe('TypeScriptScanner — excludes now match core\'s glob dialect exactly (BUG #4)', () => {
+  // `isExcludedPath` used to run a second, independent glob implementation
+  // (`globLikeMatch`) that diverged from core's `globMatch` in three ways. It now delegates to
+  // core's matcher directly, so exclude patterns must behave identically to component selectors.
+  let dir: string;
+
+  beforeAll(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-scanner-excludes-test-'));
+    fs.writeFileSync(path.join(dir, 'foo.generated.ts'), 'export const foo = 1;\n');
+    fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'src', 'keep.ts'), 'export const keep = 1;\n');
+    fs.mkdirSync(path.join(dir, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'dist', 'x.ts'), 'export const x = 1;\n');
+    fs.mkdirSync(path.join(dir, 'vendor'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'vendor', 'z.ts'), 'export const z = 1;\n');
+  });
+
+  afterAll(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a leading `**/` exclude also matches a root-level file (divergence 1: missing segment-boundary handling)', async () => {
+    const scanner = new TypeScriptScanner();
+    const graph = await scanner.scan({
+      rootDir: dir,
+      components: allComponent(),
+      excludes: ['**/*.generated.ts', 'dist', 'vendor'],
+    });
+    expect(graph.nodes.map((n) => n.file)).not.toContain('foo.generated.ts');
+    expect(graph.nodes.map((n) => n.file)).toContain('src/keep.ts');
+  });
+
+  it('a brace-group exclude pattern now works (divergence 2: no brace expansion)', async () => {
+    const scanner = new TypeScriptScanner();
+    const graph = await scanner.scan({
+      rootDir: dir,
+      components: allComponent(),
+      excludes: ['{dist,build}/**', 'vendor'],
+    });
+    expect(graph.nodes.map((n) => n.file)).not.toContain('dist/x.ts');
+    expect(graph.nodes.map((n) => n.file)).toContain('src/keep.ts');
+  });
+
+  it('a plain literal directory exclude still works (the directory-prefix arms kept alongside globMatch)', async () => {
+    const scanner = new TypeScriptScanner();
+    const graph = await scanner.scan({
+      rootDir: dir,
+      components: allComponent(),
+      excludes: ['vendor', 'dist'],
+    });
+    expect(graph.nodes.map((n) => n.file)).not.toContain('vendor/z.ts');
+    expect(graph.nodes.map((n) => n.file)).toContain('src/keep.ts');
+  });
+});

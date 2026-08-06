@@ -13,11 +13,17 @@ export function globToRegExp(pattern: string): RegExp {
     const c = normalized[i];
     if (c === '*') {
       if (normalized[i + 1] === '*') {
-        // `**` — consume any following `/` so `a/**/b` and `a/**` both behave sanely.
-        let j = i + 2;
-        if (normalized[j] === '/') j += 1;
+        if (normalized[i + 2] === '/') {
+          // interior `**/` — a `**` that owns a whole segment matches zero or more WHOLE
+          // segments, not an arbitrary substring. Without this, `src/**/index.ts` crosses
+          // segment boundaries and matches `src/notindex.ts`.
+          out += '(?:.*/)?';
+          i += 3;
+          continue;
+        }
+        // trailing `**` — unchanged: matches the rest of the path, including `/`.
         out += '.*';
-        i = j;
+        i += 2;
         continue;
       }
       out += '[^/]*';

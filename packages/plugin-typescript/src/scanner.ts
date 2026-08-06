@@ -10,6 +10,7 @@ import * as path from 'node:path';
 import ts from 'typescript';
 import {
   classifyFile,
+  globMatch,
   toComponentName,
   toRepoRelativePath,
   validateComponents,
@@ -196,21 +197,18 @@ function walkSourceFiles(repoRoot: string, excludes: readonly string[]): string[
   return files;
 }
 
+// Exclude patterns use core's glob dialect (`globMatch`) so a component selector and an
+// exclude pattern with the same text always mean the same thing (BUG #4: this used to be a
+// second, independent glob implementation that diverged from core's dialect three ways --
+// missing segment-boundary handling on a leading `**/`, no brace expansion, and a literal-space
+// placeholder that silently over-matched patterns containing a real space). The two
+// literal-prefix arms below are kept: core's `globMatch` has no implicit directory-prefix
+// semantics, so removing them would break a plain `dist` exclude matching `dist/x.ts`.
 function isExcludedPath(relPath: string, excludes: readonly string[]): boolean {
   if (relPath === '') return false;
-  return excludes.some((pattern) => relPath === pattern || relPath.startsWith(`${pattern}/`) || globLikeMatch(pattern, relPath));
-}
-
-/** Minimal glob support for exclude patterns (e.g. `**\/*.generated.ts`) without pulling in a
- * new dependency — reuses the same small pattern vocabulary as @spikedpunch/align-core's component globs. */
-function globLikeMatch(pattern: string, filePath: string): boolean {
-  if (!pattern.includes('*')) return false;
-  const escaped = pattern
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*\*/g, ' ')
-    .replace(/\*/g, '[^/]*')
-    .replace(/ /g, '.*');
-  return new RegExp(`^${escaped}$`).test(filePath);
+  return excludes.some(
+    (pattern) => relPath === pattern || relPath.startsWith(`${pattern}/`) || globMatch(pattern, relPath),
+  );
 }
 
 function scanFile(

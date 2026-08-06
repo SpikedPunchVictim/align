@@ -17,6 +17,19 @@ describe('globMatch', () => {
     expect(globMatch(pattern, 'src/llm-types/index.ts')).toBe(false);
   });
 
+  it('matches `**` as zero or more WHOLE path segments, not an arbitrary substring (BUG #2)', () => {
+    // A `**` that owns a whole segment must not cross segment boundaries: `src/notindex.ts` has
+    // no segment boundary before `index.ts`, so it must NOT match `src/**/index.ts`.
+    expect(globMatch('src/**/index.ts', 'src/notindex.ts')).toBe(false);
+    expect(globMatch('src/**/index.ts', 'src/index.ts')).toBe(true);
+    expect(globMatch('src/**/index.ts', 'src/a/b/index.ts')).toBe(true);
+    expect(globMatch('app/**/model.ts', 'app/datamodel.ts')).toBe(false);
+    expect(globMatch('**/*.ts', 'a.ts')).toBe(true);
+    expect(globMatch('**/*.ts', 'x/y/a.ts')).toBe(true);
+    expect(globMatch('**', 'anything/at/all.ts')).toBe(true);
+    expect(globMatch('packages/*/src/**', 'packages/a/src/b.ts')).toBe(true);
+  });
+
   it('matches * as a single path segment', () => {
     expect(globMatch('packages/*/src', 'packages/core/src')).toBe(true);
     expect(globMatch('packages/*/src', 'packages/core/nested/src')).toBe(false);
