@@ -8,6 +8,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import ts from 'typescript';
+import { globMatch } from '@spikedpunch/align-core';
 import { loadWorkspacePackages, readWorkspaceGlobs } from './workspace.js';
 
 const EXCLUDED_DIR_NAMES = new Set([
@@ -28,23 +29,19 @@ function toSlash(p: string): string {
   return p.split(path.sep).join('/');
 }
 
-/** Same exclude vocabulary as the scanner's `excludes` option (literal prefixes and simple
- * `*`/`**` globs) — a repo's own align.config.ts excludes (e.g. read-only vendored trees, fixture
- * directories with intentionally-broken configs) must apply here too, or `align doctor` reports
- * noise the repo owner already told align to ignore. */
+/** Exclude patterns use core's glob dialect (`globMatch`) so a component selector and an exclude
+ * pattern with the same text always mean the same thing (BUG #15: this used to be a second,
+ * independent glob implementation that diverged from core's dialect — missing segment-boundary
+ * handling on a leading `**\/`, and no brace expansion) — a repo's own align.config.ts excludes
+ * (e.g. read-only vendored trees, fixture directories with intentionally-broken configs) must
+ * apply here too, or `align doctor` reports noise the repo owner already told align to ignore. The
+ * two literal-prefix arms below are kept: core's `globMatch` has no implicit directory-prefix
+ * semantics, so removing them would break a plain `dist` exclude matching `dist/x.ts`. */
 function isExcluded(relPath: string, excludes: readonly string[]): boolean {
   if (relPath === '') return false;
-  return excludes.some((pattern) => relPath === pattern || relPath.startsWith(`${pattern}/`) || globLikeMatch(pattern, relPath));
-}
-
-function globLikeMatch(pattern: string, filePath: string): boolean {
-  if (!pattern.includes('*')) return false;
-  const escaped = pattern
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*\*/g, ' ')
-    .replace(/\*/g, '[^/]*')
-    .replace(/ /g, '.*');
-  return new RegExp(`^${escaped}$`).test(filePath);
+  return excludes.some(
+    (pattern) => relPath === pattern || relPath.startsWith(`${pattern}/`) || globMatch(pattern, relPath),
+  );
 }
 
 function walkDirs(rootDir: string, excludes: readonly string[], visit: (absDir: string) => void): void {
