@@ -348,11 +348,22 @@ function scanFile(
 
   // `export * from './other'` barrel targets are not enumerated here — see exports.ts's module
   // doc comment for why (cross-file resolution, out of scope for this per-file syntactic pass).
+  //
+  // `text.split('\n')` yields a trailing empty-string element for any file ending in a newline
+  // (essentially every file an editor or formatter writes), which is not a real line — so
+  // `lines.length` alone over-counts by one. Subtract it off when present.
+  //
+  // This deliberately does NOT match `wc -l`: for a file whose last line lacks a trailing
+  // newline (e.g. "a\nb\nc"), this reports 3 lines while `wc -l` reports 2 (it counts newline
+  // characters, not lines). Three lines of code is the correct answer for a LOC metric — do not
+  // "fix" this toward `wc -l`.
+  const loc = lines.length - (lines[lines.length - 1] === '' ? 1 : 0);
+
   return {
     edges,
     externalEdges,
     uncertain,
-    loc: lines.length,
+    loc,
     exports: extractExportedSymbols(sourceFile),
     snippet: snippetAt(1),
   };

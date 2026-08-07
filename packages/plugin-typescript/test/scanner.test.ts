@@ -273,3 +273,52 @@ describe('TypeScriptScanner — excludes now match core\'s glob dialect exactly 
     expect(graph.nodes.map((n) => n.file)).toContain('src/keep.ts');
   });
 });
+
+describe('TypeScriptScanner — loc no longer counts a phantom trailing line (BUG #5)', () => {
+  // `text.split('\n')` yields a trailing empty-string element for any file ending in a newline
+  // (essentially every file an editor or formatter writes), which used to be counted as a real
+  // line. Table verified by hand against each case's real line count.
+  let dir: string;
+
+  beforeAll(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-scanner-loc-test-'));
+    fs.writeFileSync(path.join(dir, 'empty.ts'), '');
+    fs.writeFileSync(path.join(dir, 'no-trailing-newline-one-line.ts'), 'const a = 1');
+    fs.writeFileSync(path.join(dir, 'trailing-newline-one-line.ts'), 'const a = 1\n');
+    fs.writeFileSync(path.join(dir, 'trailing-newline-three-lines.ts'), 'const a = 1\nconst b = 2\nconst c = 3\n');
+    fs.writeFileSync(path.join(dir, 'no-trailing-newline-three-lines.ts'), 'const a = 1\nconst b = 2\nconst c = 3');
+    fs.writeFileSync(path.join(dir, 'blank-line-only.ts'), '\n');
+    fs.writeFileSync(path.join(dir, 'two-blank-lines.ts'), '\n\n');
+  });
+
+  afterAll(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['empty.ts', 0],
+    ['no-trailing-newline-one-line.ts', 1],
+    ['trailing-newline-one-line.ts', 1],
+    ['trailing-newline-three-lines.ts', 3],
+    ['no-trailing-newline-three-lines.ts', 3],
+    ['blank-line-only.ts', 1],
+    ['two-blank-lines.ts', 2],
+  ])('%s has loc = %i', async (file, expectedLoc) => {
+    const scanner = new TypeScriptScanner();
+    const graph = await scanner.scan({ rootDir: dir, components: allComponent(), excludes: [] });
+    const node = graph.nodes.find((n) => n.file === file);
+    expect(node).toBeDefined();
+    expect(node?.loc).toBe(expectedLoc);
+  });
+
+  it('does NOT match `wc -l` semantics for a file whose last line lacks a trailing newline', async () => {
+    // `wc -l` counts newline characters, so it reports 2 for "const a = 1\nconst b = 2\nconst c = 3"
+    // (no trailing \n). align reports 3 — the correct line count for a LOC metric. This test pins
+    // that intentional divergence so it isn't "fixed" back toward `wc -l` later.
+    const scanner = new TypeScriptScanner();
+    const graph = await scanner.scan({ rootDir: dir, components: allComponent(), excludes: [] });
+    const node = graph.nodes.find((n) => n.file === 'no-trailing-newline-three-lines.ts');
+    expect(node?.loc).toBe(3);
+    expect(node?.loc).not.toBe(2); // 2 is what `wc -l` would report
+  });
+});

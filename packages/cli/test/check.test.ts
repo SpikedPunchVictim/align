@@ -90,7 +90,7 @@ describe('align check — arch.metric (max-LOC, promoted 2026-07-12 on kluster r
       violations: { kind: string; file: string; ruleId: string }[];
     };
     expect(payload.verdict).toBe('red');
-    expect(payload.violations).toHaveLength(1); // only src/big.ts (8 lines); src/small.ts (4 lines) stays clean
+    expect(payload.violations).toHaveLength(1); // only src/big.ts (7 lines); src/small.ts (3 lines) stays clean
     const v = payload.violations[0];
     expect(v?.kind).toBe('metric');
     expect(v?.file).toBe('src/big.ts');
@@ -111,7 +111,7 @@ describe('align check — arch.metric (max-LOC, promoted 2026-07-12 on kluster r
       return humanLogs.join('\n');
     })();
     expect(human).toContain('src/big.ts');
-    expect(human).toContain('8 lines');
+    expect(human).toContain('7 lines'); // BUG #5 fix: real line count, not lines.length's phantom trailing-newline count
     expect(human).toContain('5 lines');
     expect(human).toContain('arch.metric:loc:app');
   });
