@@ -83,6 +83,63 @@ describe('InMemoryBaselineStore', () => {
     const reloaded = new InMemoryBaselineStore(snapshot);
     expect(reloaded.isBaselined(v1.id)).toBe(true);
   });
+
+  // FRAGILE #8 (bug hunt 2026-08-03): `accept` records the measured value at acceptance time,
+  // but ONLY for kinds that carry one — never invented for kinds that have none.
+  describe('acceptedValue (FRAGILE #8 growth-advisory support)', () => {
+    it('records acceptedValue from a metric-kind violation', () => {
+      const store = new InMemoryBaselineStore();
+      const v = makeViolation({
+        id: computeFingerprint(['metric', 'r1', 'api/big.ts']),
+        kind: 'metric',
+        metric: 'loc',
+        component: toComponentName('api'),
+        value: 900,
+        threshold: 800,
+        fixHint: { code: 'split-file', file: toRepoRelativePath('api/big.ts') },
+      });
+      store.accept([v], 'manual');
+      expect(store.show()[0]?.acceptedValue).toBe(900);
+    });
+
+    it('does not record acceptedValue for a non-metric violation', () => {
+      const store = new InMemoryBaselineStore();
+      const v = makeViolation(); // default kind: 'no-dependency', which has no `value` field
+      store.accept([v], 'manual');
+      expect(store.show()[0]?.acceptedValue).toBeUndefined();
+    });
+
+    it('carries acceptedValue forward across a move-transfer (renamed file, same accepted debt)', () => {
+      const store = new InMemoryBaselineStore();
+      const original = makeViolation({
+        id: computeFingerprint(['metric', 'r1', 'api/big.ts']),
+        kind: 'metric',
+        metric: 'loc',
+        component: toComponentName('api'),
+        value: 900,
+        threshold: 800,
+        fixHint: { code: 'split-file', file: toRepoRelativePath('api/big.ts') },
+        snippet: '// api/big.ts',
+      });
+      store.accept([original], 'manual');
+
+      const moved = makeViolation({
+        id: computeFingerprint(['metric', 'r1', 'api/renamed.ts']),
+        kind: 'metric',
+        metric: 'loc',
+        component: toComponentName('api'),
+        file: toRepoRelativePath('api/renamed.ts'),
+        value: 900,
+        threshold: 800,
+        fixHint: { code: 'split-file', file: toRepoRelativePath('api/renamed.ts') },
+        snippet: '// api/big.ts', // same content — this is what makes it a "move" to reconcileMoves
+      });
+
+      store.reconcileMoves([moved]);
+      expect(store.isBaselined(moved.id)).toBe(true);
+      expect(store.show()[0]?.acceptedValue).toBe(900);
+    });
+  });
 });
 
 describe('baseline move-transfer (ADR 006)', () => {

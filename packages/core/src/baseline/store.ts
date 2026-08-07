@@ -13,6 +13,15 @@ export interface BaselineEntry {
   // files written before this field existed still parse — entries missing it simply can't
   // participate in move-transfer matching and fall back to prior (removed, not moved) behavior.
   readonly contentFingerprint?: ViolationId;
+  // The measured value at acceptance time (e.g. `arch.metric`'s line count). Optional, same
+  // back-compat discipline as `contentFingerprint` above: `.align/baseline.json` files written
+  // before this field existed still parse, and entries missing it simply don't participate in
+  // baseline-growth advisory detection (FRAGILE #8, bug hunt 2026-08-03 — `arch.metric`'s
+  // fingerprint is deliberately file-only, so a baselined over-length file can grow without bound
+  // with no fingerprint change; this field lets `gates/advisories.ts`'s growth advisory notice).
+  // Only populated for violation kinds that carry a meaningful measured value (currently just
+  // `metric`, from `Violation`'s `value` field) — never invented for kinds that have none.
+  readonly acceptedValue?: number;
 }
 
 export interface PruneResult {
@@ -83,6 +92,10 @@ export class InMemoryBaselineStore implements BaselineStore {
         acceptedAt: now,
         acceptedBy: mode,
         contentFingerprint: computeContentFingerprint(v.ruleId, v.snippet),
+        // Only `metric`-kind violations carry a meaningful measured value — never invent one for
+        // kinds that have none (FRAGILE #8's growth advisory relies on absence here to skip
+        // cleanly, same discipline as `contentFingerprint`'s optionality above).
+        ...(v.kind === 'metric' ? { acceptedValue: v.value } : {}),
       });
     }
   }
@@ -148,6 +161,9 @@ export class InMemoryBaselineStore implements BaselineStore {
         acceptedAt: entry.acceptedAt,
         acceptedBy: entry.acceptedBy,
         ...(entry.contentFingerprint === undefined ? {} : { contentFingerprint: entry.contentFingerprint }),
+        // A moved entry is still the same accepted debt, now under a new file — carry the
+        // recorded value forward the same way contentFingerprint is carried forward above.
+        ...(entry.acceptedValue === undefined ? {} : { acceptedValue: entry.acceptedValue }),
       });
       moved.push({ from: entry.fingerprint, to: matched.id });
     }

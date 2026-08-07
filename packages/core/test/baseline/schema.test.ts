@@ -66,6 +66,36 @@ describe('baselineEntrySchema', () => {
   it('rejects a missing required field', () => {
     expect(() => baselineEntrySchema.parse({ ruleId: 'r', file: 'a.ts', acceptedAt: 0, acceptedBy: 'manual' })).toThrow();
   });
+
+  // FRAGILE #8 (bug hunt 2026-08-03): `acceptedValue` is the growth-advisory field, added the
+  // same way `contentFingerprint` was — optional, so back-compat holds the same way.
+  describe('acceptedValue (FRAGILE #8 growth-advisory support)', () => {
+    it('parses an entry carrying acceptedValue', () => {
+      const parsed = baselineEntrySchema.parse({
+        fingerprint: 'f1',
+        ruleId: 'arch.metric:loc:api',
+        file: 'src/api/big.ts',
+        acceptedAt: 1234,
+        acceptedBy: 'manual',
+        acceptedValue: 900,
+      });
+      expect(parsed.acceptedValue).toBe(900);
+    });
+
+    // Load-bearing back-compat check, same class as contentFingerprint's above: every entry ever
+    // written before this field existed — and every non-metric entry ever written, period — lacks
+    // it. A regression here breaks every existing repo's baseline on upgrade.
+    it('back-compat: a legacy entry with NO acceptedValue parses fine', () => {
+      const parsed = baselineEntrySchema.parse({
+        fingerprint: 'f1',
+        ruleId: 'arch.no-cycles',
+        file: 'src/a.ts',
+        acceptedAt: 1000,
+        acceptedBy: 'init-seed',
+      });
+      expect(parsed.acceptedValue).toBeUndefined();
+    });
+  });
 });
 
 describe('baselineFileSchema', () => {

@@ -2,6 +2,8 @@ import type { UncertaintyMarker, UncertaintyReason } from '../types/graph.js';
 import type { ExternalPackageNode } from '../types/graph.js';
 import type { RuleIR } from '../types/ir.js';
 import { findUngroundedExternalSelectors } from '../rules/external-match.js';
+import type { BaselineEntry } from '../baseline/store.js';
+import type { Violation } from '../types/violation.js';
 import type { Advisory } from './types.js';
 
 /**
@@ -96,4 +98,55 @@ export function buildUngroundedExternalSelectorAdvisories(rules: readonly RuleIR
         `in this scan — vacuously green, not confirmed. Likely a typo, or the package genuinely isn't imported.`,
       ruleIds: [u.ruleId],
     }));
+}
+
+/**
+ * A starting point pending evidence (this repo promotes thresholds on measured data, not
+ * intuition — IMPLEMENTATION_PLAN.md's Promotion log), not a tuned constant. 20% is picked as
+ * "clearly more than incidental drift" without being so tight that an ordinary handful of added
+ * lines fires it on every check — reporting on any growth at all (+1 line) would be noise, not
+ * signal. Revisit once real repos show what growth rate actually precedes a file becoming
+ * unmanageable.
+ */
+const BASELINE_GROWTH_ADVISORY_RATIO = 0.2;
+
+/**
+ * FRAGILE #8 (bug hunt 2026-08-03): `arch.metric`'s fingerprint is deliberately file-identity-only
+ * (`rules/evaluators.ts`'s `evaluateMetric`, `computeFingerprint(['metric', rule.id, node.file])`)
+ * — changing it to fold in the measured value would invalidate every existing baseline entry and
+ * force a policy call on what "accepted debt" means for a growing file (a design question, not a
+ * bug fix). So the fingerprint stays exactly as-is; instead, a file whose current `loc` has grown
+ * well past what was accepted (`BaselineEntry.acceptedValue`, `baseline/store.ts`) is surfaced here
+ * as an advisory. This never changes `verdict` or baseline identity — a baselined violation stays
+ * baselined, no re-accept — it only makes growth visible instead of structurally invisible again.
+ *
+ * Silently produces no advisory (never throws) for:
+ *  - non-`metric` violations — they have no comparable `value`/`acceptedValue` pair
+ *  - a violation whose baseline entry has no recorded `acceptedValue` — either a legacy entry
+ *    accepted before this field existed, or accepted by a version that only recorded it for
+ *    `metric` kinds (which is every version, but the optionality is what makes both cases safe)
+ *  - a violation that isn't baselined at all — `entriesByFingerprint` simply has no entry for it
+ */
+export function buildBaselineGrowthAdvisories(violations: readonly Violation[], baselineEntries: readonly BaselineEntry[]): Advisory[] {
+  const entriesByFingerprint = new Map<BaselineEntry['fingerprint'], BaselineEntry>();
+  for (const entry of baselineEntries) entriesByFingerprint.set(entry.fingerprint, entry);
+
+  const advisories: Advisory[] = [];
+  for (const v of violations) {
+    if (v.kind !== 'metric') continue;
+    const entry = entriesByFingerprint.get(v.id);
+    if (entry?.acceptedValue === undefined) continue; // legacy/unbaselined — no advisory, no crash
+    if (v.value <= entry.acceptedValue * (1 + BASELINE_GROWTH_ADVISORY_RATIO)) continue;
+
+    advisories.push({
+      kind: 'baseline-growth',
+      message:
+        `${v.file} was baselined at ${entry.acceptedValue} lines and has grown to ${v.value} lines ` +
+        `(rule '${v.ruleId}') — more than ${Math.round(BASELINE_GROWTH_ADVISORY_RATIO * 100)}% over the ` +
+        'accepted value. The baseline entry is unchanged; consider splitting the file, or re-accept to ' +
+        'record the new size.',
+      ruleIds: [v.ruleId],
+    });
+  }
+  return advisories.sort((a, b) => a.message.localeCompare(b.message));
 }

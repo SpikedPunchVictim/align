@@ -814,7 +814,15 @@ So: fix `import { db } from './db'` in `a.ts`, add the same line in `b.ts`, one 
 
 This is defensible as "baseline means the human accepted that this file is over the limit," and it is consistent with `security.manifest.source-hygiene`, which deliberately excludes the specifier so a git-ref bump doesn't reset consent (`manifest-evaluators.ts:40-43`). But the two cases differ in kind: a git ref changing is not *more* debt, whereas a file doubling in size is. `arch.metric` was promoted precisely because two 2,100-line files were structurally invisible (`docs/ir-schema.md:12-13`) — and a baselined metric violation makes them invisible again.
 
-**Fix: requires design work.** Any value-sensitive fingerprint (bucketing on `Math.floor(loc / 500)`, or folding in `threshold`) invalidates **every** existing `arch.metric` baseline entry (check 3 fails) and needs a policy decision on what re-accepting should mean — a question about product intent, not code. A lower-risk alternative worth evaluating first: keep the fingerprint stable and surface growth as an **advisory** (`gates/advisories.ts`) — "3 baselined metric violations grew by >20% since acceptance" — which changes no fingerprint and needs no re-accept.
+**Fix: RESOLVED and implemented (2026-08-07) — the advisory, not a fingerprint change.**
+
+The fingerprint is untouched (`evaluators.ts:283` still `['metric', rule.id, node.file]`), so accepted debt keeps its identity and nobody re-accepts. Growth is surfaced instead: `BaselineEntry` gains an optional `acceptedValue`, populated on accept for `metric`-kind violations only, and `buildBaselineGrowthAdvisories` reports any baselined metric violation whose current value exceeds its accepted value by more than `BASELINE_GROWTH_ADVISORY_RATIO` (0.2 — a named constant documented as a starting point pending evidence, per this repo's promotion doctrine).
+
+**A correction to this finding's own sketch:** the report originally called the advisory "changes no fingerprint and needs no re-accept" — true — but implied it was therefore nearly free. It isn't quite: detecting growth needs a reference point, and `BaselineEntry` stored no value, so the advisory requires an additive schema change. That change follows the `contentFingerprint` precedent exactly (`store.ts:12-15`): optional, `.passthrough()` retained, and legacy entries lacking it simply don't participate — verified by a test that constructs an entry with the field entirely absent, the real shape a pre-upgrade `.align/baseline.json` parses to.
+
+**Why not the value-sensitive fingerprint**, despite it being unusually cheap in this release (#5 already orphans metric entries, and `UPGRADING.md` already prescribes the prune/accept procedure, so it would have cost one re-accept rather than two): changing what a baselined metric entry *means* mid-release is a one-way door, whereas an advisory is reversible and can be promoted to enforcement later on measured evidence. `acceptedValue` is also exactly the data such a promotion would need.
+
+**Deliberate limits:** advisory only — it never changes a verdict, and the threshold is a constant rather than a config option for now.
 
 ---
 

@@ -8,8 +8,9 @@
  *
  * The authoritative shape is `BaselineEntry` (`./store.ts`). Two constraints mirror it exactly and
  * must never regress:
- *  - `contentFingerprint` stays optional — `.align/baseline.json` files written before that field
- *    existed (`store.ts`'s own doc comment) must still parse.
+ *  - `contentFingerprint` (and, by the same discipline, `acceptedValue`) stays optional —
+ *    `.align/baseline.json` files written before that field existed (`store.ts`'s own doc comment)
+ *    must still parse.
  *  - the object stays open (`.passthrough()`) — a stricter schema would reject any field added to
  *    `BaselineEntry` in the future and turn every existing repo's next `align check` into a hard
  *    error on upgrade.
@@ -26,6 +27,10 @@ export const baselineEntrySchema = z
     // Optional — see module doc comment. `store.ts`: "Optional so `.align/baseline.json` files
     // written before this field existed still parse."
     contentFingerprint: z.string().min(1).optional(),
+    // Optional — same back-compat discipline (FRAGILE #8, bug hunt 2026-08-03). Only present on
+    // entries accepted from a `metric`-kind violation; a legacy or non-metric entry simply lacks
+    // it, and `gates/advisories.ts`'s growth advisory skips those cleanly rather than crashing.
+    acceptedValue: z.number().optional(),
   })
   .passthrough();
 

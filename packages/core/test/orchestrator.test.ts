@@ -444,6 +444,87 @@ describe('GateOrchestrator', () => {
     expect(gate?.baselinedCount).toBe(1);
   });
 
+  describe('baseline-growth advisory (FRAGILE #8, bug hunt 2026-08-03)', () => {
+    it('surfaces a baseline-growth advisory, naming both numbers, without flipping verdict red or touching the fingerprint', async () => {
+      const ruleset = defineProject({
+        components: { api: 'application/api/**' },
+        rules: (c) => [c.arch.component(c.api).maxLinesPerFile(800)],
+      });
+      let loc = 900;
+      const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/big.ts', 'api', loc)], []))]);
+      const baseline = new InMemoryBaselineStore();
+      const orchestrator = new GateOrchestrator(registry, ruleset, baseline);
+
+      const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      const seedArchGate = seedRun.gates.find((g) => g.gate === 'architecture');
+      const seedViolationId = seedArchGate?.violations[0]?.id;
+      baseline.accept(seedArchGate?.violations ?? [], 'init-seed');
+
+      // Grows from 900 (accepted) to 1200 — >20% over, well past the growth threshold.
+      loc = 1200;
+      const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      const archGate = run.gates.find((g) => g.gate === 'architecture');
+
+      // The violation is still baselined under the SAME fingerprint (`arch.metric`'s fingerprint
+      // is file-identity-only, deliberately unchanged by this fix) — no re-accept, no red.
+      expect(run.verdict).toBe('green');
+      expect(archGate?.violations).toHaveLength(0);
+      expect(archGate?.baselinedCount).toBe(1);
+      expect(seedViolationId).toBeDefined();
+
+      const growthAdvisory = run.advisories.find((a) => a.kind === 'baseline-growth');
+      expect(growthAdvisory).toBeDefined();
+      expect(growthAdvisory?.message).toContain('900');
+      expect(growthAdvisory?.message).toContain('1200');
+    });
+
+    it('does not surface an advisory when growth stays under the threshold', async () => {
+      const ruleset = defineProject({
+        components: { api: 'application/api/**' },
+        rules: (c) => [c.arch.component(c.api).maxLinesPerFile(800)],
+      });
+      let loc = 900;
+      const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/big.ts', 'api', loc)], []))]);
+      const baseline = new InMemoryBaselineStore();
+      const orchestrator = new GateOrchestrator(registry, ruleset, baseline);
+
+      const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      baseline.accept(seedRun.gates.find((g) => g.gate === 'architecture')?.violations ?? [], 'init-seed');
+
+      loc = 950; // ~5.5% growth — under the 20% threshold
+      const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      expect(run.verdict).toBe('green');
+      expect(run.advisories.find((a) => a.kind === 'baseline-growth')).toBeUndefined();
+    });
+
+    it('does not surface an advisory, and does not crash, for a baseline entry accepted before acceptedValue existed', async () => {
+      const ruleset = defineProject({
+        components: { api: 'application/api/**' },
+        rules: (c) => [c.arch.component(c.api).maxLinesPerFile(800)],
+      });
+      const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/big.ts', 'api', 5000)], []))]);
+
+      // A run against an EMPTY store just to obtain the real fingerprint the evaluator produces
+      // for this file — then a legacy entry is constructed by hand (no `acceptedValue` field at
+      // all, not even `undefined`), the exact shape a `.align/baseline.json` written before this
+      // field existed would deserialize to (schema.test.ts covers the parse side).
+      const probe = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+      const probeRun = await probe.check({ rootDir: '/repo', excludes: [] });
+      const violation = probeRun.gates.find((g) => g.gate === 'architecture')?.violations[0];
+      expect(violation).toBeDefined();
+      if (violation === undefined) throw new Error('unreachable: asserted above');
+
+      const legacyBaseline = new InMemoryBaselineStore([
+        { fingerprint: violation.id, ruleId: violation.ruleId, file: violation.file, acceptedAt: 0, acceptedBy: 'init-seed' },
+      ]);
+      const orchestrator = new GateOrchestrator(registry, ruleset, legacyBaseline);
+
+      const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      expect(run.verdict).toBe('green'); // still baselined — fingerprint alone is unaffected
+      expect(run.advisories.find((a) => a.kind === 'baseline-growth')).toBeUndefined();
+    });
+  });
+
   describe('security gate (ADR 013)', () => {
     it('is green with 0 manifests when no manifest scanner is injected (default, back-compat for every pre-existing caller)', async () => {
       const ruleset = defineProject({ components: { api: 'application/api/**' } });

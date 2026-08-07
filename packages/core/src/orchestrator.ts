@@ -4,7 +4,7 @@ import type { Violation } from './types/violation.js';
 import { EMPTY_MANIFEST_INVENTORY, type ManifestScanner } from './types/manifest.js';
 import type { BaselineStore } from './baseline/store.js';
 import type { Advisory, CheckRun, GateResult } from './gates/types.js';
-import { buildUncertaintyAdvisories, buildUngroundedExternalSelectorAdvisories } from './gates/advisories.js';
+import { buildBaselineGrowthAdvisories, buildUncertaintyAdvisories, buildUngroundedExternalSelectorAdvisories } from './gates/advisories.js';
 import type { PluginRegistry } from './plugin/registry.js';
 import { evaluateRule } from './rules/evaluators.js';
 import { evaluateManifestRule, type SecurityManifestRule } from './rules/manifest-evaluators.js';
@@ -191,6 +191,11 @@ export class GateOrchestrator {
       // as `ungroundedComponents` below) — an ungrounded external selector is vacuously green, not
       // a failure, so it never affects `verdict`, only visibility.
       ...buildUngroundedExternalSelectorAdvisories(architectureRules, graph.externalNodes),
+      // FRAGILE #8 (bug hunt 2026-08-03): computed after `reconcileMoves` above, against the
+      // post-reconcile baseline snapshot, so a `metric` entry that just transferred (file rename)
+      // is compared under its new fingerprint rather than momentarily looking unbaselined. Advisory
+      // only — never touches `verdict` or any fingerprint.
+      ...buildBaselineGrowthAdvisories(allViolations, this.baselineStore.show()),
     ];
 
     const gates = [parseGate, architectureGate, securityGate];

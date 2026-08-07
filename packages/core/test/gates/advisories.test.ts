@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildUncertaintyAdvisories } from '../../src/gates/advisories.js';
-import { toRepoRelativePath } from '../../src/types/branded.js';
+import { buildBaselineGrowthAdvisories, buildUncertaintyAdvisories } from '../../src/gates/advisories.js';
+import { computeFingerprint } from '../../src/baseline/fingerprint.js';
+import { toComponentName, toRepoRelativePath, toRuleId } from '../../src/types/branded.js';
+import type { BaselineEntry } from '../../src/baseline/store.js';
 import type { UncertaintyMarker } from '../../src/types/graph.js';
+import type { Violation } from '../../src/types/violation.js';
 
 function marker(specifier: string, reason: UncertaintyMarker['reason']): UncertaintyMarker {
   return {
@@ -62,5 +65,112 @@ describe('buildUncertaintyAdvisories', () => {
 
   it('returns an empty array when there are no markers', () => {
     expect(buildUncertaintyAdvisories([])).toEqual([]);
+  });
+});
+
+// FRAGILE #8 (bug hunt 2026-08-03): `arch.metric`'s fingerprint is deliberately file-identity-only
+// (never `value`, never `threshold`) — a baselined over-length file can grow without the
+// fingerprint ever changing, so this advisory is the only signal a human/agent gets that it's
+// still growing. It must never change what's baselined, only surface growth.
+function metricViolation(file: string, ruleId: string, value: number): Violation {
+  const filePath = toRepoRelativePath(file);
+  const rule = toRuleId(ruleId);
+  return {
+    id: computeFingerprint(['metric', rule, filePath]),
+    ruleId: rule,
+    category: 'architecture',
+    severity: 'error',
+    file: filePath,
+    range: { startLine: 1, endLine: 1 },
+    snippet: `// ${file}`,
+    fixHint: { code: 'split-file', file: filePath },
+    kind: 'metric',
+    metric: 'loc',
+    component: toComponentName('api'),
+    value,
+    threshold: 800,
+  };
+}
+
+function noDependencyViolation(file: string, ruleId: string): Violation {
+  const filePath = toRepoRelativePath(file);
+  const toFile = toRepoRelativePath('ui/other.ts');
+  return {
+    id: computeFingerprint(['no-dependency', ruleId, file, 'ui/other.ts', './other']),
+    ruleId: toRuleId(ruleId),
+    category: 'architecture',
+    severity: 'error',
+    file: filePath,
+    range: { startLine: 1, endLine: 1 },
+    snippet: `import './other'`,
+    fixHint: { code: 'remove-import', file: filePath, line: 1 },
+    kind: 'no-dependency',
+    fromFile: filePath,
+    toFile,
+    fromComponent: toComponentName('api'),
+    toComponent: toComponentName('ui'),
+    specifier: './other',
+    line: 1,
+  };
+}
+
+function baselineEntryFor(v: Violation, acceptedValue?: number): BaselineEntry {
+  return {
+    fingerprint: v.id,
+    ruleId: v.ruleId,
+    file: v.file,
+    acceptedAt: 0,
+    acceptedBy: 'manual',
+    ...(acceptedValue === undefined ? {} : { acceptedValue }),
+  };
+}
+
+describe('buildBaselineGrowthAdvisories', () => {
+  it('fires when the current value exceeds the accepted value by more than the threshold, naming both numbers', () => {
+    const v = metricViolation('api/big.ts', 'arch.metric:loc:api', 1200); // accepted at 900 -> now 1200 (33% growth)
+    const entry = baselineEntryFor(v, 900);
+    const advisories = buildBaselineGrowthAdvisories([v], [entry]);
+    expect(advisories).toHaveLength(1);
+    expect(advisories[0]?.kind).toBe('baseline-growth');
+    expect(advisories[0]?.message).toContain('900');
+    expect(advisories[0]?.message).toContain('1200');
+    expect(advisories[0]?.message).toContain('api/big.ts');
+    expect(advisories[0]?.ruleIds).toEqual(['arch.metric:loc:api']);
+  });
+
+  it('does not fire when growth is below the threshold', () => {
+    const v = metricViolation('api/big.ts', 'arch.metric:loc:api', 1000); // 900 -> 1000 is ~11%, below 20%
+    const entry = baselineEntryFor(v, 900);
+    expect(buildBaselineGrowthAdvisories([v], [entry])).toEqual([]);
+  });
+
+  it('does not fire on exactly the threshold boundary (inclusive)', () => {
+    const v = metricViolation('api/big.ts', 'arch.metric:loc:api', 1080); // exactly 900 * 1.2
+    const entry = baselineEntryFor(v, 900);
+    expect(buildBaselineGrowthAdvisories([v], [entry])).toEqual([]);
+  });
+
+  it('does not fire, and does not throw, for a legacy entry with no recorded acceptedValue', () => {
+    const v = metricViolation('api/big.ts', 'arch.metric:loc:api', 5000);
+    const entry = baselineEntryFor(v, undefined);
+    expect(entry.acceptedValue).toBeUndefined();
+    expect(() => buildBaselineGrowthAdvisories([v], [entry])).not.toThrow();
+    expect(buildBaselineGrowthAdvisories([v], [entry])).toEqual([]);
+  });
+
+  it('ignores a metric violation that has no baseline entry at all (not baselined)', () => {
+    const v = metricViolation('api/big.ts', 'arch.metric:loc:api', 5000);
+    expect(buildBaselineGrowthAdvisories([v], [])).toEqual([]);
+  });
+
+  it('leaves a non-metric baselined violation unaffected — no value is recorded for it, so it never participates', () => {
+    const v = noDependencyViolation('api/a.ts', 'arch.no-dependency:api->ui');
+    const entry = baselineEntryFor(v); // acceptedValue never set for a non-metric kind
+    expect(entry.acceptedValue).toBeUndefined();
+    expect(buildBaselineGrowthAdvisories([v], [entry])).toEqual([]);
+  });
+
+  it('returns an empty array when there are no violations', () => {
+    expect(buildBaselineGrowthAdvisories([], [])).toEqual([]);
   });
 });
