@@ -3,7 +3,7 @@ import { runCheck } from './commands/check.js';
 import { runExportIr } from './commands/export-ir.js';
 import { runInit } from './commands/init.js';
 import { baselineAccept, baselinePrune, baselineShow } from './commands/baseline.js';
-import { buildExplainPayload } from './commands/explain.js';
+import { runExplain } from './commands/explain.js';
 import { runDoctor } from './commands/doctor.js';
 import { runBuild, DEFAULT_DOC_PATH } from './commands/build.js';
 import { runAgentCommand } from './commands/agent.js';
@@ -138,13 +138,7 @@ export function buildProgram(): Command {
     .command('explain <ruleId>')
     .description('Explain one architecture rule: its kind, rationale, and constrained components.')
     .action(async (ruleId: string) => {
-      const payload = await buildExplainPayload(process.cwd(), ruleId);
-      if (payload === undefined) {
-        console.error(`Unknown rule id '${ruleId}'.`);
-        process.exitCode = 1;
-        return;
-      }
-      console.log(JSON.stringify(payload, null, 2));
+      process.exitCode = await runExplain(process.cwd(), ruleId);
     });
 
   program

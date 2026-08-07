@@ -2,7 +2,6 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline/promises';
 import {
-  ComponentValidationError,
   computeImpactDelta,
   diffGeneratedRules,
   evaluateRule,
@@ -32,6 +31,7 @@ import { TypeScriptPlugin } from '@spikedpunch/align-plugin-typescript';
 import { loadConfig, CONFIG_FILENAME } from '../config.js';
 import { assertGeneratedRulesNoteWellFormed, writeGeneratedRulesNote } from '../init/config-comment.js';
 import { printDryRunReport, renderBuildReport } from './build-report.js';
+import { reportCliError } from '../cli-error.js';
 import {
   readBaseline,
   readGeneratedRules,
@@ -407,12 +407,10 @@ export async function runBuild(rootDir: string, options: BuildOptions): Promise<
   try {
     result = await dryRunBuild(rootDir, docRelPath);
   } catch (err) {
-    if (err instanceof ComponentValidationError) {
-      console.error(`align build: ${err.message}`);
-      return 1;
-    }
-    console.error(`align build: ${err instanceof Error ? err.message : String(err)}`);
-    return 1;
+    // A `ComponentValidationError` (`err.message`) and any other thrown `Error` both format
+    // identically through `reportCliError` (`err instanceof Error ? err.message : String(err)`),
+    // so the special case this used to carry was vestigial — collapsed to one call.
+    return reportCliError('align build', err);
   }
   printDryRunReport(result);
   await recordBuildTelemetry(rootDir, docRelPath, result, options.telemetryPreConfig);
@@ -442,8 +440,7 @@ export async function runBuild(rootDir: string, options: BuildOptions): Promise<
   try {
     applied = writeBuildArtifacts(rootDir, result, { acceptNewIntoBaseline });
   } catch (err) {
-    console.error(`align build: ${err instanceof Error ? err.message : String(err)}`);
-    return 1;
+    return reportCliError('align build', err);
   }
   console.log(`\n${applied.message}`);
   return applied.ok ? 0 : 1;

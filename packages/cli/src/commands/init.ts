@@ -14,6 +14,7 @@ import { offerAlignScript } from '../init/npm-script.js';
 import { createOrchestrator } from '../composition-root.js';
 import { CONFIG_FILENAME, loadConfig } from '../config.js';
 import { writeBaseline, ensureAlignDir } from '../align-dir.js';
+import { reportCliError } from '../cli-error.js';
 
 export interface InitOptions {
   readonly acceptExisting: boolean;
@@ -93,8 +94,12 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     writeGeneratedRulesNote(configPath);
     writeAgentInstructions(rootDir);
   } catch (err) {
-    console.log(err instanceof Error ? err.message : String(err));
-    return 1;
+    // Was `console.log` — an inconsistency with every other refusal in this codebase (stderr on
+    // failure, stdout on success/progress), normalized to `console.error` here rather than left
+    // as a deliberate difference: nothing distinguishes this failure from any other that would
+    // justify printing it to stdout, and stdout output survives redirection (`align init >
+    // out.log`) in a way that would hide a real failure from the terminal.
+    return reportCliError('align init', err);
   }
   console.log('Wrote/updated CLAUDE.md agent-instructions block.');
 
@@ -102,7 +107,18 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     console.log('Wrote/updated .gitignore (excluded .align/telemetry.jsonl + .align/telemetry-state.json — opt-in, local-only).');
   }
 
-  const { ruleset, excludes, hostRules } = await loadConfig(rootDir);
+  // loadConfig can fail six ways, including a corrupt `.align/generated-rules.json` (bug hunt
+  // 2026-08-03, BUG #14) — caught here instead of crashing with a raw Node stack trace. By this
+  // point CLAUDE.md and align.config.ts's note comment may already have been written above (both
+  // purely additive, self-atomic writes independent of loadConfig succeeding), so this refusal
+  // still leaves the repo in a valid, re-runnable state rather than rolling anything back.
+  let loaded: Awaited<ReturnType<typeof loadConfig>>;
+  try {
+    loaded = await loadConfig(rootDir);
+  } catch (err) {
+    return reportCliError('align init', err);
+  }
+  const { ruleset, excludes, hostRules } = loaded;
   const { orchestrator } = createOrchestrator(ruleset, [], hostRules);
   const run = await orchestrator.check({ rootDir, excludes });
   const violations = run.gates.flatMap((g) => g.violations);

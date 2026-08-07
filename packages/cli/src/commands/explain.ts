@@ -2,8 +2,31 @@ import type { McpExplainRulePayload, RepoRelativePath } from '@spikedpunch/align
 import { buildViolationMermaid, evaluateRule, toComponentName, toRuleId } from '@spikedpunch/align-core';
 import { TypeScriptPlugin } from '@spikedpunch/align-plugin-typescript';
 import { loadConfig } from '../config.js';
+import { reportCliError } from '../cli-error.js';
 
 const EXAMPLES_PER_COMPONENT = 3;
+
+/**
+ * `align explain <ruleId>` — the CLI entry point. `buildExplainPayload` below is shared with the
+ * MCP `align_explain_rule` tool (`mcp/server.ts`), which relies on `loadConfig`'s throw reaching
+ * the SDK's own try/catch (verified empirically: the SDK converts any uncaught throw into a clean
+ * `isError` response, bug hunt 2026-08-03, BUG #14) — so the catch belongs HERE, at the CLI-only
+ * wrapper, not inside the shared function, where it would swallow the throw MCP depends on.
+ */
+export async function runExplain(rootDir: string, ruleId: string): Promise<number> {
+  let payload: McpExplainRulePayload | undefined;
+  try {
+    payload = await buildExplainPayload(rootDir, ruleId);
+  } catch (err) {
+    return reportCliError('align explain', err);
+  }
+  if (payload === undefined) {
+    console.error(`Unknown rule id '${ruleId}'.`);
+    return 1;
+  }
+  console.log(JSON.stringify(payload, null, 2));
+  return 0;
+}
 
 export async function buildExplainPayload(rootDir: string, ruleId: string): Promise<McpExplainRulePayload | undefined> {
   const { ruleset, excludes, hostRules } = await loadConfig(rootDir);

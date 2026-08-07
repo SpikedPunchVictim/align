@@ -103,7 +103,13 @@ describe('align check --untrusted — the proof: never imports align.config.ts',
     const poisoned = copyFixture('simple-app');
     try {
       fs.writeFileSync(path.join(poisoned, 'align.config.ts'), `throw new Error(${JSON.stringify(EXPLOIT_MESSAGE)});\n`, 'utf8');
-      await expect(runCheck(poisoned, { json: false })).rejects.toThrow(/EXPLOIT/);
+      // Trusted mode's `loadConfig` call is now caught at the command entry (bug hunt 2026-08-03,
+      // BUG #14) — a poisoned align.config.ts is a clean non-zero exit, not an unhandled
+      // rejection. The poison message still surfacing on stderr is the proof that trusted mode
+      // really did execute align.config.ts (contrasted with --untrusted below, which never does).
+      const { result: code, errors } = await withCapturedConsole(() => runCheck(poisoned, { json: false }));
+      expect(code).toBe(1);
+      expect(errors.join('\n')).toMatch(/EXPLOIT/);
     } finally {
       fs.rmSync(poisoned, { recursive: true, force: true });
     }

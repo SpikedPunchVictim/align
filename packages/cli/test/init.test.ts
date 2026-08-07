@@ -223,13 +223,29 @@ describe('align init — npm-script offer', () => {
 // reports its other refusals — a printed message plus a non-zero exit code — never let it escape
 // as an unhandled promise rejection.
 describe('align init — malformed marker block fails cleanly (caller-contract fix)', () => {
-  function captureLog(): { logs: string[]; restore: () => void } {
+  // `runInit`'s marker-block catch used to `console.log` its failure message — an inconsistency
+  // with every other refusal in this codebase (stderr on failure), normalized to `console.error`
+  // alongside the shared `reportCliError` helper (bug hunt 2026-08-03, BUG #14). Captures both
+  // sinks so this suite keeps working regardless of which one the message lands on.
+  function captureLog(): { logs: string[]; errors: string[]; restore: () => void } {
     const logs: string[] = [];
-    const original = console.log;
+    const errors: string[] = [];
+    const originalLog = console.log;
+    const originalError = console.error;
     console.log = ((...args: unknown[]) => {
       logs.push(args.map(String).join(' '));
     }) as typeof console.log;
-    return { logs, restore: () => (console.log = original) };
+    console.error = ((...args: unknown[]) => {
+      errors.push(args.map(String).join(' '));
+    }) as typeof console.error;
+    return {
+      logs,
+      errors,
+      restore: () => {
+        console.log = originalLog;
+        console.error = originalError;
+      },
+    };
   }
 
   it('a malformed CLAUDE.md marker state (orphan START) exits non-zero with a printed message, not a throw', async () => {
@@ -238,7 +254,7 @@ describe('align init — malformed marker block fails cleanly (caller-contract f
     const original = '# Notes\n\n<!-- align:start -->\nstale, no closing marker\n';
     fs.writeFileSync(claudeMdPath, original, 'utf8');
 
-    const { logs, restore } = captureLog();
+    const { errors, restore } = captureLog();
     let code: number;
     try {
       code = await runInit(tmpDir, { acceptExisting: false, nonInteractive: true });
@@ -247,7 +263,7 @@ describe('align init — malformed marker block fails cleanly (caller-contract f
     }
 
     expect(code).not.toBe(0);
-    expect(logs.join('\n')).toMatch(/malformed align block/);
+    expect(errors.join('\n')).toMatch(/malformed align block/);
     // Refused, not guessed: the file is untouched, not corrupted or duplicated into.
     expect(fs.readFileSync(claudeMdPath, 'utf8')).toBe(original);
   });
@@ -264,7 +280,7 @@ describe('align init — malformed marker block fails cleanly (caller-contract f
       `// align:generated-rules-note:start\nstale, no closing marker\n`;
     fs.writeFileSync(configPath, original, 'utf8');
 
-    const { logs, restore } = captureLog();
+    const { errors, restore } = captureLog();
     let code: number;
     try {
       code = await runInit(tmpDir, { acceptExisting: false, nonInteractive: true });
@@ -273,7 +289,7 @@ describe('align init — malformed marker block fails cleanly (caller-contract f
     }
 
     expect(code).not.toBe(0);
-    expect(logs.join('\n')).toMatch(/malformed align block/);
+    expect(errors.join('\n')).toMatch(/malformed align block/);
     // This is the destructive case BUG #10 describes for align.config.ts specifically: the
     // ruleset must survive, byte-for-byte, rather than being silently spliced away.
     expect(fs.readFileSync(configPath, 'utf8')).toBe(original);

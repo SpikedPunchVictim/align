@@ -1,6 +1,7 @@
 import { buildExportedRuleset } from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { writeRulesetIr } from '../align-dir.js';
+import { reportCliError } from '../cli-error.js';
 
 export interface ExportIrOptions {
   /** Overrides the default `.align/ruleset-ir.json` output location (absolute or repo-root-relative). */
@@ -23,7 +24,15 @@ export interface ExportIrOptions {
  * `align check --untrusted` against this exact file will refuse to run until they're removed.
  */
 export async function runExportIr(rootDir: string, options: ExportIrOptions = {}): Promise<number> {
-  const { ruleset, excludes } = await loadConfig(rootDir);
+  // loadConfig can fail six ways, including a corrupt `.align/generated-rules.json` (bug hunt
+  // 2026-08-03, BUG #14) — caught here instead of crashing with a raw Node stack trace.
+  let loaded: Awaited<ReturnType<typeof loadConfig>>;
+  try {
+    loaded = await loadConfig(rootDir);
+  } catch (err) {
+    return reportCliError('align export-ir', err);
+  }
+  const { ruleset, excludes } = loaded;
   const exported = buildExportedRuleset(ruleset, excludes);
   const writtenTo = writeRulesetIr(rootDir, exported, options.out);
 

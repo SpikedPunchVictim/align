@@ -11,6 +11,7 @@ import {
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, readGeneratedRules, readRulesetIr, readRulesLock, writeBaseline } from '../align-dir.js';
+import { reportCliError } from '../cli-error.js';
 import { verifyFrozenRules } from './build.js';
 import { buildCheckEvent, computeAndPersistViolationTransitions, computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
 import { detectVersionSkewAdvisory } from '../version-skew.js';
@@ -75,7 +76,18 @@ export async function runCheck(rootDir: string, options: CheckOptions): Promise<
 
 
 async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<number> {
-  const { ruleset, excludes, hostRules, telemetry } = await loadConfig(rootDir);
+  // `loadConfig` can fail six different ways — a syntax error in align.config.ts, a missing
+  // @spikedpunch/align-core devDependency, a missing default export, a malformed excludes/
+  // compositionRoots/knownPublicDeepImports export, or a corrupt `.align/generated-rules.json`
+  // (bug hunt 2026-08-03, BUG #14) — and nothing between here and `program.ts`'s action handler
+  // used to catch any of them, so every one crashed with a raw Node stack trace.
+  let loaded: Awaited<ReturnType<typeof loadConfig>>;
+  try {
+    loaded = await loadConfig(rootDir);
+  } catch (err) {
+    return reportCliError('align check', err);
+  }
+  const { ruleset, excludes, hostRules, telemetry } = loaded;
   let previousBaseline: BaselineEntry[];
   try {
     previousBaseline = readBaseline(rootDir);
@@ -83,8 +95,7 @@ async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<
     // readBaseline throws on a corrupted `.align/baseline.json` (bug hunt 2026-08-03, BUG #1) —
     // caught here the same way `runUntrustedCheck` below catches `readRulesetIr`, instead of an
     // unattributed Node stack trace.
-    console.error(`align check: ${err instanceof Error ? err.message : String(err)}`);
-    return 1;
+    return reportCliError('align check', err);
   }
   const { orchestrator, baselineStore } = createOrchestrator(ruleset, previousBaseline, hostRules);
 

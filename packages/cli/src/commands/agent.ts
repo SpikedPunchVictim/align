@@ -23,6 +23,7 @@ import {
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline } from '../align-dir.js';
+import { reportCliError } from '../cli-error.js';
 import { computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
 
 export interface AgentRunCliOptions {
@@ -170,7 +171,17 @@ function exitCodeFor(result: AgentRunResult): number {
 }
 
 export async function runAgentCommand(rootDir: string, options: AgentRunCliOptions): Promise<number> {
-  const { ruleset, excludes, hostRules, telemetry } = await loadConfig(rootDir);
+  // loadConfig can fail six ways, including a corrupt `.align/generated-rules.json` (bug hunt
+  // 2026-08-03, BUG #14) — caught here instead of crashing with a raw Node stack trace, before
+  // this function ever constructs an AnthropicFixProvider (which itself requires
+  // ANTHROPIC_API_KEY) or touches git.
+  let loaded: Awaited<ReturnType<typeof loadConfig>>;
+  try {
+    loaded = await loadConfig(rootDir);
+  } catch (err) {
+    return reportCliError('align agent run', err);
+  }
+  const { ruleset, excludes, hostRules, telemetry } = loaded;
   const anthropicProvider = options.model !== undefined ? new AnthropicFixProvider({ model: options.model }) : new AnthropicFixProvider();
   const memoizingProvider = new MemoizingFixProvider(anthropicProvider);
   const effects = buildEffects(rootDir, ruleset, excludes, hostRules, options, memoizingProvider);
@@ -196,8 +207,7 @@ export async function runAgentCommand(rootDir: string, options: AgentRunCliOptio
   try {
     result = await runAgentLoop(effects, ruleset, runOptions);
   } catch (err) {
-    console.error(`align agent run: ${err instanceof Error ? err.message : String(err)}`);
-    return 1;
+    return reportCliError('align agent run', err);
   }
   printResult(result);
   recordAgentTelemetry(rootDir, result, memoizingProvider, anthropicProvider, ruleset, options.telemetryPreConfig, telemetry);

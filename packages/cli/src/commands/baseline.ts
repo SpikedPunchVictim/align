@@ -2,6 +2,7 @@ import { InMemoryBaselineStore, toRuleId, type BaselineEntry } from '@spikedpunc
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, writeBaseline } from '../align-dir.js';
+import { reportCliError } from '../cli-error.js';
 import { computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
 
 /**
@@ -31,7 +32,16 @@ async function currentViolations(rootDir: string) {
 }
 
 export async function baselineAccept(rootDir: string, ruleId?: string, telemetryPreConfig?: boolean): Promise<number> {
-  const { violations, ruleset, telemetry } = await currentViolations(rootDir);
+  // currentViolations calls loadConfig, which can fail six ways, including a corrupt
+  // `.align/generated-rules.json` (bug hunt 2026-08-03, BUG #14) — caught here instead of
+  // crashing with a raw Node stack trace.
+  let current: Awaited<ReturnType<typeof currentViolations>>;
+  try {
+    current = await currentViolations(rootDir);
+  } catch (err) {
+    return reportCliError('align baseline accept', err);
+  }
+  const { violations, ruleset, telemetry } = current;
   const targeted = ruleId === undefined ? violations : violations.filter((v) => v.ruleId === toRuleId(ruleId));
   const previous = tryReadBaseline(rootDir, 'align baseline accept');
   if (!previous.ok) return previous.code;
@@ -54,7 +64,15 @@ export async function baselineAccept(rootDir: string, ruleId?: string, telemetry
 }
 
 export async function baselinePrune(rootDir: string, telemetryPreConfig?: boolean): Promise<number> {
-  const { ruleset, excludes, hostRules, telemetry } = await loadConfig(rootDir);
+  // loadConfig can fail six ways, including a corrupt `.align/generated-rules.json` (bug hunt
+  // 2026-08-03, BUG #14) — caught here instead of crashing with a raw Node stack trace.
+  let loaded: Awaited<ReturnType<typeof loadConfig>>;
+  try {
+    loaded = await loadConfig(rootDir);
+  } catch (err) {
+    return reportCliError('align baseline prune', err);
+  }
+  const { ruleset, excludes, hostRules, telemetry } = loaded;
   const previous = tryReadBaseline(rootDir, 'align baseline prune');
   if (!previous.ok) return previous.code;
   const store = new InMemoryBaselineStore(previous.entries);
