@@ -48,7 +48,7 @@ All work below is **uncommitted, in the working tree on branch `fix`**. Gate bas
 | **#5** | ✅ **Implemented + verified** | `plugin-typescript/src/scanner.ts` counts real lines; `wc -l` divergence pinned by a comment and a test. 8 tests in `plugin-typescript/test/scanner.test.ts`. One existing assertion in `cli/test/check.test.ts` corrected (`8 lines` → `7 lines`) — the fixture visibly has 7 lines, so the old assertion had baked in the buggy value. `baseline prune` instruction is in the commit body. **Note for future checks:** this repo's `arch.metric` rule lives in doc-generated `.align/generated-rules.json`, NOT `align.config.ts` — grepping only the config would miss it. |
 | **#6** | ✅ **Implemented + verified** | `core/src/fix/schema.ts` `.refine()` uniqueness on `files[].path`, with the why-reject-not-merge reasoning kept inline. 4 tests in `core/test/fix/schema.test.ts`. `safeParse` at `anthropicFixProvider.ts:194` confirmed, so rejection re-prompts the model rather than throwing. **Follow-up worth considering:** `FIX_PROPOSAL_JSON_SCHEMA` (the tool definition sent to Anthropic, `anthropicFixProvider.ts:40`) is hand-written and NOT derived from the zod schema, so the model only learns this constraint by failing once and reading the correction. A line in that JSON Schema's description would save the wasted attempt. |
 | **#15** | ✅ **Implemented + verified** | `plugin-typescript/src/doctor.ts` `globLikeMatch` deleted in favour of core's `globMatch` (literal-prefix arms kept). 3 tests in `plugin-typescript/test/doctor.test.ts` via `findDeadAliases`. No existing test needed changing, so this repo's own `doctor` output is unaffected. |
-| **#14** | ⬜ Not started | Catch around `loadConfig` at each command entry. **Fix is a sketch, not Step-6-verified** — added after the fix-verification pass. |
+| **#14** | ⬜ Not started — **Step 6 pass complete, blocked on one decision** | Catch around `loadConfig` at 7 CLI command entries (NOT MCP — the SDK already converts throws to `isError`; NOT `doctor`/`telemetry` — they handle failure deliberately). Blast radius corrected 1–2 files → 8. Blocked on: introduce a shared error helper, or add a ninth bespoke catch? 19 bespoke sites in 4 incompatible shapes exist today. |
 | **#7 / #8 / #9** | 🔵 Blocked on design decisions | Not implementable as written; each needs a product call. See their sections. |
 | **Needs Review 1 / 2** | 🔵 Blocked on product decisions | Root-workspace-package support; repo-scoped vs directory-scoped commands. |
 
@@ -67,7 +67,7 @@ All work below is **uncommitted, in the working tree on branch `fix`**. Gate bas
 | 5 | `plugin-typescript/src/scanner.ts:228,357` — `loc` counts a phantom trailing line, so `arch.metric max: N` fires on a file of exactly N lines and reports N+1 | Boundaries | Confirmed (empirical) | 🟢 Medium | ⚪ Low | 🟢 Medium | 🟠 Excellent | 1 file (fingerprint unaffected) | Trivial |
 | 6 | `agent/src/run.ts:167,180` — a `FixProposal` listing the same path twice writes both results in sequence; the first entry's edits are silently lost and the partial result is committed | Data Lifecycle | Confirmed (empirical) | 🟢 Medium | ⚪ Low | 🟢 Medium | 🟢 Good | 1 file | Trivial |
 | 8 | `core/src/rules/evaluators.ts:283` — `arch.metric` fingerprint excludes the measured value, so a file baselined at `max+1` can grow without bound and stay green | Data Lifecycle | Confirmed (empirical) | 🟢 Medium | 🟡 High | 🟢 Medium | 🟡 Marginal | 1 file + full metric re-accept | requires design work |
-| 14 | `cli/src/config.ts:128` — `readGeneratedRules` correctly throws on a corrupt `.align/generated-rules.json`, but `loadConfig` doesn't catch and neither does any command, so every `loadConfig`-based command dies with a raw Node stack trace | Error Paths | Confirmed (empirical) | 🟢 Medium | ⚪ Low | 🟢 Medium | 🟠 Excellent | 1–2 files | Trivial |
+| 14 | `cli/src/config.ts:128` — `readGeneratedRules` correctly throws on a corrupt `.align/generated-rules.json`, but `loadConfig` doesn't catch and neither does any command, so every `loadConfig`-based command dies with a raw Node stack trace | Error Paths | Confirmed (empirical) | 🟢 Medium | 🟡 High | 🟢 Medium | 🟢 Good | 8 files / 7 call sites + a shared helper | Medium |
 | 11 | `cli/src/init/claude-md.ts:39` + `config-comment.ts:39` — an END marker positioned before a START marker fails the `endIdx > startIdx` guard and falls through to append, adding a fresh block on **every** run, unboundedly | Boundaries | Confirmed (empirical) | 🟢 Medium | 🟡 High | 🟢 Medium | 🟢 Good | same fix as #10 | covered by #10 |
 | 12 | `cli/src/init/claude-md.ts:37-38` + `config-comment.ts:37-38` — with two complete marker pairs, `indexOf` finds the first START and the first END, so only the first block is ever refreshed and the second goes stale permanently | Boundaries | Confirmed (empirical) | ⚪ Low | 🟡 High | ⚪ Low | 🟢 Good | same fix as #10 | covered by #10 |
 
@@ -701,7 +701,39 @@ Error: /…/.align/generated-rules.json is not valid JSON: Expected property nam
 
 **Note on what BUG #1's fix did and didn't cover:** `runTrustedCheck` now catches `readBaseline` (line 79-84) but the `loadConfig` call on the line immediately above it is still unguarded — the sweep guarded the baseline read and left the config load exposed. `align doctor` is the exception and already handles this: `config.ts:49-55` documents that its catch turns a config error into a `config-error` advisory with exit 0.
 
-**Fix:** catch around `loadConfig` at each command entry, converting to a printed message plus a non-zero exit — the same shape already used for `readBaseline` (`check.ts:79-84`), `writeGeneratedRulesNote` (`init.ts`), and `runAgentLoop` (`agent.ts`). Since `loadConfig` can throw for several reasons (missing default export, malformed sibling exports via `readStringArrayExport`, a genuine syntax error in `align.config.ts`, plus this), a single catch at each entry point covers a whole family, not just this reader — likely a better shape than guarding `readGeneratedRules` alone. Full Step 6 checklist not yet worked: **this finding was added after the audit's fix-verification pass, so its fix is a sketch, not a verified fix.** Treat it accordingly.
+**Fix:** catch around `loadConfig` at each **CLI command** entry, converting to a printed message plus a non-zero exit. A single catch per call site covers the whole failure family rather than just this reader.
+
+**The `loadConfig` failure family** (enumerated during the Step 6 pass, `config.ts` read in full):
+
+| Failure | Site | Thrown type | Message already actionable? |
+|---|---|---|---|
+| syntax error in `align.config.ts`, or any non-`ERR_MODULE_NOT_FOUND` import failure | `config.ts:104-114`, rethrown `:113` | native `SyntaxError` etc., unwrapped | Node's own wording, not align-authored |
+| `@spikedpunch/align-core` not installed in the target repo | `config.ts:106-113` → `errors.ts:24-40` | `AlignCoreMissingError` | yes — gives two fix commands |
+| no `default` export | `config.ts:115-117` | `Error` | yes |
+| malformed `excludes`/`compositionRoots`/`knownPublicDeepImports` | `config.ts:56-63` | `Error` | yes |
+| corrupt `generated-rules.json` JSON | `align-dir.ts:112-116` | `Error` | yes |
+| `generated-rules.json` fails zod | `align-dir.ts:117` | **raw `ZodError`** | **no** — prints zod's issue array |
+
+`mergeGeneratedRules` and `toHostPredicateRegistry` were checked and cannot throw.
+
+**Step 6 checklist (completed 2026-08-06):**
+1. *Boundary arithmetic.* None introduced. ✅
+2. *Mirror path.* The write side (`writeGeneratedRules`) always emits schema-valid content, so the reader's strictness cannot reject align's own output. ✅
+3. *Existing data.* None — no migration, no baseline churn, no fingerprint change. This is purely presentational. ✅
+4. *Constraint values.* The failure family above is read from source, not assumed. ✅
+5. *Failure modes.* Catch must print and **exit non-zero** — never swallow. A swallowed config error would be a false green, strictly worse than the current crash. ✅
+6. *Interactions.* Nothing is masked: no test anywhere calls `loadConfig` directly or asserts it rejects (`grep -rn "loadConfig" packages/*/test` → comments only), and the one adjacent test (`doctor-deep-imports.test.ts:82-99`) asserts the *opposite* — that a config failure becomes a clean advisory at exit 0. ✅
+7. *Caller contract.* **9+ call sites across 8 files, not the "1–2 files" originally estimated — a ~4× undercount.** Seven genuinely crash raw today: `check.ts:78`, `explain.ts:9`, `export-ir.ts:26`, `baseline.ts:25`, `baseline.ts:57`, `init.ts:105`, `agent.ts:173`. **Two must NOT be changed**, because they handle failure deliberately and differently: `doctor.ts:105` (→ `config-error` advisory, exit 0) and `telemetry.ts:151` (swallows to `[]` so the rest of the report still prints). ⚠️
+8. *Empirical.* Pre-fix crash reproduced (above). Doctor's exit-0 contract verified live: corrupt file → `config-error (1): Could not load align.config.ts: … is not valid JSON`, **exit 0**, file restored, `align check` green again. ✅
+
+**Two scope corrections the Step 6 pass produced — both narrow the fix:**
+
+- **The MCP surface does not need this fix.** The original finding implied `mcp/server.ts` was exposed. It isn't: `@modelcontextprotocol/sdk`'s `McpServer` wraps *every* tool call in its own try/catch and converts any uncaught throw into `createToolError(...)`, byte-identical in shape to the manual `{ isError: true }` responses in `server.ts`. Verified by driving the real server over stdio with a corrupt file — `align_explain_rule` returned a clean `isError` response despite having **no** local catch. The manual catches added by BUG #1's sweep are defense-in-depth and message consistency, not crash prevention. Scope this fix to CLI commands in `program.ts` only.
+- **`build.ts`'s `recordBuildTelemetry:64` looks like a gap and is not.** Investigated and empirically refuted: `align build` with a corrupt file fails earlier, in `computeBuildResult`'s *direct* `readGeneratedRules` call (`build.ts:105`), inside `runBuild`'s existing catch (`build.ts:406-416`) — so it prints cleanly and exits 1, and `recordBuildTelemetry` is never reached with a corrupt file.
+
+**Open design question — needs a decision before implementing.** There is **no shared "print a config error and exit non-zero" helper** in `packages/cli`. `err instanceof Error ? err.message : String(err)` appears **19 times across 8 files**, in at least four mutually incompatible shapes: `console.error` + `return 1` (`check`, `build`, `agent`); `console.log` + `return 1` (`init.ts:96`); a local `{ok, code}` discriminated union (`baseline.ts:16-21`); an MCP content object; an advisory push (`doctor`); and a swallow-to-`[]` (`telemetry`). The original sketch's "the same shape already used" is therefore **not accurate** — there is no single shape to copy. Implementing #14 means either picking one shape per surface or introducing a genuine shared helper. **Recommendation: introduce the helper**, since this fix would otherwise make it nine files and twenty-odd bespoke sites.
+
+**One related defect noted, deliberately not folded in:** the zod-parse step throws a raw `ZodError` in all three `.align/` readers (`readGeneratedRules`, `readBaseline`, `readRulesetIr`), so a schema-invalid — as opposed to JSON-invalid — artifact prints zod's issue array rather than align-authored prose. Systemic, not specific to #14, and it survives this fix. Worth its own finding.
 
 ### BUG #15 — A third copy of the divergent glob matcher, in `align doctor`, still unfixed
 
