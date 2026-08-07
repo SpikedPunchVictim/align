@@ -4,6 +4,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import type { z } from 'zod';
 import {
   baselineFileSchema,
   exportedRulesetSchema,
@@ -32,6 +33,25 @@ const TELEMETRY_STATE_FILENAME = 'telemetry-state.json';
 
 export function alignDirPath(rootDir: string): string {
   return path.join(rootDir, ALIGN_DIR);
+}
+
+/**
+ * The missing sibling of the `JSON.parse` catch at each of this file's three artifact readers
+ * (`readBaseline`, `readGeneratedRules`, `readRulesetIr`): all three already turn a JSON-syntax
+ * error into align-authored prose naming the file, but until now all three let a *schema*-invalid
+ * (valid JSON, wrong shape) artifact throw zod's raw `ZodError` straight through — an issue array
+ * with no file name and no framing, inconsistent with the JSON.parse catch two lines above it at
+ * every one of these call sites (bug hunt 2026-08-03, noted alongside BUG #14 but not folded into
+ * its fix). `safeParse` instead of `parse` so the failure is a normal return value to format here,
+ * not a second exception type callers would need to distinguish from the JSON.parse one.
+ */
+function parseArtifact<T>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, parsed: unknown, file: string, shapeDescription: string): T {
+  const result = schema.safeParse(parsed);
+  if (result.success) return result.data;
+  const issues = result.error.issues
+    .map((issue) => `  ${issue.path.length > 0 ? issue.path.join('.') : '(root)'}: ${issue.message}`)
+    .join('\n');
+  throw new Error(`${file} does not match the expected shape (${shapeDescription}):\n${issues}`);
 }
 
 function baselinePath(rootDir: string): string {
@@ -83,7 +103,12 @@ export function readBaseline(rootDir: string): BaselineEntry[] {
   // brands those same fields (`ViolationId`/`RuleId`/`RepoRelativePath`). `as BaselineEntry[]` alone doesn't
   // satisfy TS's overlap check across a branded intersection type — the boundary cast goes through `unknown`,
   // same as every other brand-construction site (`types/branded.ts`'s `toXxx` helpers).
-  return baselineFileSchema.parse(parsed) as unknown as BaselineEntry[];
+  return parseArtifact(
+    baselineFileSchema,
+    parsed,
+    file,
+    'an array of baseline entries (fingerprint, ruleId, file, acceptedAt, acceptedBy)',
+  ) as unknown as BaselineEntry[];
 }
 
 export function writeBaseline(rootDir: string, entries: readonly BaselineEntry[]): void {
@@ -114,7 +139,12 @@ export function readGeneratedRules(rootDir: string): GeneratedRulesFile | undefi
   } catch (err) {
     throw new Error(`${generatedRulesPath(rootDir)} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
   }
-  return generatedRulesFileSchema.parse(parsed);
+  return parseArtifact<GeneratedRulesFile>(
+    generatedRulesFileSchema,
+    parsed,
+    generatedRulesPath(rootDir),
+    '{ irVersion, docPath, generatedAt, rules[] }',
+  );
 }
 
 /** Returns the exact raw bytes written, so callers can content-hash the same string that will be
@@ -169,7 +199,7 @@ export function readRulesetIr(rootDir: string, override?: string): ExportedRules
   } catch (err) {
     throw new Error(`${file} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
   }
-  return exportedRulesetSchema.parse(parsed);
+  return parseArtifact<ExportedRuleset>(exportedRulesetSchema, parsed, file, '{ irVersion, exportedAt, excludes[], ruleset }');
 }
 
 export function writeRulesetIr(rootDir: string, data: ExportedRuleset, override?: string): string {
