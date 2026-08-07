@@ -35,7 +35,19 @@ export const suppressionSchema = z.object({
 export type Suppression = z.infer<typeof suppressionSchema>;
 
 export const fixProposalSchema = z.object({
-  files: z.array(fixProposalFileSchema).min(1),
+  /**
+   * Each `path` must appear at most once. LLM fix providers routinely emit one entry per logical
+   * change, so two entries for the same file is a common — and unguarded, without this check —
+   * output shape. Rejecting is deliberate over merging: two independently-resolved edit sets for
+   * the same file can produce overlapping spans that `applyEditsToFile`'s atomic overlap check
+   * (`apply.ts`) would have caught *within* one entry; merging across entries would trade a
+   * silent loss (BUG #6: the second entry's write clobbers the first's) for silent corruption
+   * instead. Put every edit for a file in that file's `edits` array — that's what it's for.
+   */
+  files: z.array(fixProposalFileSchema).min(1).refine(
+    (files) => new Set(files.map((f) => f.path)).size === files.length,
+    'each file may appear at most once — put every edit for a file in that file\'s `edits` array',
+  ),
   /**
    * Accepted and validated per ADR 010, but dormant in arch-first v1: no lint gates exist yet,
    * so no rule category is suppressible. Any proposal that *uses* this field is rejected by the
