@@ -156,3 +156,12 @@ of a long-lived secret you should rotate periodically. You can migrate back to O
 | CLI installs but its deps 404 | A package published out of order, or one of the five failed mid-run. `pnpm -r publish` handles ordering; re-run it — already-published versions are skipped. |
 | Release workflow auth error | See *Fallback: token-based publishing* above. |
 | `You cannot publish over the previously published versions` | The version already exists. Bump with `pnpm release:version` and re-tag. |
+
+## Upgrade notes
+
+When a release changes violation fingerprints, component classification, or any other behaviour
+a consumer has to act on, record it in [`UPGRADING.md`](./UPGRADING.md) **in the same commit as
+the change**, not at release time. Baseline-churn instructions in particular are easy to lose:
+a consumer whose accepted debt stops matching needs the exact `align baseline prune` /
+`align baseline accept` sequence, and the order matters (see that file for why `prune` must run
+before `check`).
