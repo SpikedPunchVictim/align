@@ -60,7 +60,7 @@ All work below is **uncommitted, in the working tree on branch `fix`**. Gate bas
 | 13 | `agent/src/run.ts:311-313` + `git.ts:39-41` — `defaultWorkBranchName` is date-only, so a second `align agent run` on the same day collides; `createBranch` rejects and nothing catches it, crashing with a raw Node stack trace | Time & Concurrency / Error Paths | Confirmed (empirical) | 🟡 High | 🟡 High | 🟡 High | 🟠 Excellent | 2 files + test double | Small |
 | 1 | `cli/src/align-dir.ts:59-64` — a corrupt `baseline.json` is silently read as empty; `baseline accept`/`prune` then overwrite the file, permanently destroying every accepted entry | Cross-Impl / Error Paths | Confirmed (empirical) | 🔴 Critical | 🟡 High | 🔴 Critical | 🟠 Excellent | 6 files (core schema + align-dir + 8 call sites across 4 command/server files) | Small |
 | 2 | `core/src/components/glob.ts:16-21` — `**` compiles to `.*`, crossing path-segment boundaries: `src/**/index.ts` classifies `src/notindex.ts` | Boundaries | Confirmed (empirical) | 🟡 High | 🟡 High | 🟡 High | 🟠 Excellent | 1 file + baseline churn (re-accept required) | Trivial |
-| 9 | `core/src/rules/tarjan.ts:88-101` — the greedy cycle walk can strand and return a NON-CLOSED chain, which `evaluateNoCycles` renders as a cycle violation with a fingerprint over the phantom path | Boundaries / State Machines | Confirmed (empirical) | 🟡 High | 🔴 Critical | 🟡 High | 🟢 Good | 2 files | requires design work |
+| 9 | `core/src/rules/tarjan.ts:88-101` — the greedy cycle walk can strand and return a NON-CLOSED chain, which `evaluateNoCycles` renders as a cycle violation with a fingerprint over the phantom path | Boundaries / State Machines | Confirmed (empirical) | 🟡 High | 🟡 High | 🟡 High | 🟢 Good | 1 file + shared re-accept note | Small |
 | 3 | `core/src/rules/host-rules.ts:165` — `custom.host` fingerprint folds in a line number, violating `fingerprint.ts:9`'s "never line numbers"; 8 of 9 sibling call sites comply | Cross-Impl | Confirmed (empirical) | 🟡 High | 🟡 High | 🟡 High | 🟠 Excellent | 1 file + one-time re-accept (no auto-transfer) | Trivial |
 | 4 | `plugin-typescript/src/scanner.ts:206-214` — the exclude matcher diverges from core's dialect in 3 ways despite a comment claiming parity; a literal space in a pattern becomes a wildcard | Cross-Impl | Confirmed (empirical) | 🟡 High | 🟡 High | 🟡 High | 🟠 Excellent | 1 file + baseline churn (ships with #2) | Small |
 | 7 | `core/src/baseline/store.ts:131-153` — move-transfer can silently baseline a genuinely new violation when one is fixed and an identical-snippet one appears elsewhere in the same commit | Data Lifecycle | Confirmed (empirical) | 🟡 High | 🔴 Critical | 🟡 High | 🟡 Marginal | 2 files + contract change | requires design work |
@@ -91,7 +91,6 @@ All work below is **uncommitted, in the working tree on branch `fix`**. Gate bas
 
 **Deferred to design work:**
 
-- **#9** — the obvious mitigation is *defective*; see the Correction note in BUG #9. A correct fix must repair or re-derive the chain, not skip the SCC. Independent of #1–#8; can be scheduled separately.
 - **#7** — every candidate fix changes ADR 006's accepted semantics and needs a product decision. Sketch below, not a patch.
 - **#8** — same: any fix invalidates all existing `arch.metric` baseline entries and needs a policy call on what "accepted debt" means for a growing file.
 
@@ -523,7 +522,26 @@ fingerprint:         3ea48afeec39957b
 
 > **Correction to the original report.** Needs-Review #1 closed with: *"the defensive `if (chain[0] !== chain[chain.length - 1]) continue;` in `evaluateNoCycles` costs nothing and closes it either way."* **That is wrong, and the suggestion must not be shipped.** In the reaching instance above, that `continue` would emit **zero** violations for an SCC containing two genuine cycles (`a↔d` and `a→b→c→a`) — converting a wrong-but-visible violation into a silent false green, the exact class this codebase exists to prevent.
 
-**Fix: requires design work.** A correct fix must *repair or re-derive* the chain — e.g. backtrack on strand, or extract a guaranteed cycle (shortest cycle through `scc[0]` via BFS) rather than a greedy walk — never skip the SCC. This is an algorithm change in a function whose header claims it is "ported from the kluster spike; proven algorithm", so it also needs a decision about whether to re-verify against that evidence base. See the Fix Plan for the fingerprint-churn interaction.
+**Fix: RESOLVED and implemented (2026-08-07).** The greedy walk is deleted and replaced by a BFS for the shortest cycle through `scc[0]` — which cannot strand, because in an SCC of size ≥2 every node is mutually reachable. Self-loops keep the `[a, a]` two-element contract (returning `[a]` would produce zero hops and silently drop the violation — the same false-green class as the rejected skip-the-SCC mitigation).
+
+**The scope decision was settled by measurement, not judgment.** The open question was whether BFS should *replace* the greedy walk or only *back it up* on strand, since `evaluators.ts:164` fingerprints over the chain's edge sequence and any change orphans baseline entries. Measured across six real repos (align, kluster, n8n, directus, otel-js, fluxify — ~23,000 files) using the real compiled scanner and the real compiled `tarjanScc`:
+
+| | runtime kinds | with `includeTypeOnly` |
+|---|---|---|
+| multi-node SCCs | 221 | 285 |
+| **stranded (the live bug)** | **9 (4.1%)** | 16 (5.6%) |
+| closed chains identical under BFS | 209 (98.6%) | 264 (98.1%) |
+| **closed chains that would differ** | **3 (1.4%)** | 5 (1.9%) |
+
+Three findings decided it:
+
+1. **The premise of the back-up-only option was false.** It was proposed on the grounds that "no user re-accepts anything" — but stranded SCCs churn under *any* correct fix, so a repo with cycle debt including a stranded SCC re-accepts either way. Its true saving is 3 entries out of 212, not "all of them."
+2. **Stranding is worse in the wild than synthetically estimated** — 4.1% measured vs ~1.8% from brute force. n8n renders 6 phantom non-cycles today; directus 3.
+3. **The "huge phantom chain" legibility argument does not hold at this scale** and should not have been relied on: real SCCs do get large (244 nodes in n8n) but reported chains stay short — max 11 greedy hops, median 2. The close-first shortcut at `tarjan.ts:90-92` kept them short. BFS still wins on legibility in the divergent cases (8 hops → 4, 3 → 2), which improves `suggestedBreakEdge` and the fix agent's target — but that is a smaller argument than it was made to sound.
+
+**Also corrected:** `tarjan.ts`'s module header credited the whole file to the kluster spike as a "proven algorithm". That credit was only ever earned by the iterative Tarjan (stack safety); the walk carried this defect *from* that same source (`docs/evidence/kluster-spike/src/rules.ts:178` has the identical strand defect). The header now scopes the attribution to the SCC algorithm and marks the chain extraction as align's own. The vendored evidence file is left untouched.
+
+**Migration:** the 9 stranded fingerprints and 3 divergent ones change, so this folds into the same combined `align baseline prune && align baseline accept` note as #2/#3/#4. Move-transfer cannot rescue them — `store.ts:134` requires a different file, and a re-derived chain keeps `violation.file = scc[0]`; the snippet usually changes too, so `contentFingerprint` shifts as well.
 
 ### BUG #10 / #11 / #12 — The marker-splice branch mishandles every malformed state: silent deletion, unbounded duplication, and a permanently stale block
 
