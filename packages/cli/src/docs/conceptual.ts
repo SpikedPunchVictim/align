@@ -21,7 +21,7 @@ export function baseline(): string {
   return `A new rule (or align's first run) on a mature repo will find pre-existing violations. The baseline tolerates them as **accepted debt** — never silently fixed — so day one is green instead of a wall of red. Consent is always explicit (ADR 006):
 
 - \`align init\` seeds the baseline from the first check. Interactive: asks. CI/non-interactive: requires \`--accept-existing\`, else exits red — silence is never consent.
-- \`align baseline accept [--rule <ruleId>]\` accepts current violations (optionally scoped to one rule). \`align baseline show\` lists what's baselined; \`align baseline prune\` drops entries for violations that no longer exist.
+- \`align baseline accept [--rule <ruleId>]\` accepts current violations (optionally scoped to one rule). \`align baseline show\` lists what's baselined; \`align baseline prune\` drops entries for violations that no longer exist (and refuses, changing nothing, when the check errored — an incomplete scan proves nothing was fixed).
 
 Entries are fingerprinted on a **content-snippet hash, not a line number**, so moving or lightly editing a file doesn't un-baseline or double-count — \`prune\` reports moved entries rather than treating them as new. The MCP server never self-serves acceptance (\`allowBaselineFromMcp\` defaults \`false\`): an agent can't grant itself amnesty from a rule it's failing.`;
 }

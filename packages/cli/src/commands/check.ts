@@ -249,7 +249,10 @@ function persistMovedBaseline(rootDir: string, run: CheckRun, baselineStore: InM
 
 /** The one baseline-debt computation shared by `align check`, MCP `align_check`, and the payload
  * builder's fallback — a single guarded function so the error-run correction (below) can't drift
- * across copies (it did: three inline `Σ baselinedCount` sites, and only two were first fixed). */
+ * across copies (it did: three inline `Σ baselinedCount` sites, and only two were first fixed).
+ * The same asymmetry has a MUTATING half — commands that delete/overwrite baseline entries from a
+ * run's violations (`baseline prune`, `init`) — guarded by `refuseIfRunErrored` (`errored-run.ts`),
+ * which is where a new consumer of flattened gate violations should look first. */
 export function computeBaselineDebt(previousBaseline: readonly BaselineEntry[], run: CheckRun): BaselineDebt {
   const previous = previousBaseline.length;
   // An errored gate reports `baselinedCount: 0` (orchestrator.ts) though its on-disk baseline

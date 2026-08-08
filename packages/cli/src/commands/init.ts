@@ -15,6 +15,7 @@ import { createOrchestrator } from '../composition-root.js';
 import { CONFIG_FILENAME, loadConfig } from '../config.js';
 import { writeBaseline, ensureAlignDir } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
+import { refuseIfRunErrored } from '../errored-run.js';
 
 export interface InitOptions {
   readonly acceptExisting: boolean;
@@ -128,6 +129,14 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   const { ruleset, excludes, hostRules } = loaded;
   const { orchestrator } = createOrchestrator(ruleset, [], hostRules);
   const run = await orchestrator.check({ rootDir, excludes });
+  // `align init` is re-runnable on a repo that already has a baseline ("align.config.ts already
+  // exists — leaving it as-is", above), and the zero-violations branch below writes `[]` over it.
+  // An errored gate reports `violations: []` without evaluating anything, so that branch used to
+  // destroy an existing baseline while printing "Initial check is green" and exiting 0 — the same
+  // class as `baselinePrune`'s BUG #18, found in the same sweep. Refuse before any of the baseline
+  // branches: the gate's own message tells the user what to fix, and the run is re-runnable after.
+  const refusal = refuseIfRunErrored('align init', run, 'refusing to seed or reset the baseline');
+  if (refusal !== undefined) return refusal;
   const violations = run.gates.flatMap((g) => g.violations);
 
   const isInteractive = options.nonInteractive === true ? false : (options.nonInteractive ?? process.stdin.isTTY === true);

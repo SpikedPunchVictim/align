@@ -3,6 +3,7 @@ import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, writeBaseline } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
+import { refuseIfRunErrored } from '../errored-run.js';
 import { computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
 
 /**
@@ -63,6 +64,16 @@ export async function baselineAccept(rootDir: string, ruleId?: string, telemetry
   return 0;
 }
 
+/**
+ * Prune is the only command that DELETES accepted consent decisions, so it is the one place the
+ * errored-gate asymmetry is destructive rather than merely wrong: an errored gate reports
+ * `violations: []`, which made every baseline entry look orphaned and got it deleted while the
+ * command printed "Pruned N fixed violation(s)" and exited 0 (bug hunt 2026-08-08, BUG #18 —
+ * reproduced by shadowing a component so `align check` reports `verdict: 'error'`). An absent
+ * violation on an incomplete scan means "not verified", never "fixed" — the same lesson
+ * `computeBaselineDebt` (`commands/check.ts`) records for the three reporting sites; see
+ * `refuseIfRunErrored` (`errored-run.ts`), which is now the single guard for this class.
+ */
 export async function baselinePrune(rootDir: string, telemetryPreConfig?: boolean): Promise<number> {
   // loadConfig can fail six ways, including a corrupt `.align/generated-rules.json` (bug hunt
   // 2026-08-03, BUG #14) — caught here instead of crashing with a raw Node stack trace.
@@ -78,6 +89,9 @@ export async function baselinePrune(rootDir: string, telemetryPreConfig?: boolea
   const store = new InMemoryBaselineStore(previous.entries);
   const { orchestrator } = createOrchestrator(ruleset, [], hostRules);
   const run = await orchestrator.check({ rootDir, excludes });
+  // BEFORE the store is consulted and before anything is written (see this function's doc comment).
+  const refusal = refuseIfRunErrored('align baseline prune', run, 'refusing to prune the baseline');
+  if (refusal !== undefined) return refusal;
   const allViolations = run.gates.flatMap((g) => g.violations);
   // `knownFiles` gates move-transfer the same way `align check`'s own reconcileMoves does
   // (FRAGILE #7 fix, bug hunt 2026-08-03) — must be the real current scan's file set, not the
