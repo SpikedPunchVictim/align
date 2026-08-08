@@ -20,16 +20,28 @@ import { buildExplainPayload } from '../commands/explain.js';
 import { computeBaselineDebt } from '../commands/check.js';
 import { DEFAULT_DOC_PATH, proposeFromClientSubmission, writeBuildArtifacts, type DryRunResult } from '../commands/build.js';
 import { renderCondensedFixingSkill } from '../skill/condensed.js';
+import { withVersionSkew } from '../version-skew.js';
 
 /** Shared by `align_check`/`align_violations`: runs a fresh check and persists any move-transfer
  * (ADR 006) the run performed, so a renamed file's baselined violation doesn't need a separate
  * `align baseline prune` to stop being re-reported on the next call. Also returns the
- * baseline-debt delta for the `align_check` payload (docs/proposals/reconciled-build-order.md #2). */
+ * baseline-debt delta for the `align_check` payload (docs/proposals/reconciled-build-order.md #2).
+ *
+ * NOTE TO WHOEVER ADDS THE NEXT CROSS-CUTTING THING TO CHECK OUTPUT: this function is the one
+ * that keeps getting missed. `computeBaselineDebt` above already carries a comment saying this was
+ * "the third copy the first fix missed (NEW-1)" for baseline-debt math, and `withVersionSkew`
+ * below (the global-vs-local version-skew advisory) shipped on `align check`/`align doctor` first
+ * and wasn't wired in here either, so `align_check`/`align_violations` silently returned
+ * `advisories: []` for a skew the CLI was already reporting. Same root cause both times: two
+ * call sites (trusted/`--untrusted` `check.ts`) get updated, this third one — the MCP path — does
+ * not, because it isn't next to the other two in the file tree. If you're adding anything that
+ * should show up in every `CheckRun`-producing surface, check this function is on the list before
+ * you call it done. */
 async function freshCheck(rootDir: string): Promise<{ readonly run: CheckRun; readonly baselineDebt: BaselineDebt }> {
   const { ruleset, excludes, hostRules } = await loadConfig(rootDir);
   const previousBaseline = readBaseline(rootDir);
   const { orchestrator, baselineStore } = createOrchestrator(ruleset, previousBaseline, hostRules);
-  const run = await orchestrator.check({ rootDir, excludes });
+  const run = withVersionSkew(await orchestrator.check({ rootDir, excludes }), rootDir);
   if (run.advisories.some((a) => a.kind === 'baseline-moved')) {
     writeBaseline(rootDir, baselineStore.snapshot());
   }

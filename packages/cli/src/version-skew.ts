@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { Advisory } from '@spikedpunch/align-core';
+import type { Advisory, CheckRun } from '@spikedpunch/align-core';
 import { ALIGN_VERSION } from './telemetry/process-context.js';
 
 /**
@@ -37,4 +37,23 @@ export function detectVersionSkewAdvisory(rootDir: string): Advisory | undefined
       `binary (\`npx align\` or \`node_modules/.bin/align\`), or align the versions ` +
       `(\`npm i -D @spikedpunch/align-core@${ALIGN_VERSION}\`).`,
   };
+}
+
+/**
+ * Prepend a global-vs-local version-skew advisory (running binary ≠ this repo's installed
+ * align-core) to a `CheckRun`, so a stale global align shadowing the project-local one is a
+ * visible one-liner, not a silent behavior change (e.g. a pre-brace global matching a `{a,b}`
+ * selector to zero files).
+ *
+ * Lifted out of `commands/check.ts` (where it started life as a module-private helper) so every
+ * `CheckRun`-producing surface can share one copy instead of growing a second: `align check`
+ * (both the trusted and `--untrusted` paths) and the MCP server's `align_check`/`align_violations`
+ * (both funnel through `mcp/server.ts`'s `freshCheck`). Do not re-inline this at a new call site —
+ * that's exactly the "third copy" failure mode `freshCheck`'s own comment already warns about for
+ * a different piece of cross-cutting check output (baseline-debt computation); wire the new
+ * surface to this function instead.
+ */
+export function withVersionSkew(run: CheckRun, rootDir: string): CheckRun {
+  const skew = detectVersionSkewAdvisory(rootDir);
+  return skew === undefined ? run : { ...run, advisories: [skew, ...run.advisories] };
 }

@@ -6,9 +6,63 @@ import { describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createMcpServer } from '../src/mcp/server.js';
+import { ALIGN_VERSION } from '../src/telemetry/index.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.join(here, 'fixtures');
+
+/**
+ * Builds `dir/node_modules` the same way the whole-directory `fs.symlinkSync(realNodeModules, ...)`
+ * used elsewhere in this file does (individual real-package resolution, so TypeScript/align-core/
+ * everything else still works) EXCEPT for `@spikedpunch/align-core`: that one package gets its own
+ * shadow directory — every file symlinked through as-is except `package.json`, which is rewritten
+ * with `fakeVersion`. This lets `detectVersionSkewAdvisory` (which reads only
+ * `node_modules/@spikedpunch/align-core/package.json`'s `version` field, `version-skew.ts`) see a
+ * mismatch while the real align-core code (dsl, scanner, orchestrator) still resolves and runs
+ * normally underneath — needed because BUG #17's regression can only be exercised through a real
+ * `align_check` MCP call, not a unit test of the detector alone (see `version-skew.test.ts` for
+ * that).
+ */
+function nodeModulesWithShadowedCoreVersion(dir: string, fakeVersion: string): void {
+  const realNodeModules = path.join(process.cwd(), 'node_modules');
+  const tmpNodeModules = path.join(dir, 'node_modules');
+  fs.mkdirSync(tmpNodeModules);
+  for (const entry of fs.readdirSync(realNodeModules)) {
+    if (entry === '@spikedpunch') continue;
+    fs.symlinkSync(path.join(realNodeModules, entry), path.join(tmpNodeModules, entry));
+  }
+  const realScope = path.join(realNodeModules, '@spikedpunch');
+  const tmpScope = path.join(tmpNodeModules, '@spikedpunch');
+  fs.mkdirSync(tmpScope);
+  for (const entry of fs.readdirSync(realScope)) {
+    if (entry === 'align-core') continue;
+    fs.symlinkSync(path.join(realScope, entry), path.join(tmpScope, entry));
+  }
+  const realCore = path.join(realScope, 'align-core');
+  const tmpCore = path.join(tmpScope, 'align-core');
+  fs.mkdirSync(tmpCore);
+  for (const entry of fs.readdirSync(realCore)) {
+    if (entry === 'package.json') continue;
+    fs.symlinkSync(path.join(realCore, entry), path.join(tmpCore, entry));
+  }
+  const corePkg = JSON.parse(fs.readFileSync(path.join(realCore, 'package.json'), 'utf8')) as Record<string, unknown>;
+  fs.writeFileSync(path.join(tmpCore, 'package.json'), JSON.stringify({ ...corePkg, version: fakeVersion }));
+}
+
+function writeMinimalAlignRepo(dir: string): void {
+  fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'src/index.ts'), `export const x = 1;\n`, 'utf8');
+  fs.writeFileSync(
+    path.join(dir, 'tsconfig.json'),
+    JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext' } }),
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(dir, 'align.config.ts'),
+    `import { defineProject } from '@spikedpunch/align-core/dsl';\nexport default defineProject({ components: { app: 'src/**' } });\n`,
+    'utf8',
+  );
+}
 
 async function connectedClient(rootDir: string): Promise<Client> {
   const server = createMcpServer(rootDir);
@@ -95,6 +149,47 @@ describe('align mcp — align_check', () => {
       };
       expect(payload.verdict).toBe('green');
       expect(payload.ungroundedComponents).toEqual([{ name: 'api', selector: 'src/api/**', policy: 'until-populated' }]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('align mcp — version-skew advisory carried into the payload (BUG #17)', () => {
+  // `freshCheck` (`mcp/server.ts`) is the shared plumbing behind both `align_check` and
+  // `align_violations` — `withVersionSkew` (`version-skew.ts`, lifted out of `commands/check.ts`)
+  // is applied there so this fires for both. `align_violations`'s response only ever forwards
+  // `{ violations, pagination }` (see its handler), never an `advisories` field at all — that's a
+  // pre-existing, deliberate scope decision (it's a violations list, not a check summary), not
+  // something this fix changes, so only `align_check` is asserted on here.
+  it('align_check carries a version-skew advisory when the repo-installed align-core differs from the running binary', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-mcp-skew-test-'));
+    try {
+      writeMinimalAlignRepo(dir);
+      nodeModulesWithShadowedCoreVersion(dir, '0.0.1-mismatched');
+
+      const client = await connectedClient(dir);
+      const result = await client.callTool({ name: 'align_check', arguments: {} });
+      const payload = JSON.parse(textOf(result)) as { advisories: { kind: string; message: string }[] };
+      const skew = payload.advisories.find((a) => a.kind === 'version-skew');
+      expect(skew).toBeDefined();
+      expect(skew?.message).toContain(ALIGN_VERSION);
+      expect(skew?.message).toContain('0.0.1-mismatched');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('align_check carries no version-skew advisory when the repo-installed align-core matches the running binary', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-mcp-skew-test-'));
+    try {
+      writeMinimalAlignRepo(dir);
+      nodeModulesWithShadowedCoreVersion(dir, ALIGN_VERSION);
+
+      const client = await connectedClient(dir);
+      const result = await client.callTool({ name: 'align_check', arguments: {} });
+      const payload = JSON.parse(textOf(result)) as { advisories: { kind: string }[] };
+      expect(payload.advisories.some((a) => a.kind === 'version-skew')).toBe(false);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

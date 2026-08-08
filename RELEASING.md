@@ -121,6 +121,34 @@ commit, and the workflow run.
 
 ---
 
+## Testing an unreleased build against an external repo
+
+An unreleased build carries the **same version string as the last published release** until you
+bump it. align's version-skew advisory (`packages/cli/src/version-skew.ts`) fires by comparing the
+running binary's version against the target repo's installed `@spikedpunch/align-core` — so on an
+unbumped build the two always match, and the advisory stays silent by construction, exactly during
+the kind of test it exists to catch. **No skew advisory here is not evidence of compatibility** —
+it just means you haven't bumped.
+
+To get a real signal, bump to a prerelease version first — uncommitted, local only
+(`scripts/bump-version.mjs` accepts an `x.y.z-prerelease` suffix):
+
+```bash
+node scripts/bump-version.mjs 0.1.5-dev.0    # writes the prerelease string into all five package.json files
+pnpm -r build
+# link/install this build into the external repo, then run `align check` / `align_check` there —
+# a version mismatch now fires the advisory against anything pinned to a release.
+```
+
+**Revert the bump before committing anything else** — the prerelease string must never land in a
+real commit:
+
+```bash
+git checkout -- packages/*/package.json
+```
+
+---
+
 ## Fallback: token-based publishing
 
 Trusted Publishing (OIDC) is exchanged most reliably by the `npm` CLI; the release workflow relies
