@@ -36,16 +36,125 @@ export function resolveRepoRoot(startDir: string): string | undefined {
 }
 
 /**
+ * Directory names the nested-subproject scan below never descends into. Deliberately a small local
+ * copy rather than an import of `plugin-typescript`'s `DEFAULT_EXCLUDED_DIR_NAMES`: that constant
+ * is module-private to `scanner.ts` (plugin-typescript already keeps its own second copy in
+ * `doctor.ts` for the same reason), so reusing it would mean newly exporting a scanner internal
+ * through the plugin's public surface just to serve a CLI error message — widening a package's
+ * public API for an unrelated concern, and coupling this message's traversal policy to the TS
+ * scanner's source-file traversal policy, which are free to diverge. `cli -> plugin-typescript` is
+ * permitted by align's own ruleset, so this is an API-surface/coupling call, not a conformance one.
+ *
+ * Dot-directories are skipped wholesale by `isUninterestingDirName` EXCEPT `.align` itself, which
+ * is one of the two markers being looked for.
+ */
+const NESTED_SCAN_SKIPPED_DIR_NAMES: ReadonlySet<string> = new Set([
+  'node_modules',
+  'dist',
+  'build',
+  '.build',
+  '.history',
+  '.git',
+  '.next',
+  '.turbo',
+  '.cache',
+  'coverage',
+  'out',
+  'target',
+  'vendor',
+  'venv',
+  '__pycache__',
+]);
+
+/** How far below the start directory the nested-subproject scan looks. 2 covers the shapes this
+ * exists for (`typescript/`, `services/api/`) without turning a run from `$HOME` into a tree walk. */
+const NESTED_SCAN_MAX_DEPTH = 2;
+/** Hard ceiling on directories read. A user who runs a command from `/` or `$HOME` must get an
+ * answer immediately; hitting this cap with nothing found falls back to the generic message. */
+const NESTED_SCAN_MAX_DIRS = 400;
+/** How many nested setups the message names before switching to "and N more". */
+const NESTED_SCAN_MAX_NAMED = 3;
+
+function isUninterestingDirName(name: string): boolean {
+  if (name === ALIGN_DIR) return false; // one of the two markers — never skipped
+  return name.startsWith('.') || NESTED_SCAN_SKIPPED_DIR_NAMES.has(name);
+}
+
+/**
+ * Breadth-first, bounded, read-only scan DOWNWARD from `startDir` for directories that do have an
+ * align setup. Exists because the upward walk's "run `align init` here" advice is actively wrong in
+ * a common real shape: a polyglot monorepo whose git root holds several subprojects with align set
+ * up in exactly one of them (verified on a real repo with `typescript/`, `python/`, `website/`
+ * siblings) — following that advice creates a second, competing align setup at the wrong level.
+ *
+ * Bounded three ways: depth (`NESTED_SCAN_MAX_DEPTH`), total directories read
+ * (`NESTED_SCAN_MAX_DIRS`), and the skip list above. Breadth-first so the shallowest — i.e. most
+ * likely intended — subprojects are the ones that survive a budget cutoff. Symlinked directories
+ * are not followed (`Dirent.isDirectory()` is false for a symlink), which also makes cycles
+ * impossible. Unreadable directories are skipped silently: this only ever decorates an error
+ * message, so it must never itself throw.
+ */
+function scanForNestedRepoRoots(startDir: string): readonly string[] {
+  const found: string[] = [];
+  const queue: { readonly dir: string; readonly depth: number }[] = [{ dir: startDir, depth: 0 }];
+  let dirsRead = 0;
+  while (queue.length > 0) {
+    if (dirsRead >= NESTED_SCAN_MAX_DIRS) break;
+    const { dir, depth } = queue.shift() as { dir: string; depth: number };
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+      dirsRead += 1;
+    } catch {
+      continue; // unreadable (permissions, races) — never let a decoration break the message
+    }
+    const hasMarker = entries.some(
+      (e) => (e.isFile() && e.name === CONFIG_FILENAME) || (e.isDirectory() && e.name === ALIGN_DIR),
+    );
+    // depth 0 is `startDir`, which the caller already established has no marker.
+    if (depth > 0 && hasMarker) {
+      found.push(dir);
+      continue; // an initialized subproject is a leaf for this purpose — don't scan inside it
+    }
+    if (depth >= NESTED_SCAN_MAX_DEPTH) continue;
+    const childNames = entries
+      .filter((e) => e.isDirectory() && !isUninterestingDirName(e.name))
+      .map((e) => e.name)
+      .sort(); // readdir order is not guaranteed — sort so the message is byte-identical run to run
+    for (const name of childNames) queue.push({ dir: path.join(dir, name), depth: depth + 1 });
+  }
+  return found;
+}
+
+/** `typescript/`, `packages/app/` — start-relative, always POSIX-separated and trailing-slashed so
+ * the message reads as a directory the user can `cd` into. */
+function toDisplayPath(startDir: string, dir: string): string {
+  return `${path.relative(startDir, dir).split(path.sep).join('/')}/`;
+}
+
+/**
  * The message every "no repo root found" surfacing uses, whichever delivery mechanism the caller
  * needs — `reportCliError` (every command) or a doctor advisory (`align doctor` alone; see
- * `resolveRepoRootForDoctor` below). Names the directory searched from and suggests `align init`,
- * shared so the two delivery paths can never say different things.
+ * `resolveRepoRootForDoctor` below). Names the directory searched from, shared so the two delivery
+ * paths can never say different things.
+ *
+ * Two endings. When a bounded downward scan finds align set up in a subdirectory, the message
+ * points at it instead of suggesting `align init` — suggesting `init` at the git root of a
+ * polyglot monorepo whose `typescript/` subproject already has align is bad advice that creates a
+ * second, competing setup. When nothing is found below either, the original `align init` wording
+ * is kept verbatim: that case is still correct.
  */
 export function repoNotFoundMessage(cwd: string): string {
-  return (
-    `no ${CONFIG_FILENAME} or ${ALIGN_DIR}/ directory found in ${cwd} or any parent directory. ` +
-    'Run `align init` to set align up here, or run this command from inside an initialized repo.'
-  );
+  const prefix = `no ${CONFIG_FILENAME} or ${ALIGN_DIR}/ directory found in ${cwd} or any parent directory. `;
+  const nested = scanForNestedRepoRoots(cwd);
+  if (nested.length === 0) {
+    return `${prefix}Run \`align init\` to set align up here, or run this command from inside an initialized repo.`;
+  }
+  const named = nested.slice(0, NESTED_SCAN_MAX_NAMED).map((dir) => toDisplayPath(cwd, dir));
+  const remaining = nested.length - named.length;
+  const list = named.join(', ') + (remaining > 0 ? `, and ${remaining} more` : '');
+  const subject = nested.length === 1 ? 'a subdirectory' : 'subdirectories';
+  return `${prefix}align is already set up in ${subject} of this directory (${list}) — run this command from there.`;
 }
 
 /** Prints the one-line stderr notice every command shows when the resolved root differs from

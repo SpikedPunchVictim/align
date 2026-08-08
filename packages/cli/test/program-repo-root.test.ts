@@ -177,6 +177,27 @@ describe('align <command> resolves the repo root instead of trusting cwd blindly
       expect(errors).toEqual([]);
     });
 
+    it('polyglot monorepo root: the advisory points at the initialized subproject and still exits 0', async () => {
+      // The real shape this exists for: a git root holding `typescript/`, `python/`, `website/`
+      // with align set up only in `typescript/`. Doctor must NOT lose its always-0 contract just
+      // because the message body changed, and must not tell the user to `align init` at the root.
+      const root = makeEmptyRepo();
+      for (const name of ['typescript', 'python', 'website']) fs.mkdirSync(path.join(root, name));
+      fs.writeFileSync(path.join(root, 'typescript', 'align.config.ts'), 'export default {};\n');
+      process.chdir(root);
+
+      const { logs, errors } = await withCapturedConsole(async () => {
+        await buildProgram().parseAsync(['node', 'align', 'doctor'], { from: 'node' });
+      });
+
+      expect(process.exitCode).toBe(0);
+      const stdout = logs.join('\n');
+      expect(stdout).toContain('repo-not-found');
+      expect(stdout).toContain('typescript/');
+      expect(stdout).not.toContain('align init');
+      expect(errors).toEqual([]);
+    });
+
     it('--json: no repo root anywhere reports the same condition as a structured advisory, still exit 0', async () => {
       const root = makeEmptyRepo();
       const nested = path.join(root, 'a', 'b');
