@@ -11,7 +11,16 @@ import { parse as parseYaml } from 'yaml';
 
 export interface WorkspacePackage {
   readonly name: string;
-  readonly dir: string; // repo-relative, trailing slash, forward slashes
+  /**
+   * Repo-relative, forward slashes, trailing slash — **except** for a package rooted at the repo
+   * root itself (`workspaces: ["."]` / `[""]` / `["./"]`, or pnpm `packages: ["**"]` when the
+   * root has its own `package.json`), which is the one case with no relative path segment to put
+   * a slash after. That package's `dir` is `''`, not `'/'` — `matchesSelector`
+   * (`core/src/components/registry.ts`) relies on `file.startsWith(dir)`, and `startsWith('')` is
+   * true for every file (the correct "rooted at the repo root" semantics), whereas `'/'` matches
+   * no repo-relative path and silently classifies zero files.
+   */
+  readonly dir: string;
 }
 
 const asStringArray = (value: unknown): string[] =>
@@ -85,7 +94,11 @@ export function loadWorkspacePackages(rootDir: string): WorkspacePackage[] {
       const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8')) as { name?: unknown };
       if (typeof pkg.name === 'string' && pkg.name.length > 0) {
         const rel = path.relative(rootDir, abs).split(path.sep).join('/');
-        packages.push({ name: pkg.name, dir: rel.endsWith('/') ? rel : `${rel}/` });
+        // `rel === ''` means `abs === rootDir` — the package IS the repo root. Leave `dir` as
+        // `''` rather than appending a trailing slash (which would produce `'/'`, matching no
+        // repo-relative file — see the `WorkspacePackage.dir` doc comment above).
+        const dir = rel === '' ? '' : rel.endsWith('/') ? rel : `${rel}/`;
+        packages.push({ name: pkg.name, dir });
       }
     } catch {
       // malformed package.json: skip this one package, not the whole scan

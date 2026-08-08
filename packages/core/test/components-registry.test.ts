@@ -53,6 +53,48 @@ describe('classifyFile', () => {
     expect(classifyFile(toRepoRelativePath('packages/core/index.ts'), components, workspace)).toBe('core');
     expect(classifyFile(toRepoRelativePath('packages/other/index.ts'), components, workspace)).toBeUndefined();
   });
+
+  it('a non-root package matches by directory prefix only — a sibling with the same prefix (no slash boundary) does not match', () => {
+    const components = {
+      [toComponentName('core')]: { name: '', selector: { kind: 'package' as const, packageNames: ['@x/core'] }, empty: 'fail' as const },
+    };
+    const workspace = new Map([['@x/core', toRepoRelativePath('packages/core/')]]);
+    expect(classifyFile(toRepoRelativePath('packages/core/src/index.ts'), components, workspace)).toBe('core');
+    // `packages/core-utils/x.ts` shares the literal prefix `packages/core` but is a different
+    // package directory — the trailing slash on `dir` is what makes `startsWith` a boundary
+    // check rather than a bare string-prefix check.
+    expect(classifyFile(toRepoRelativePath('packages/core-utils/x.ts'), components, workspace)).toBeUndefined();
+  });
+
+  it('a root workspace package (dir: "") matches every file — startsWith("") is true for any path', () => {
+    const components = {
+      [toComponentName('root')]: { name: '', selector: { kind: 'package' as const, packageNames: ['rootpkg'] }, empty: 'fail' as const },
+    };
+    const workspace = new Map([['rootpkg', toRepoRelativePath('')]]);
+    expect(classifyFile(toRepoRelativePath('src/index.ts'), components, workspace)).toBe('root');
+    expect(classifyFile(toRepoRelativePath('packages/other/index.ts'), components, workspace)).toBe('root');
+    expect(classifyFile(toRepoRelativePath('package.json'), components, workspace)).toBe('root');
+  });
+
+  it('first-match-wins: a root package declared first swallows files that a later component would otherwise claim', () => {
+    const components = {
+      [toComponentName('root')]: { name: '', selector: { kind: 'package' as const, packageNames: ['rootpkg'] }, empty: 'fail' as const },
+      [toComponentName('ui')]: glob(['packages/ui/**']),
+    };
+    const workspace = new Map([['rootpkg', toRepoRelativePath('')]]);
+    // Declared first, so it claims everything — including files a later `ui` selector would match.
+    expect(classifyFile(toRepoRelativePath('packages/ui/App.tsx'), components, workspace)).toBe('root');
+  });
+
+  it('first-match-wins: a root package declared last leaves earlier components their own files', () => {
+    const components = {
+      [toComponentName('ui')]: glob(['packages/ui/**']),
+      [toComponentName('root')]: { name: '', selector: { kind: 'package' as const, packageNames: ['rootpkg'] }, empty: 'fail' as const },
+    };
+    const workspace = new Map([['rootpkg', toRepoRelativePath('')]]);
+    expect(classifyFile(toRepoRelativePath('packages/ui/App.tsx'), components, workspace)).toBe('ui');
+    expect(classifyFile(toRepoRelativePath('other/thing.ts'), components, workspace)).toBe('root');
+  });
 });
 
 // Greenfield mode's empty-policy matrix (IMPLEMENTATION_PLAN.md Design Reserve, ADR 003

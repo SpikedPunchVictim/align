@@ -22,6 +22,17 @@ export * from './verb-manifest.js';
 // Component declaration shorthand
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * A plain string is a glob pattern (`'packages/api/**'`), or, prefixed with `package:`, a
+ * workspace-package-name selector (`'package:my-pkg'`) resolved against `pnpm-workspace.yaml` /
+ * `package.json` `workspaces` at load time (ADR 003).
+ *
+ * **Root-package caution:** if `my-pkg` is the workspace's *root* package (`workspaces: ["."]` /
+ * `[""]`, or pnpm `packages: ["**"]` including the root), its selector matches every file in the
+ * repo — components classify first-match-wins, in declaration order, and a root package has no
+ * sub-path to distinguish it from anything else. Declare a root-package component **last** in
+ * `components`, after every other component that should claim its own files first.
+ */
 export type ComponentDeclaration =
   | string
   | {

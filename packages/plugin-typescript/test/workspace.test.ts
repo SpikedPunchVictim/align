@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { classifyFile, toComponentName, toRepoRelativePath, validateComponents } from '@spikedpunch/align-core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadWorkspacePackages, readWorkspaceGlobs, resolveWorkspaceSpecifier } from '../src/workspace.js';
 
@@ -85,6 +86,51 @@ describe('loadWorkspacePackages', () => {
   it('returns an empty array when there is no pnpm-workspace.yaml', () => {
     const packages = loadWorkspacePackages(path.join(here, 'fixtures', 'clean'));
     expect(packages).toEqual([]);
+  });
+
+  // Needs-Review 1 (root workspace packages): when the workspace declaration resolves the repo
+  // root itself to a package directory, `path.relative(rootDir, rootDir)` is `''`. The package's
+  // `dir` must stay `''`, not `'/'` — `'/'` matches no repo-relative file (`file.startsWith('/')`
+  // is false for every scanned path), which classified the root package to zero files.
+  describe('root workspace package (dir stays "", not "/")', () => {
+    it('npm `workspaces: ["."]` resolves the root package.json to dir: ""', () => {
+      const dir = makeRepo({ 'package.json': JSON.stringify({ name: 'rootpkg', workspaces: ['.'] }) });
+      const packages = loadWorkspacePackages(dir);
+      expect(packages).toEqual([{ name: 'rootpkg', dir: '' }]);
+    });
+
+    it('npm `workspaces: [""]` resolves the root package.json to dir: ""', () => {
+      const dir = makeRepo({ 'package.json': JSON.stringify({ name: 'rootpkg', workspaces: [''] }) });
+      const packages = loadWorkspacePackages(dir);
+      expect(packages).toEqual([{ name: 'rootpkg', dir: '' }]);
+    });
+
+    it('pnpm `packages: ["**"]` includes the root package.json at dir: ""', () => {
+      const dir = makeRepo({
+        'pnpm-workspace.yaml': "packages:\n  - '**'\n",
+        'package.json': JSON.stringify({ name: 'rootpkg' }),
+      });
+      const packages = loadWorkspacePackages(dir);
+      expect(packages).toEqual([{ name: 'rootpkg', dir: '' }]);
+    });
+
+    it('a root-package component classifies files instead of erroring as a stale/zero-match selector', () => {
+      const dir = makeRepo({ 'package.json': JSON.stringify({ name: 'rootpkg', workspaces: ['.'] }) });
+      const packages = loadWorkspacePackages(dir);
+      const workspaceIndex = new Map(packages.map((p) => [p.name, toRepoRelativePath(p.dir)]));
+      const components = {
+        [toComponentName('root')]: {
+          name: 'root',
+          selector: { kind: 'package' as const, packageNames: ['rootpkg'] },
+          empty: 'fail' as const,
+        },
+      };
+      const srcIndexFile = toRepoRelativePath('src/index.ts');
+      const files = [srcIndexFile, toRepoRelativePath('package.json')];
+      // Previously: `dir: '/'` meant this threw ComponentValidationError ("matches zero files").
+      expect(() => validateComponents(components, files, workspaceIndex)).not.toThrow();
+      expect(classifyFile(srcIndexFile, components, workspaceIndex)).toBe('root');
+    });
   });
 });
 

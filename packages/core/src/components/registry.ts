@@ -34,7 +34,17 @@ function matchesSelector(
   });
 }
 
-/** First-component-match-wins classification, in the order components are declared. */
+/**
+ * First-component-match-wins classification, in the order components are declared.
+ *
+ * **Root workspace packages are the sharp edge here.** A `package:` selector naming a package
+ * rooted at the repo root itself (`dir: ''` — see `WorkspacePackage.dir`'s doc comment in
+ * `@spikedpunch/align-plugin-typescript`) matches via `file.startsWith('')`, which is true for
+ * every repo-relative file. That is the correct semantics for "this component IS the repo root,"
+ * but under first-match-wins it also means such a component claims every file not already claimed
+ * by an earlier-declared component. **Declare a root-package component last** in the `components`
+ * map, or it will silently swallow files meant for components declared after it.
+ */
 export function classifyFile(
   file: RepoRelativePath,
   components: Readonly<Record<ComponentName, ComponentDefinitionIR>>,
