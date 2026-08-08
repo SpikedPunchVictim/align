@@ -1,5 +1,4 @@
 import type { RepoRelativePath, RuleId, ViolationId } from '../types/branded.js';
-import type { DependencyGraph } from '../types/graph.js';
 import type { Violation } from '../types/violation.js';
 import { computeContentFingerprint } from './fingerprint.js';
 
@@ -34,14 +33,30 @@ export interface BaselineStore {
   isBaselined(violationId: ViolationId): boolean;
   accept(violations: readonly Violation[], mode: BaselineEntry['acceptedBy']): void;
   acceptByRule(ruleId: RuleId, violations: readonly Violation[]): void;
-  prune(currentGraph: DependencyGraph, currentViolations: readonly Violation[]): PruneResult;
+  /** `knownFiles` is the current scan's file set (domain-agnostic — the architecture gate passes
+   * its graph's node files, the security gate its manifest inventory's files, ADR 013). It gates
+   * move-transfer the same way `reconcileMoves` below does — see that doc comment for why. Callers
+   * MUST derive it from the scan's own file list, never from `currentViolations` (a fixed file has
+   * no violations, so deriving from violations would make every fixed file look deleted). */
+  prune(currentViolations: readonly Violation[], knownFiles: ReadonlySet<RepoRelativePath>): PruneResult;
   /** Move-transfer only (ADR 006): for every baseline entry whose structural fingerprint is no
-   * longer present in `currentViolations`, look for a current, not-yet-baselined violation with
-   * the same `ruleId`+`snippet` content in a *different* file and transfer the entry to its new
-   * fingerprint. Unlike `prune`, entries with no match are left in place (not removed) — intended
-   * to run on every `align check` so a rename doesn't turn CI red for one cycle. Returns the
-   * transferred pairs so the caller can report "N entries transferred (file moves)". */
-  reconcileMoves(currentViolations: readonly Violation[]): readonly { readonly from: ViolationId; readonly to: ViolationId }[];
+   * longer present in `currentViolations` AND whose recorded `file` is no longer in `knownFiles`
+   * (a real rename/deletion — FRAGILE #7, bug hunt 2026-08-03), look for a current, not-yet-
+   * baselined violation with the same `ruleId`+`snippet` content in a *different* file and transfer
+   * the entry to its new fingerprint. An orphan whose own file is STILL in `knownFiles` was fixed,
+   * not moved — an identical-looking violation elsewhere is a genuinely new violation and is never
+   * matched, even if the content fingerprint collides. Unlike `prune`, entries with no match are
+   * left in place (not removed) — intended to run on every `align check` so a rename doesn't turn
+   * CI red for one cycle. Returns the transferred pairs so the caller can report "N entries
+   * transferred (file moves)".
+   *
+   * `knownFiles` is the current scan's file set, domain-agnostic (never a `DependencyGraph` — the
+   * `security` gate has no graph, only a `ManifestInventory`, ADR 013). Callers MUST derive it from
+   * the scan's own file list, never from `currentViolations` (see `prune`'s doc comment above). */
+  reconcileMoves(
+    currentViolations: readonly Violation[],
+    knownFiles: ReadonlySet<RepoRelativePath>,
+  ): readonly { readonly from: ViolationId; readonly to: ViolationId }[];
   show(filter?: { readonly ruleId?: RuleId }): readonly BaselineEntry[];
   /** Not part of docs/core-interfaces.md's contract — the CLI's persistence boundary needs a
    * flat snapshot to serialize to `.align/baseline.json`; core stays fs-free (functional core /
@@ -70,6 +85,17 @@ interface MoveResult {
  * fingerprint is still present is never touched by this — so a genuinely new violation with an
  * identical snippet in a second location, while the original violation/file still exists, is never
  * mistaken for a move (both fingerprints remain distinct baseline-relevant entries).
+ *
+ * FRAGILE #7 fix (bug hunt 2026-08-03): the case the paragraph above does NOT cover is a fixed
+ * violation coexisting, in the same scan, with a textually identical NEW violation in a different
+ * file — e.g. `import { db } from './db'` removed from `a.ts` and added to `b.ts` in one commit.
+ * Content fingerprints collide and `a.ts`'s file differs from `b.ts`'s, so the pre-fix matcher
+ * transferred the baseline entry onto `b.ts`, silently pre-accepting a genuinely new violation.
+ * `applyMoves` now additionally requires the orphan's own recorded `file` to be ABSENT from
+ * `knownFiles` (the current scan's file set) before it will even look for a content match — "moved"
+ * means the old file is gone (a real rename), not merely "some other file has matching text". This
+ * does not regress the rename case: a rename removes the old path from the scan by construction, so
+ * the entry stays eligible and still transfers.
  */
 export class InMemoryBaselineStore implements BaselineStore {
   private readonly entries = new Map<ViolationId, BaselineEntry>();
@@ -107,12 +133,15 @@ export class InMemoryBaselineStore implements BaselineStore {
     );
   }
 
-  reconcileMoves(currentViolations: readonly Violation[]): readonly { readonly from: ViolationId; readonly to: ViolationId }[] {
-    return this.applyMoves(currentViolations).moved;
+  reconcileMoves(
+    currentViolations: readonly Violation[],
+    knownFiles: ReadonlySet<RepoRelativePath>,
+  ): readonly { readonly from: ViolationId; readonly to: ViolationId }[] {
+    return this.applyMoves(currentViolations, knownFiles).moved;
   }
 
-  prune(_currentGraph: DependencyGraph, currentViolations: readonly Violation[]): PruneResult {
-    const { moved, unmatchedOrphans } = this.applyMoves(currentViolations);
+  prune(currentViolations: readonly Violation[], knownFiles: ReadonlySet<RepoRelativePath>): PruneResult {
+    const { moved, unmatchedOrphans } = this.applyMoves(currentViolations, knownFiles);
     for (const fingerprint of unmatchedOrphans) this.entries.delete(fingerprint);
     return { removed: unmatchedOrphans, moved };
   }
@@ -122,7 +151,7 @@ export class InMemoryBaselineStore implements BaselineStore {
    * two callers is what happens to an orphaned entry that finds no match (left alone for
    * `reconcileMoves`, deleted for `prune`), so that decision is made by the caller, not here.
    */
-  private applyMoves(currentViolations: readonly Violation[]): MoveResult {
+  private applyMoves(currentViolations: readonly Violation[], knownFiles: ReadonlySet<RepoRelativePath>): MoveResult {
     const currentIds = new Set(currentViolations.map((v) => v.id));
     const orphaned = [...this.entries.values()].filter((e) => !currentIds.has(e.fingerprint));
     if (orphaned.length === 0) return { moved: [], unmatchedOrphans: [] };
@@ -142,6 +171,15 @@ export class InMemoryBaselineStore implements BaselineStore {
     const unmatchedOrphans: ViolationId[] = [];
 
     for (const entry of orphaned) {
+      // FRAGILE #7 (bug hunt 2026-08-03): "moved" means the orphan's OWN file is gone from this
+      // scan — a real rename/deletion. If it's still known, the violation there was fixed, so an
+      // identical-looking violation elsewhere is a genuinely new violation, not a move, even if the
+      // content fingerprint collides. This check runs before any content-match lookup.
+      if (knownFiles.has(entry.file)) {
+        unmatchedOrphans.push(entry.fingerprint);
+        continue;
+      }
+
       const content = entry.contentFingerprint;
       const candidates = content === undefined ? undefined : candidatesByContent.get(content);
       const matchIdx = candidates?.findIndex((v) => v.file !== entry.file) ?? -1;

@@ -70,7 +70,7 @@ describe('InMemoryBaselineStore', () => {
     const store = new InMemoryBaselineStore();
     const v1 = makeViolation({ id: computeFingerprint(['a']) });
     store.accept([v1], 'manual');
-    const result = store.prune({ nodes: [], edges: [], externalNodes: [], externalEdges: [], uncertain: [], scannedAt: Date.now() }, []);
+    const result = store.prune([], new Set());
     expect(result.removed).toEqual([v1.id]);
     expect(store.isBaselined(v1.id)).toBe(false);
   });
@@ -135,7 +135,7 @@ describe('InMemoryBaselineStore', () => {
         snippet: '// api/big.ts', // same content — this is what makes it a "move" to reconcileMoves
       });
 
-      store.reconcileMoves([moved]);
+      store.reconcileMoves([moved], new Set([toRepoRelativePath('api/renamed.ts')]));
       expect(store.isBaselined(moved.id)).toBe(true);
       expect(store.show()[0]?.acceptedValue).toBe(900);
     });
@@ -143,8 +143,6 @@ describe('InMemoryBaselineStore', () => {
 });
 
 describe('baseline move-transfer (ADR 006)', () => {
-  const emptyGraph = { nodes: [], edges: [], externalNodes: [], externalEdges: [], uncertain: [], scannedAt: Date.now() };
-
   it('reconcileMoves transfers an orphaned entry to a same-snippet violation in a different file', () => {
     const store = new InMemoryBaselineStore();
     const original = makeViolation({
@@ -154,14 +152,16 @@ describe('baseline move-transfer (ADR 006)', () => {
     });
     store.accept([original], 'manual');
 
-    // "a.ts" was renamed to "renamed.ts" — same snippet/content, new structural fingerprint.
+    // "a.ts" was renamed to "renamed.ts" — same snippet/content, new structural fingerprint. The
+    // current scan's known files are exactly what it produced: "renamed.ts" (and whatever else),
+    // NOT "a.ts" — that absence is what makes this a rename, not a fix (ADR 006's whole purpose).
     const moved = makeViolation({
       id: computeFingerprint(['no-dependency', 'r1', 'renamed.ts', 'b.ts', './b']),
       file: toRepoRelativePath('renamed.ts'),
       snippet: `import './b'`,
     });
 
-    const result = store.reconcileMoves([moved]);
+    const result = store.reconcileMoves([moved], new Set([toRepoRelativePath('renamed.ts')]));
     expect(result).toEqual([{ from: original.id, to: moved.id }]);
     expect(store.isBaselined(moved.id)).toBe(true);
     expect(store.isBaselined(original.id)).toBe(false);
@@ -183,13 +183,15 @@ describe('baseline move-transfer (ADR 006)', () => {
     });
     store.accept([original, fixedElsewhere], 'manual');
 
+    // "a.ts" renamed to "renamed.ts" (still absent from knownFiles below); "c.ts" is genuinely
+    // fixed — its file is still known, so even without a content match it would stay unmatched.
     const moved = makeViolation({
       id: computeFingerprint(['no-dependency', 'r1', 'renamed.ts', 'b.ts', './b']),
       file: toRepoRelativePath('renamed.ts'),
       snippet: `import './b'`,
     });
 
-    const result = store.prune(emptyGraph, [moved]);
+    const result = store.prune([moved], new Set([toRepoRelativePath('renamed.ts'), toRepoRelativePath('c.ts')]));
     expect(result.moved).toEqual([{ from: original.id, to: moved.id }]);
     expect(result.removed).toEqual([fixedElsewhere.id]);
     expect(store.isBaselined(moved.id)).toBe(true);
@@ -213,7 +215,10 @@ describe('baseline move-transfer (ADR 006)', () => {
       snippet: `import './b'`,
     });
 
-    const moved = store.reconcileMoves([original, secondLocation]);
+    const moved = store.reconcileMoves(
+      [original, secondLocation],
+      new Set([toRepoRelativePath('a.ts'), toRepoRelativePath('z.ts')]),
+    );
     expect(moved).toEqual([]);
     expect(store.isBaselined(original.id)).toBe(true);
     expect(store.isBaselined(secondLocation.id)).toBe(false); // new violation surfaces as red
@@ -223,8 +228,110 @@ describe('baseline move-transfer (ADR 006)', () => {
     const store = new InMemoryBaselineStore();
     const original = makeViolation({ id: computeFingerprint(['a']), snippet: 'unique-a' });
     store.accept([original], 'manual');
-    const result = store.prune(emptyGraph, []);
+    const result = store.prune([], new Set());
     expect(result.moved).toEqual([]);
     expect(result.removed).toEqual([original.id]);
+  });
+
+  // FRAGILE #7 (bug hunt 2026-08-03): the case ADR 006's original design comment didn't cover — a
+  // fixed violation coexisting, in the same scan, with a textually identical NEW violation
+  // elsewhere. The fix: transfer only when the orphan's OWN file is no longer in the current scan.
+  describe('FRAGILE #7 fix: file-existence gating', () => {
+    it('does NOT transfer when the orphan\'s own file still exists (violation there was fixed, not moved)', () => {
+      const store = new InMemoryBaselineStore();
+      const original = makeViolation({
+        id: computeFingerprint(['no-dependency', 'r1', 'a.ts', 'target.ts', './target']),
+        file: toRepoRelativePath('a.ts'),
+        snippet: `import './target'`,
+      });
+      store.accept([original], 'manual');
+
+      // a.ts's violating import was removed (fixed) but a.ts itself is still scanned. b.ts is a
+      // different, brand-new file that happens to add a textually identical import in the same
+      // commit — a routine refactor/copy-paste, not a rename.
+      const newViolation = makeViolation({
+        id: computeFingerprint(['no-dependency', 'r1', 'b.ts', 'target.ts', './target']),
+        file: toRepoRelativePath('b.ts'),
+        snippet: `import './target'`,
+      });
+
+      const knownFiles = new Set([toRepoRelativePath('a.ts'), toRepoRelativePath('b.ts')]);
+      const result = store.reconcileMoves([newViolation], knownFiles);
+
+      expect(result).toEqual([]);
+      expect(store.isBaselined(newViolation.id)).toBe(false); // b.ts's violation shows red
+      expect(store.isBaselined(original.id)).toBe(true); // orphan left in place (reconcileMoves never deletes)
+    });
+
+    it('the rename case still transfers (ADR 006 unaffected): orphan file absent, identical content elsewhere', () => {
+      const store = new InMemoryBaselineStore();
+      const original = makeViolation({
+        id: computeFingerprint(['no-dependency', 'r1', 'a.ts', 'target.ts', './target']),
+        file: toRepoRelativePath('a.ts'),
+        snippet: `import './target'`,
+      });
+      store.accept([original], 'manual');
+
+      // "a.ts" was renamed to "c.ts" — absent from this scan's knownFiles entirely.
+      const moved = makeViolation({
+        id: computeFingerprint(['no-dependency', 'r1', 'c.ts', 'target.ts', './target']),
+        file: toRepoRelativePath('c.ts'),
+        snippet: `import './target'`,
+      });
+
+      const result = store.reconcileMoves([moved], new Set([toRepoRelativePath('c.ts')]));
+      expect(result).toEqual([{ from: original.id, to: moved.id }]);
+      expect(store.isBaselined(moved.id)).toBe(true);
+      expect(store.isBaselined(original.id)).toBe(false);
+    });
+
+    it('an orphan whose file is gone but has no matching candidate stays an unmatched orphan (unchanged)', () => {
+      const store = new InMemoryBaselineStore();
+      const original = makeViolation({
+        id: computeFingerprint(['a']),
+        file: toRepoRelativePath('a.ts'),
+        snippet: 'unique-a',
+      });
+      store.accept([original], 'manual');
+
+      // a.ts is gone from this scan, but nothing currently matches its content fingerprint —
+      // reconcileMoves must leave it exactly as it was (deletion is prune's job, not this one's).
+      const result = store.reconcileMoves([], new Set());
+      expect(result).toEqual([]);
+      expect(store.isBaselined(original.id)).toBe(true);
+      expect(store.show()).toHaveLength(1);
+    });
+
+    it('two orphans competing for one content-matching candidate: only one is consumed (existing splice behaviour)', () => {
+      const store = new InMemoryBaselineStore();
+      const original1 = makeViolation({
+        id: computeFingerprint(['no-dependency', 'r1', 'a.ts', 'target.ts', './target']),
+        file: toRepoRelativePath('a.ts'),
+        snippet: `import './target'`,
+      });
+      const original2 = makeViolation({
+        id: computeFingerprint(['no-dependency', 'r1', 'c.ts', 'target.ts', './target']),
+        file: toRepoRelativePath('c.ts'),
+        snippet: `import './target'`,
+      });
+      store.accept([original1, original2], 'manual');
+
+      // Both a.ts and c.ts are gone (renamed away); only one current violation shares their
+      // content fingerprint, so only one orphan can claim it.
+      const candidate = makeViolation({
+        id: computeFingerprint(['no-dependency', 'r1', 'd.ts', 'target.ts', './target']),
+        file: toRepoRelativePath('d.ts'),
+        snippet: `import './target'`,
+      });
+
+      const result = store.reconcileMoves([candidate], new Set([toRepoRelativePath('d.ts')]));
+      expect(result).toHaveLength(1);
+      expect(result[0]?.to).toBe(candidate.id);
+      expect(store.isBaselined(candidate.id)).toBe(true);
+
+      const remainingOrphanId = result[0]?.from === original1.id ? original2.id : original1.id;
+      expect(store.isBaselined(remainingOrphanId)).toBe(true); // still keyed under its own (orphaned) fingerprint — untouched
+      expect(store.show()).toHaveLength(2); // the transferred entry + the still-unmatched orphan
+    });
   });
 });

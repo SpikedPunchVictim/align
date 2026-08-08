@@ -1,4 +1,4 @@
-import { InMemoryBaselineStore, toRuleId, type BaselineEntry } from '@spikedpunch/align-core';
+import { InMemoryBaselineStore, toRuleId, type BaselineEntry, type RepoRelativePath } from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, writeBaseline } from '../align-dir.js';
@@ -79,10 +79,16 @@ export async function baselinePrune(rootDir: string, telemetryPreConfig?: boolea
   const { orchestrator } = createOrchestrator(ruleset, [], hostRules);
   const run = await orchestrator.check({ rootDir, excludes });
   const allViolations = run.gates.flatMap((g) => g.violations);
-  const result = store.prune(
-    { nodes: [], edges: [], externalNodes: [], externalEdges: [], uncertain: [], scannedAt: Date.now() },
-    allViolations,
-  );
+  // `knownFiles` gates move-transfer the same way `align check`'s own reconcileMoves does
+  // (FRAGILE #7 fix, bug hunt 2026-08-03) — must be the real current scan's file set, not the
+  // empty stub this used to pass (which `store.prune` used to silently ignore anyway).
+  let knownFiles: ReadonlySet<RepoRelativePath>;
+  try {
+    knownFiles = await orchestrator.knownFiles({ rootDir, excludes });
+  } catch (err) {
+    return reportCliError('align baseline prune', err);
+  }
+  const result = store.prune(allViolations, knownFiles);
   writeBaseline(rootDir, store.snapshot());
   console.log(
     `Pruned ${result.removed.length} fixed violation(s) from the baseline; ` +

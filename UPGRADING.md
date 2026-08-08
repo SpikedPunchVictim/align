@@ -11,28 +11,28 @@ what to do about that, and in what order.
 
 ```bash
 git status                 # commit or stash first — .align/baseline.json will change
-align baseline prune       # STEP 1 — must come before any `align check`
+align baseline prune       # STEP 1 — drop entries whose violations no longer exist
 align check                # STEP 2 — review what is now red
 align baseline accept      # STEP 3 — only after you have reviewed step 2
 ```
 
-#### Why `prune` must come first
+#### Why this order
 
-This is not stylistic; running `align check` first can silently accept a real violation.
+`prune` first, then review, then `accept` — so you see what actually changed before consenting
+to it. That is the whole reason for the order in this release.
 
-`align check` runs baseline move-transfer against your real baseline and **writes the result
-to disk** (`commands/check.ts` — the orchestrator is constructed with your loaded baseline,
-and `persistMovedBaseline` saves any transfers). Move-transfer matches an orphaned entry to a
-current violation by rule id + snippet, in a different file.
+Earlier drafts of this page claimed the order was a *correctness* requirement, on the grounds
+that `align check` move-transfers your real baseline while `align baseline prune` does not.
+**That was wrong on both halves.** `align check` does move-transfer and persist
+(`commands/check.ts`), but so did `prune` — it built its store from your real baseline and ran
+the same transfer logic (`commands/baseline.ts`, `baseline/store.ts`), passing a stub graph
+that `prune` then ignored. The two paths behaved identically.
 
-`align baseline prune` and `align baseline accept` construct their orchestrator with an
-**empty** baseline (`commands/baseline.ts`), so they never move-transfer your real entries.
-
-Because this release deliberately orphans entries, letting `check` run first gives
-move-transfer a pool of orphans to mis-match. The most likely victim is `arch.metric`, whose
-snippet is just the file's first line — two over-long files sharing a license header or a
-common import collide trivially, so an orphan can transfer onto an unrelated file and
-silently baseline a genuine violation. `prune` deletes the orphans outright instead.
+That hazard is gone regardless: this release also fixes move-transfer itself
+(see below), so an orphaned entry is only ever transferred when its own file has genuinely
+disappeared from the scan. The re-fingerprinted entries in this release keep their files, so
+nothing transfers and neither command can mis-attribute your debt. Run them in the order above
+because it makes the review clearer, not because a different order is dangerous.
 
 #### Why you should review before `accept`
 
@@ -99,6 +99,12 @@ Worth knowing about, but no migration:
   if it cannot land on that branch.
 - **`align doctor` honours your excludes the same way `align check` does.** It previously used a
   laxer matcher, so you may see fewer advisories.
+- **Baseline move-transfer only fires on a real move.** Previously an orphaned entry was
+  transferred onto any current violation with matching rule id + snippet in a different file —
+  so fixing a violation in one file while adding a textually identical one in another, in the
+  same commit, silently baselined the new one and left CI green. A transfer now requires the
+  orphan's own file to have genuinely disappeared from the scan. Renames still transfer, which
+  is what the mechanism exists for; `align baseline prune` was affected too and is also fixed.
 - **A fix proposal listing the same file twice is rejected** rather than silently applying only
   one of the two entries' edits.
 

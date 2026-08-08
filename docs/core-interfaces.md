@@ -568,7 +568,22 @@ interface BaselineStore {
   isBaselined(violationId: ViolationId): boolean;
   accept(violations: readonly Violation[], mode: BaselineEntry['acceptedBy']): void;
   acceptByRule(ruleId: RuleId): void;
-  prune(currentGraph: DependencyGraph): PruneResult;
+  // `knownFiles` is the current scan's file set — domain-agnostic (never a `DependencyGraph`: the
+  // `security` gate has no graph, only a `ManifestInventory`, ADR 013) and REQUIRED, not optional
+  // (an optional parameter would silently preserve the unsafe pre-fix behavior for any caller that
+  // omits it). Callers derive it from the scan's own file list, never from `currentViolations` — a
+  // fixed file has no violations, so deriving from violations would make every fixed file look
+  // deleted. `prune` and `reconcileMoves` share this exact signature so the two paths can't drift.
+  prune(currentViolations: readonly Violation[], knownFiles: ReadonlySet<RepoRelativePath>): PruneResult;
+  // Move-transfer only (ADR 006, FRAGILE #7 fix — bug hunt 2026-08-03): transfers an orphaned entry
+  // onto a same-content violation in a different file ONLY when the orphan's own recorded `file` is
+  // no longer in `knownFiles` — i.e. a real rename/deletion. If the orphan's file is still known,
+  // its violation was fixed, not moved, so a textually identical violation elsewhere is never
+  // mistaken for a move. Unlike `prune`, an unmatched orphan is left in place, not removed.
+  reconcileMoves(
+    currentViolations: readonly Violation[],
+    knownFiles: ReadonlySet<RepoRelativePath>,
+  ): readonly { readonly from: ViolationId; readonly to: ViolationId }[];
   show(filter?: { readonly ruleId?: RuleId }): readonly BaselineEntry[];
 }
 ```

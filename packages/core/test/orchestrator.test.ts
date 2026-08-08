@@ -444,6 +444,46 @@ describe('GateOrchestrator', () => {
     expect(gate?.baselinedCount).toBe(1);
   });
 
+  it('FRAGILE #7 (bug hunt 2026-08-03): a FIXED violation does NOT transfer to an identical new violation in another file (architecture gate supplies its own known files)', async () => {
+    const ruleset = defineProject({
+      components: { api: 'application/api/**', ui: 'application/ui/**' },
+      rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
+    });
+    const registry = new StaticPluginRegistry([
+      fakePlugin(() =>
+        graph(
+          [node('application/api/a.ts', 'api'), node('application/ui/b.ts', 'ui')],
+          [edge('application/api/a.ts', 'application/ui/b.ts', { specifier: '../ui/b', line: 3 })],
+        ),
+      ),
+    ]);
+    const baseline = new InMemoryBaselineStore();
+    const orchestrator = new GateOrchestrator(registry, ruleset, baseline);
+    const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+    baseline.accept(seedRun.gates.find((g) => g.gate === 'architecture')?.violations ?? [], 'init-seed');
+    expect((await orchestrator.check({ rootDir: '/repo', excludes: [] })).verdict).toBe('green');
+
+    // a.ts's forbidden import is REMOVED (fixed) — a.ts is still a scanned node, present in
+    // knownFiles — and a DIFFERENT file, z.ts, adds a textually identical forbidden import in the
+    // same commit. This must show red, never be silently pre-accepted via move-transfer.
+    const registry2 = new StaticPluginRegistry([
+      fakePlugin(() =>
+        graph(
+          [node('application/api/a.ts', 'api'), node('application/api/z.ts', 'api'), node('application/ui/b.ts', 'ui')],
+          [edge('application/api/z.ts', 'application/ui/b.ts', { specifier: '../ui/b', line: 3 })],
+        ),
+      ),
+    ]);
+    const orchestrator2 = new GateOrchestrator(registry2, ruleset, baseline);
+    const run = await orchestrator2.check({ rootDir: '/repo', excludes: [] });
+    expect(run.verdict).toBe('red');
+    const gate = run.gates.find((g) => g.gate === 'architecture');
+    expect(gate?.violations).toHaveLength(1);
+    expect(gate?.violations[0]?.file).toBe('application/api/z.ts');
+    expect(gate?.baselinedCount).toBe(0); // NOT silently baselined via move-transfer
+    expect(run.advisories.find((a) => a.kind === 'baseline-moved')).toBeUndefined();
+  });
+
   describe('baseline-growth advisory (FRAGILE #8, bug hunt 2026-08-03)', () => {
     it('surfaces a baseline-growth advisory, naming both numbers, without flipping verdict red or touching the fingerprint', async () => {
       const ruleset = defineProject({
@@ -664,6 +704,97 @@ describe('GateOrchestrator', () => {
       expect(archGate?.violations[0]?.kind).toBe('no-dependency');
       expect(securityGate?.violations).toHaveLength(1);
       expect(securityGate?.violations[0]?.kind).toBe('manifest-source-hygiene');
+    });
+
+    describe('FRAGILE #7 (bug hunt 2026-08-03): security gate supplies its own known files (manifest inventory, not a graph)', () => {
+      it('a FIXED manifest violation does NOT transfer to an identical new violation in a different manifest', async () => {
+        const ruleset = defineProject({
+          components: { api: 'application/api/**' },
+          rules: (c) => [c.security.manifest.sourceHygiene()],
+        });
+        const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
+        const baseline = new InMemoryBaselineStore();
+        const manifestScanner1 = fakeManifestScanner({
+          manifests: [
+            {
+              file: toRepoRelativePath('package.json'),
+              raw: '{}',
+              dependencies: [{ name: 'xlsx', specifier: 'https://cdn.sheetjs.com/xlsx.tgz', field: 'dependencies' }],
+            },
+          ],
+          lockfilePresent: true,
+        });
+        const orchestrator = new GateOrchestrator(registry, ruleset, baseline, new Map(), manifestScanner1);
+        const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+        baseline.accept(seedRun.gates.find((g) => g.gate === 'security')?.violations ?? [], 'init-seed');
+        expect((await orchestrator.check({ rootDir: '/repo', excludes: [] })).verdict).toBe('green');
+
+        // "package.json"'s git-sourced dependency is fixed (removed) — the manifest itself is
+        // still present in this scan — and a DIFFERENT workspace member's manifest introduces the
+        // identical specifier. This must show red, never be silently pre-accepted.
+        const manifestScanner2 = fakeManifestScanner({
+          manifests: [
+            { file: toRepoRelativePath('package.json'), raw: '{}', dependencies: [] },
+            {
+              file: toRepoRelativePath('apps/foo/package.json'),
+              raw: '{}',
+              dependencies: [{ name: 'xlsx', specifier: 'https://cdn.sheetjs.com/xlsx.tgz', field: 'dependencies' }],
+            },
+          ],
+          lockfilePresent: true,
+        });
+        const orchestrator2 = new GateOrchestrator(registry, ruleset, baseline, new Map(), manifestScanner2);
+        const run = await orchestrator2.check({ rootDir: '/repo', excludes: [] });
+        const gate = run.gates.find((g) => g.gate === 'security');
+        expect(gate?.status).toBe('red');
+        expect(gate?.violations).toHaveLength(1);
+        expect(gate?.violations[0]?.file).toBe('apps/foo/package.json');
+        expect(gate?.baselinedCount).toBe(0); // NOT silently transferred
+        expect(run.advisories.find((a) => a.kind === 'baseline-moved')).toBeUndefined();
+      });
+
+      it('a manifest that genuinely disappears (workspace member moved) still transfers (ADR 006 unaffected)', async () => {
+        const ruleset = defineProject({
+          components: { api: 'application/api/**' },
+          rules: (c) => [c.security.manifest.sourceHygiene()],
+        });
+        const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
+        const baseline = new InMemoryBaselineStore();
+        const manifestScanner1 = fakeManifestScanner({
+          manifests: [
+            {
+              file: toRepoRelativePath('packages/old/package.json'),
+              raw: '{}',
+              dependencies: [{ name: 'xlsx', specifier: 'https://cdn.sheetjs.com/xlsx.tgz', field: 'dependencies' }],
+            },
+          ],
+          lockfilePresent: true,
+        });
+        const orchestrator = new GateOrchestrator(registry, ruleset, baseline, new Map(), manifestScanner1);
+        const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+        baseline.accept(seedRun.gates.find((g) => g.gate === 'security')?.violations ?? [], 'init-seed');
+        expect((await orchestrator.check({ rootDir: '/repo', excludes: [] })).verdict).toBe('green');
+
+        // The workspace member moved — the OLD manifest path is entirely absent from this scan
+        // (not merely fixed), same specifier at a new path.
+        const manifestScanner2 = fakeManifestScanner({
+          manifests: [
+            {
+              file: toRepoRelativePath('packages/new/package.json'),
+              raw: '{}',
+              dependencies: [{ name: 'xlsx', specifier: 'https://cdn.sheetjs.com/xlsx.tgz', field: 'dependencies' }],
+            },
+          ],
+          lockfilePresent: true,
+        });
+        const orchestrator2 = new GateOrchestrator(registry, ruleset, baseline, new Map(), manifestScanner2);
+        const run = await orchestrator2.check({ rootDir: '/repo', excludes: [] });
+        expect(run.verdict).toBe('green');
+        const gate = run.gates.find((g) => g.gate === 'security');
+        expect(gate?.violations).toHaveLength(0);
+        expect(gate?.baselinedCount).toBe(1);
+        expect(run.advisories.find((a) => a.kind === 'baseline-moved')?.message).toBe('1 entry transferred (file moves).');
+      });
     });
   });
 });
