@@ -11,7 +11,25 @@ import { runSkill, type SkillTopic } from './commands/skill.js';
 import { runDocs } from './commands/docs.js';
 import { runTelemetryReport, DEFAULT_TELEMETRY_FILE } from './commands/telemetry.js';
 import { startMcpServer } from './mcp/server.js';
+import { requireRepoRoot, resolveRepoRootForDoctor } from './repo-root.js';
 import { ALIGN_VERSION, resolveTelemetryPreConfig } from './telemetry/index.js';
+
+/**
+ * Every command except `init` is repo-scoped (bug hunt 2026-08-03, Needs-Review #2): it resolves
+ * the repo root (nearest ancestor with `align.config.ts` or `.align/`) instead of trusting
+ * `process.cwd()` blindly. Returns `undefined` and leaves `process.exitCode` set on failure — the
+ * caller's action must return immediately without invoking the command. `init` does not use this;
+ * it runs before either marker exists, by definition, so it stays cwd-scoped (see `program.ts`'s
+ * `init` action, which prints the directory it targets instead).
+ */
+function resolveRootOrFail(command: string): string | undefined {
+  const resolved = requireRepoRoot(command, process.cwd());
+  if ('exitCode' in resolved) {
+    process.exitCode = resolved.exitCode;
+    return undefined;
+  }
+  return resolved.root;
+}
 
 /** `--telemetry` / `--no-telemetry` (IMPLEMENTATION_PLAN.md's telemetry spec) share commander's
  * negatable-option pairing on every command that can emit telemetry: neither flag passed leaves
@@ -82,8 +100,10 @@ export function buildProgram(): Command {
       .option('--ir <path>', 'override the .align/ruleset-ir.json path --untrusted/--ir-only reads from'),
   ).action(
     async (opts: { json: boolean; frozenRules: boolean; untrusted: boolean; irOnly: boolean; ir?: string; telemetry?: boolean }) => {
+      const rootDir = resolveRootOrFail('align check');
+      if (rootDir === undefined) return;
       const telemetryPreConfig = resolveTelemetryPreConfig({ telemetry: opts.telemetry });
-      const code = await runCheck(process.cwd(), {
+      const code = await runCheck(rootDir, {
         json: opts.json,
         frozenRules: opts.frozenRules,
         untrusted: opts.untrusted || opts.irOnly,
@@ -103,7 +123,9 @@ export function buildProgram(): Command {
     )
     .option('--out <path>', 'override the default .align/ruleset-ir.json output path')
     .action(async (opts: { out?: string }) => {
-      const code = await runExportIr(process.cwd(), opts.out !== undefined ? { out: opts.out } : {});
+      const rootDir = resolveRootOrFail('align export-ir');
+      if (rootDir === undefined) return;
+      const code = await runExportIr(rootDir, opts.out !== undefined ? { out: opts.out } : {});
       process.exitCode = code;
     });
 
@@ -115,15 +137,19 @@ export function buildProgram(): Command {
       .description('Accept current violations into the baseline (optionally scoped to one rule).')
       .option('--rule <ruleId>', 'only accept violations of this rule'),
   ).action(async (opts: { rule?: string; telemetry?: boolean }) => {
+    const rootDir = resolveRootOrFail('align baseline accept');
+    if (rootDir === undefined) return;
     const telemetryPreConfig = resolveTelemetryPreConfig({ telemetry: opts.telemetry });
-    process.exitCode = await baselineAccept(process.cwd(), opts.rule, telemetryPreConfig);
+    process.exitCode = await baselineAccept(rootDir, opts.rule, telemetryPreConfig);
   });
 
   addTelemetryOptions(
     baseline.command('prune').description('Remove baseline entries for violations that no longer exist; report moved entries.'),
   ).action(async (opts: { telemetry?: boolean }) => {
+    const rootDir = resolveRootOrFail('align baseline prune');
+    if (rootDir === undefined) return;
     const telemetryPreConfig = resolveTelemetryPreConfig({ telemetry: opts.telemetry });
-    process.exitCode = await baselinePrune(process.cwd(), telemetryPreConfig);
+    process.exitCode = await baselinePrune(rootDir, telemetryPreConfig);
   });
 
   baseline
@@ -131,14 +157,18 @@ export function buildProgram(): Command {
     .description('List baselined violations (optionally scoped to one rule).')
     .option('--rule <ruleId>', 'only show violations of this rule')
     .action(async (opts: { rule?: string }) => {
-      process.exitCode = await baselineShow(process.cwd(), opts.rule);
+      const rootDir = resolveRootOrFail('align baseline show');
+      if (rootDir === undefined) return;
+      process.exitCode = await baselineShow(rootDir, opts.rule);
     });
 
   program
     .command('explain <ruleId>')
     .description('Explain one architecture rule: its kind, rationale, and constrained components.')
     .action(async (ruleId: string) => {
-      process.exitCode = await runExplain(process.cwd(), ruleId);
+      const rootDir = resolveRootOrFail('align explain');
+      if (rootDir === undefined) return;
+      process.exitCode = await runExplain(rootDir, ruleId);
     });
 
   program
@@ -150,7 +180,18 @@ export function buildProgram(): Command {
     )
     .option('--json', 'print structured advisories + capped per-specifier uncertainty detail as JSON', false)
     .action(async (opts: { json: boolean }) => {
-      process.exitCode = await runDoctor(process.cwd(), { json: opts.json });
+      // Unlike every other command, doctor never fails (see `runDoctor`'s doc comment) — a
+      // missing repo root downgrades to a `repo-not-found` advisory instead of a non-zero exit,
+      // so it uses `resolveRepoRootForDoctor` rather than `resolveRootOrFail`/`requireRepoRoot`.
+      const resolved = resolveRepoRootForDoctor('align doctor', process.cwd());
+      if ('root' in resolved) {
+        process.exitCode = await runDoctor(resolved.root, { json: opts.json });
+      } else {
+        process.exitCode = await runDoctor(process.cwd(), {
+          json: opts.json,
+          extraAdvisories: [{ kind: 'repo-not-found', message: resolved.notFoundMessage }],
+        });
+      }
     });
 
   addTelemetryOptions(
@@ -168,8 +209,10 @@ export function buildProgram(): Command {
       .option('--accept-new-into-baseline', 'seed any new violations the proposal adds into the baseline', false),
   ).action(
     async (opts: { doc: string; apply: boolean; ifChanged: boolean; verify: boolean; acceptNewIntoBaseline: boolean; telemetry?: boolean }) => {
+      const rootDir = resolveRootOrFail('align build');
+      if (rootDir === undefined) return;
       const telemetryPreConfig = resolveTelemetryPreConfig({ telemetry: opts.telemetry });
-      const code = await runBuild(process.cwd(), {
+      const code = await runBuild(rootDir, {
         doc: opts.doc,
         apply: opts.apply,
         ifChanged: opts.ifChanged,
@@ -209,8 +252,10 @@ export function buildProgram(): Command {
       dryRun: boolean;
       telemetry?: boolean;
     }) => {
+      const rootDir = resolveRootOrFail('align agent run');
+      if (rootDir === undefined) return;
       const telemetryPreConfig = resolveTelemetryPreConfig({ telemetry: opts.telemetry });
-      const code = await runAgentCommand(process.cwd(), {
+      const code = await runAgentCommand(rootDir, {
         maxAttempts: opts.maxAttempts,
         pr: opts.pr,
         autoMerge: opts.autoMerge,
@@ -228,7 +273,9 @@ export function buildProgram(): Command {
     .command('mcp')
     .description('Start the align MCP server (stdio) exposing align_check / align_violations / align_explain_rule.')
     .action(async () => {
-      await startMcpServer(process.cwd());
+      const rootDir = resolveRootOrFail('align mcp');
+      if (rootDir === undefined) return;
+      await startMcpServer(rootDir);
     });
 
   program
@@ -248,7 +295,9 @@ export function buildProgram(): Command {
         process.exitCode = 1;
         return;
       }
-      process.exitCode = await runSkill(process.cwd(), { topic, install: opts.install }, program);
+      const rootDir = resolveRootOrFail('align skill');
+      if (rootDir === undefined) return;
+      process.exitCode = await runSkill(rootDir, { topic, install: opts.install }, program);
     });
 
   program
@@ -274,7 +323,9 @@ export function buildProgram(): Command {
     .option('--file <path>', `JSONL file to read (default ${DEFAULT_TELEMETRY_FILE})`)
     .option('--json', 'print the structured summary as JSON', false)
     .action(async (opts: { file?: string; json: boolean }) => {
-      process.exitCode = await runTelemetryReport(process.cwd(), { json: opts.json, ...(opts.file !== undefined ? { file: opts.file } : {}) });
+      const rootDir = resolveRootOrFail('align telemetry');
+      if (rootDir === undefined) return;
+      process.exitCode = await runTelemetryReport(rootDir, { json: opts.json, ...(opts.file !== undefined ? { file: opts.file } : {}) });
     });
 
   return program;

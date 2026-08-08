@@ -37,6 +37,13 @@ export interface InitOptions {
 }
 
 export async function runInit(rootDir: string, options: InitOptions): Promise<number> {
+  // `init` is the one command that does NOT resolve a repo root (`program.ts`'s `resolveRootOrFail`
+  // — by definition neither marker `align.config.ts` nor `.align/` exists yet on a first run) —
+  // it stays cwd-scoped. Printing the target directory up front is the mitigation: a user who
+  // meant the repo root but forgot to `cd ..` out of a subdirectory sees it immediately, instead
+  // of silently getting `align.config.ts`/`.align/`/`CLAUDE.md` written somewhere unintended.
+  console.log(`Initializing align in ${rootDir}`);
+
   const configPath = path.join(rootDir, CONFIG_FILENAME);
   ensureAlignDir(rootDir);
 

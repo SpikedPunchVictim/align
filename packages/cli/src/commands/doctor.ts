@@ -42,6 +42,16 @@ const DEFAULT_DEEP_IMPORT_ALLOWLIST: readonly string[] = ['typescript/lib/**', '
 
 export interface DoctorOptions {
   readonly json: boolean;
+  /**
+   * Advisories the caller already computed before `collectDoctorReport` runs, merged ahead of
+   * everything this function finds. `program.ts`'s only use today: a missing repo root (no
+   * `align.config.ts`/`.align/` anywhere above cwd) downgrades to a `repo-not-found` advisory
+   * here instead of a non-zero CLI exit — doctor's contract is "never fails" (see this file's
+   * `runDoctor` doc comment), so that failure mode must go through the same advisory formatting
+   * (human + `--json`) as every other one, not a bespoke path. See `repo-root.ts`'s
+   * `resolveRepoRootForDoctor`.
+   */
+  readonly extraAdvisories?: readonly Advisory[];
 }
 
 export interface DoctorJsonPayload {
@@ -233,7 +243,9 @@ async function collectDoctorReport(rootDir: string): Promise<DoctorReport> {
  * doctor exists to help someone understand.
  */
 export async function runDoctor(rootDir: string, options: DoctorOptions = { json: false }): Promise<number> {
-  const { advisories, uncertain } = await collectDoctorReport(rootDir);
+  const collected = await collectDoctorReport(rootDir);
+  const advisories = [...(options.extraAdvisories ?? []), ...collected.advisories];
+  const { uncertain } = collected;
 
   if (options.json) {
     const payload: DoctorJsonPayload = {
