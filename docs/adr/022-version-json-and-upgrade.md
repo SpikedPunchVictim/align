@@ -164,6 +164,52 @@ run (including under `--notes`), and never require consent.
 entry would otherwise render as "nothing to know about this version," which is the false-green
 shape — silence read as an all-clear.
 
+#### All three tiers ship in 0.2.0
+
+Staging validators ahead of transforms was considered and rejected. The case for staging was that
+the apply pipeline would ship without ever having run a real migration; the decision is to build
+it now and accept that its first genuine exercise may be a later release.
+
+**What each tier must satisfy to be admitted**, regardless of when it ships:
+
+1. Every transform is paired with a validator that detects its precondition, and the validator is
+   runnable standalone so a finding can be seen without accepting a fix.
+2. Its remediation is **mechanical and unambiguous** — one correct answer, derivable from state
+   align can already observe. Anything requiring authorial intent stays validator-only.
+3. It is idempotent, and its blast radius is inspectable before it runs.
+
+Criterion 2 is the load-bearing one, and the `**` change shows both sides of it. "Narrow the
+selector" and "mark the component `empty: 'until-populated'`" are *intent* decisions a transform
+must never make — **a mechanical fix for an ambiguous intent is a wrong fix applied confidently.**
+But *"rewrite this selector so its match set is exactly what it was before 0.2.0"* is derivable:
+align can evaluate both glob semantics and compute the difference. The user consents to the
+intent; the edit itself is unambiguous. That is a legitimate 0.2.0 transform candidate and should
+be evaluated first during implementation, precisely because it would give the pipeline a real
+first run inside this release.
+
+Some validators will never acquire a transform. That is a correct end state, not an unfinished one.
+
+#### Compensating controls — the pipeline ships less exercised than the rest
+
+Stated plainly rather than assumed away: **the transform apply pipeline may reach users without
+having performed a real migration.** These controls are what make that acceptable, and they are
+requirements, not suggestions:
+
+- **Preview by default.** A transform shows the exact diff it would apply and requires consent
+  before writing. `--notes` already implies a read-only path; applying is never the default of any
+  invocation.
+- **Refuse on a dirty working tree** for any transform touching `align.config.ts`, so `git
+  checkout` is always an intact escape hatch. A user who cannot revert has no recovery from a
+  wrong edit, and this is the cheapest possible guarantee that they can.
+- **Reuse `init/marker-block.ts`'s discipline** — refuse rather than guess, never rewrite a region
+  align did not author. BUG #10/#11/#12 are the precedent for what happens otherwise.
+- **Drive it end-to-end on a real repo before release.** The `test-apps/` repos carry real configs;
+  constructing a genuine scenario there (an interior `**` selector on `kluster` or `n8n`) and
+  running validator → preview → apply → verify is not the same as a user migration, but it is a
+  real config rather than a fixture, and it is the difference between "unit tested" and "has run."
+- Until that end-to-end run happens, the transform tier is described as **unproven live** in
+  release notes and status reports — not "shipped and working."
+
 ### Flags
 
 - `--notes` — print the assembled notes and validator findings for the detected range and exit.
