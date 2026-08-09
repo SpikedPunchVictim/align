@@ -92,8 +92,12 @@ function parseSimpleVersion(version: string): readonly [number, number, number] 
  * comparison as the fallback keeps this total (never throws) for a non-semver stamp — e.g. a hand
  * edited or pre-release build string — which must still resolve to SOME ordering rather than crash
  * the advisory it feeds.
+ *
+ * Exported (not module-private) so `migrations/range.ts` (ADR 022's registry range selection) can
+ * reuse this exact ordering instead of growing a second version comparator — one implementation of
+ * "which version is newer," used by both the skew advisories and the migration registry.
  */
-function compareVersions(a: string, b: string): number {
+export function compareVersions(a: string, b: string): number {
   const pa = parseSimpleVersion(a);
   const pb = parseSimpleVersion(b);
   if (pa === undefined || pb === undefined) return a === b ? 0 : a.localeCompare(b);
