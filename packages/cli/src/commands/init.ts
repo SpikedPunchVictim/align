@@ -13,7 +13,7 @@ import { ensureTelemetryGitignored } from '../init/gitignore.js';
 import { offerAlignScript } from '../init/npm-script.js';
 import { createOrchestrator } from '../composition-root.js';
 import { CONFIG_FILENAME, loadConfig } from '../config.js';
-import { writeBaseline, ensureAlignDir } from '../align-dir.js';
+import { writeBaseline, ensureAlignDir, seedVersionStamp } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored } from '../errored-run.js';
 
@@ -152,7 +152,18 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   };
 
   if (violations.length === 0) {
-    writeBaseline(rootDir, []);
+    // `writeBaseline` (a `.align/` artifact writer, `align-dir.ts`) stamps `alignVersion` on its
+    // own; `seedVersionStamp` is the ADDITIONAL, init-only write of `baselineReconciledBy` (ADR
+    // 022) — every `init` run re-establishes the baseline from a fresh check, which IS the
+    // "deliberate reconciliation" that field records. Both can throw on a corrupted
+    // `.align/version.json` (same corrupt-≠-absent discipline as every other artifact reader),
+    // caught here the same way every other refusal in this command is.
+    try {
+      writeBaseline(rootDir, []);
+      seedVersionStamp(rootDir);
+    } catch (err) {
+      return reportCliError('align init', err);
+    }
     console.log('Initial check is green — no baseline seeding needed.');
     return finish(0);
   }
@@ -180,16 +191,21 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     return finish(1);
   }
 
-  writeBaseline(
-    rootDir,
-    violations.map((v) => ({
-      fingerprint: v.id,
-      ruleId: v.ruleId,
-      file: v.file,
-      acceptedAt: Date.now(),
-      acceptedBy: options.acceptExisting ? ('accept-existing' as const) : ('init-seed' as const),
-    })),
-  );
+  try {
+    writeBaseline(
+      rootDir,
+      violations.map((v) => ({
+        fingerprint: v.id,
+        ruleId: v.ruleId,
+        file: v.file,
+        acceptedAt: Date.now(),
+        acceptedBy: options.acceptExisting ? ('accept-existing' as const) : ('init-seed' as const),
+      })),
+    );
+    seedVersionStamp(rootDir);
+  } catch (err) {
+    return reportCliError('align init', err);
+  }
   console.log(`Seeded baseline with ${violations.length} pre-existing violation(s) — run \`align baseline show\` to review.`);
   return finish(0);
 }

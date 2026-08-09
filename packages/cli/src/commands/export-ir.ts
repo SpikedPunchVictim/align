@@ -34,7 +34,16 @@ export async function runExportIr(rootDir: string, options: ExportIrOptions = {}
   }
   const { ruleset, excludes } = loaded;
   const exported = buildExportedRuleset(ruleset, excludes);
-  const writtenTo = writeRulesetIr(rootDir, exported, options.out);
+  // `writeRulesetIr` stamps `alignVersion` when the write lands inside `.align/` (ADR 022's write
+  // discipline, `align-dir.ts`) and can throw on a corrupted `.align/version.json` — same
+  // corrupt-≠-absent discipline as every other artifact reader, caught here rather than left as a
+  // raw Node stack trace.
+  let writtenTo: string;
+  try {
+    writtenTo = writeRulesetIr(rootDir, exported, options.out);
+  } catch (err) {
+    return reportCliError('align export-ir', err);
+  }
 
   const componentCount = Object.keys(exported.ruleset.components).length;
   console.log(`align export-ir: wrote ${exported.ruleset.rules.length} rule(s), ${componentCount} component(s) to ${writtenTo}`);

@@ -106,7 +106,15 @@ async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<
   const wallStart = performance.now();
   const run = await orchestrator.check({ rootDir, excludes });
   const wallMs = performance.now() - wallStart;
-  persistMovedBaseline(rootDir, run, baselineStore);
+  try {
+    // Writes `.align/baseline.json` on a move-transfer, which stamps `alignVersion` (ADR 022's
+    // write discipline, `align-dir.ts`) and can throw on a corrupted `.align/version.json` — same
+    // corrupt-≠-absent discipline as `readBaseline`'s catch above, reported the same clean way
+    // rather than an unhandled Node stack trace.
+    persistMovedBaseline(rootDir, run, baselineStore);
+  } catch (err) {
+    return reportCliError('align check', err);
+  }
 
   let effectiveRun = run;
   if (options.frozenRules === true) {
@@ -124,7 +132,15 @@ async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<
 
   recordCheckTelemetry(rootDir, recorder, effectiveRun, wallMs, rulesetIrHash, 'check');
 
-  return emit(withVersionSkew(effectiveRun, rootDir), options, generatedRulesSummary(rootDir), computeBaselineDebt(previousBaseline, run));
+  let finalRun: CheckRun;
+  try {
+    // Reads `.align/version.json` for the provenance advisory (ADR 021/022, `version-skew.ts`) and
+    // can throw on a corrupted file — same discipline, reported the same clean way.
+    finalRun = withVersionSkew(effectiveRun, rootDir);
+  } catch (err) {
+    return reportCliError('align check', err);
+  }
+  return emit(finalRun, options, generatedRulesSummary(rootDir), computeBaselineDebt(previousBaseline, run));
 }
 
 /**
@@ -233,11 +249,31 @@ async function runUntrustedCheck(rootDir: string, options: CheckOptions): Promis
   const wallStart = performance.now();
   const run = await orchestrator.check({ rootDir, excludes: exported.excludes });
   const wallMs = performance.now() - wallStart;
-  persistMovedBaseline(rootDir, run, baselineStore);
+  try {
+    // Same corrupt-≠-absent risk (a move-transfer write stamps `alignVersion`, ADR 022) as
+    // `runTrustedCheck`'s identical catch above.
+    persistMovedBaseline(rootDir, run, baselineStore);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`align check --untrusted: ${message}`);
+    recorder.record({ kind: 'error', errorKind: 'untrusted-refusal', message: shortMessage(message), command: 'check --untrusted' });
+    return 1;
+  }
 
   recordCheckTelemetry(rootDir, recorder, run, wallMs, rulesetIrHash, 'check --untrusted');
 
-  return emit(withVersionSkew(run, rootDir), options, undefined, computeBaselineDebt(previousBaseline, run));
+  let finalRun: CheckRun;
+  try {
+    // Same corrupt-≠-absent risk (reads `.align/version.json` for the provenance advisory) as
+    // `runTrustedCheck`'s identical catch above.
+    finalRun = withVersionSkew(run, rootDir);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`align check --untrusted: ${message}`);
+    recorder.record({ kind: 'error', errorKind: 'untrusted-refusal', message: shortMessage(message), command: 'check --untrusted' });
+    return 1;
+  }
+  return emit(finalRun, options, undefined, computeBaselineDebt(previousBaseline, run));
 }
 
 function persistMovedBaseline(rootDir: string, run: CheckRun, baselineStore: InMemoryBaselineStore): void {

@@ -48,7 +48,14 @@ export async function baselineAccept(rootDir: string, ruleId?: string, telemetry
   if (!previous.ok) return previous.code;
   const store = new InMemoryBaselineStore(previous.entries);
   store.accept(targeted, 'manual');
-  writeBaseline(rootDir, store.snapshot());
+  // `writeBaseline` stamps `alignVersion` (ADR 022's write discipline, `align-dir.ts`) and can
+  // throw on a corrupted `.align/version.json` — same corrupt-≠-absent discipline as `tryReadBaseline`
+  // above, caught here rather than left as a raw Node stack trace.
+  try {
+    writeBaseline(rootDir, store.snapshot());
+  } catch (err) {
+    return reportCliError('align baseline accept', err);
+  }
   console.log(`Accepted ${targeted.length} violation(s)${ruleId === undefined ? '' : ` for rule '${ruleId}'`} into the baseline.`);
 
   const recorder = createTelemetryRecorder(rootDir, 'baseline accept', telemetryPreConfig, telemetry);
@@ -122,7 +129,13 @@ export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, 
   // `writeBaseline`) and why deferring on refusal loses nothing.
   const incompleteRefusal = refuseIfRunIncomplete('align baseline prune', run, result.removed.length, allowIncomplete ?? false);
   if (incompleteRefusal !== undefined) return incompleteRefusal;
-  writeBaseline(rootDir, store.snapshot());
+  // Same corrupt-≠-absent throw risk as `baselineAccept` above (`writeBaseline`'s internal
+  // `alignVersion` stamp, ADR 022) — caught here rather than left as a raw Node stack trace.
+  try {
+    writeBaseline(rootDir, store.snapshot());
+  } catch (err) {
+    return reportCliError('align baseline prune', err);
+  }
   console.log(
     `Pruned ${result.removed.length} fixed violation(s) from the baseline; ` +
       `${result.moved.length} ${result.moved.length === 1 ? 'entry' : 'entries'} transferred (file moves).`,

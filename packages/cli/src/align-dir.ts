@@ -16,12 +16,15 @@ import {
   type RulesLock,
   type TelemetryState,
 } from '@spikedpunch/align-core';
+import { ALIGN_VERSION } from './telemetry/process-context.js';
+import { versionFileSchema, type VersionFile } from './version-file.js';
 
 export const ALIGN_DIR = '.align';
 const BASELINE_FILENAME = 'baseline.json';
 const GENERATED_RULES_FILENAME = 'generated-rules.json';
 const RULES_LOCK_FILENAME = 'rules.lock.json';
 const LAST_BUILD_REPORT_FILENAME = 'last-build-report.md';
+const VERSION_FILENAME = 'version.json';
 // Default location for `align export-ir`'s output / `align check --untrusted`'s input (ADR 014).
 // Overridable per-invocation via `align export-ir --out <path>` / `align check --ir <path>`.
 const RULESET_IR_FILENAME = 'ruleset-ir.json';
@@ -74,6 +77,88 @@ export function ensureAlignDir(rootDir: string): void {
   fs.mkdirSync(alignDirPath(rootDir), { recursive: true });
 }
 
+function versionFilePath(rootDir: string): string {
+  return path.join(alignDirPath(rootDir), VERSION_FILENAME);
+}
+
+/**
+ * Reads and zod-validates `.align/version.json` (ADR 022). Absence is a legitimate state — every
+ * install created before 0.2.0, and even a fresh 0.2.0+ repo before its first `.align/`-writing
+ * command, has no stamp — and returns `undefined`, never an error: "unknown, predates stamping" is
+ * a normal thing for this file to say. A file that EXISTS but fails to parse as JSON or fails
+ * schema validation throws — the same corrupt-≠-absent discipline as `readBaseline`/
+ * `readGeneratedRules`/`readRulesetIr` above, naming the file in the thrown message. This function
+ * backs both the `align check` provenance advisory (`version-skew.ts`) and the internal
+ * read-merge-write inside `stampAlignVersion`/`seedVersionStamp` below — one reader, not two that
+ * could drift on what "corrupt" means.
+ */
+export function readVersionFile(rootDir: string): VersionFile | undefined {
+  const file = versionFilePath(rootDir);
+  if (!fs.existsSync(file)) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    throw new Error(`${file} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return parseArtifact<VersionFile>(versionFileSchema, parsed, file, '{ alignVersion, baselineReconciledBy? }');
+}
+
+function writeVersionFile(rootDir: string, data: VersionFile): void {
+  ensureAlignDir(rootDir);
+  fs.writeFileSync(versionFilePath(rootDir), `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+}
+
+/**
+ * The single choke point for `alignVersion` stamping (ADR 022's write discipline). Called from
+ * every `.align/` artifact writer in THIS file — `writeBaseline`, `writeGeneratedRules`,
+ * `writeRulesLock`, `writeRulesetIr` — which are already the only places under `.align/` any
+ * command in this codebase writes to (this module's own doc comment: "all filesystem I/O for
+ * .align/ lives here, not in core"). Piggybacking the stamp on those four writers, instead of
+ * calling it separately at each of `init`, `build --apply`, `export-ir`, `baseline accept`/`prune`,
+ * and `check`'s move-transfer path, makes the coverage argument STRUCTURAL rather than
+ * enumerative: a new command that writes an `.align/` artifact has to call one of these functions
+ * (or add a fifth writer here, which should call this too) — there is no way to write an artifact
+ * through this module without also stamping. This is the pattern `withVersionSkew`
+ * (`version-skew.ts`) and `refuseIfRunErrored`/`refuseIfRunIncomplete` (`errored-run.ts`) already
+ * establish: one shared function, never a copy re-inlined at a new call site.
+ *
+ * Deliberately never touches `baselineReconciledBy` — see `seedVersionStamp` below for why that
+ * field has exactly one writer (`init`) plus, later, `align upgrade`.
+ *
+ * Deliberately NOT wired into `writeTelemetryState`/`appendTelemetryLine`: telemetry is opt-in,
+ * local-only, gitignored by default, and explicitly not a portable artifact (see those two
+ * functions' own doc comments below) — it is outside the ".align/ artifact" set ADR 022 stamps.
+ *
+ * A read-only `align check` never calls any of the four writers above (the ONLY writer `check`
+ * ever touches is `writeBaseline`, and only on the move-transfer path — `persistMovedBaseline`,
+ * `commands/check.ts`), so this function is never reached on a plain check — `.align/version.json`
+ * is correctly never created by a check that doesn't mutate anything.
+ */
+function stampAlignVersion(rootDir: string): void {
+  const current = readVersionFile(rootDir);
+  writeVersionFile(rootDir, { ...current, alignVersion: ALIGN_VERSION });
+}
+
+/**
+ * `align init`'s seed of `.align/version.json` (ADR 022) — the only OTHER writer of
+ * `baselineReconciledBy` besides the future `align upgrade`. Not `check`, not `accept`, not
+ * `prune`: those write through `stampAlignVersion` above, which deliberately never touches this
+ * field. `baselineReconciledBy` answers "has this baseline been reconciled under the running
+ * version?", not "who last wrote baseline.json" — an incidental writer (a move-transfer, a scoped
+ * accept) must not be able to advance it, which is the entire point of restricting it to this one
+ * call plus `upgrade`.
+ *
+ * Every `align init` run — including a re-run against a repo that already has `.align/` — re-seeds
+ * both fields, because every `init` run re-establishes the baseline from a fresh check (`runInit`
+ * always ends by writing `.align/baseline.json`, seeded or empty); that IS the "deliberate
+ * reconciliation" this field exists to record.
+ */
+export function seedVersionStamp(rootDir: string): void {
+  const current = readVersionFile(rootDir);
+  writeVersionFile(rootDir, { ...current, alignVersion: ALIGN_VERSION, baselineReconciledBy: ALIGN_VERSION });
+}
+
 /**
  * Reads and zod-validates `.align/baseline.json`. A missing file returns `[]` (nothing has been
  * accepted yet), but a file that exists and fails to parse as JSON or fails schema validation
@@ -115,6 +200,7 @@ export function writeBaseline(rootDir: string, entries: readonly BaselineEntry[]
   ensureAlignDir(rootDir);
   const sorted = [...entries].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint));
   fs.writeFileSync(baselinePath(rootDir), `${JSON.stringify(sorted, null, 2)}\n`, 'utf8');
+  stampAlignVersion(rootDir);
 }
 
 /** Raw on-disk bytes of `.align/generated-rules.json`, or `undefined` if absent — used both to
@@ -154,6 +240,7 @@ export function writeGeneratedRules(rootDir: string, file: GeneratedRulesFile): 
   ensureAlignDir(rootDir);
   const raw = `${JSON.stringify(file, null, 2)}\n`;
   fs.writeFileSync(generatedRulesPath(rootDir), raw, 'utf8');
+  stampAlignVersion(rootDir);
   return raw;
 }
 
@@ -167,6 +254,7 @@ export function readRulesLock(rootDir: string): RulesLock | undefined {
 export function writeRulesLock(rootDir: string, lock: RulesLock): void {
   ensureAlignDir(rootDir);
   fs.writeFileSync(rulesLockPath(rootDir), `${JSON.stringify(lock, null, 2)}\n`, 'utf8');
+  stampAlignVersion(rootDir);
 }
 
 export function writeLastBuildReport(rootDir: string, markdown: string): void {
@@ -206,6 +294,14 @@ export function writeRulesetIr(rootDir: string, data: ExportedRuleset, override?
   const file = rulesetIrPath(rootDir, override);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+  // Only stamp when the write actually landed inside THIS repo's `.align/` — `--out` can point
+  // anywhere on disk (ADR 021: "a ruleset-ir.json moved out of .align/ via --out carries no
+  // provenance", accepted knowingly), including outside this repo entirely. Stamping
+  // unconditionally would create/touch `.align/version.json` for a repo whose `.align/` this
+  // invocation never actually wrote to.
+  if (file.startsWith(`${alignDirPath(rootDir)}${path.sep}`) || file === alignDirPath(rootDir)) {
+    stampAlignVersion(rootDir);
+  }
   return file;
 }
 
