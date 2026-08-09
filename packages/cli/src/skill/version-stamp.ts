@@ -1,19 +1,33 @@
+import { sha256Hex } from '@spikedpunch/align-core';
+
 /**
- * The version stamp embedded in every `align skill --install`-written SKILL.md (`install.ts`): a
- * human-visible line plus a machine-parseable HTML-comment marker carrying the align version that
- * generated the snapshot.
+ * The stamps embedded in every `align skill --install`-written SKILL.md (`install.ts`): a
+ * human-visible line plus two machine-parseable HTML-comment markers — the align version that
+ * generated the snapshot, and a content hash of the rendered body (ADR 021 gap 3).
  *
- * Why this exists: `align skill` (no `--install`) generates its guide live from the running
- * binary's own registries on every call, so it can never drift. `--install`, by contrast, writes a
- * point-in-time snapshot — a SKILL.md installed before some feature shipped (e.g. tier-2
+ * Why the version stamp exists: `align skill` (no `--install`) generates its guide live from the
+ * running binary's own registries on every call, so it can never drift. `--install`, by contrast,
+ * writes a point-in-time snapshot — a SKILL.md installed before some feature shipped (e.g. tier-2
  * `.because()` support) silently won't mention it, with nothing telling the human or agent the
- * snapshot is behind. The stamp makes that staleness detectable: `doctor.ts`'s `stale-skill`
- * advisory reads the marker back out of an installed file and compares it against the running
- * binary's `ALIGN_VERSION`. Defined here (not inline in `install.ts` or `doctor.ts`) so the
- * marker's exact format has exactly one source of truth shared between the writer and the reader.
+ * snapshot is behind. The version marker makes that staleness detectable: `doctor.ts`'s
+ * `stale-skill` advisory reads it back out of an installed file and compares it against the running
+ * binary's `ALIGN_VERSION`.
+ *
+ * Why the content hash also exists: a version comparison alone is blind to a skill re-rendered at
+ * the SAME version — the normal case during development, and any patch that changes skill content
+ * without a version bump. The content hash closes that gap the same way `rulesLockSchema`'s
+ * `docContentHash` (`core/build/schema.ts`) does for a built ruleset: hash the content, not the
+ * label on it. It hashes the rendered body ONLY, computed BEFORE the version stamp/frontmatter are
+ * applied (`computeSkillContentHash`) — hashing the assembled file would make the hash churn on
+ * every align release even when no skill content changed, which is strictly worse than the
+ * version-only check it replaces.
+ *
+ * Both markers are defined here (not inline in `install.ts` or `doctor.ts`) so their exact formats
+ * have exactly one source of truth shared between the writer and the reader.
  */
 
 const VERSION_MARKER_PREFIX = 'align-skill-version';
+const CONTENT_HASH_MARKER_PREFIX = 'align-skill-content-hash';
 
 /** Rendered into the installed body, near the top of the `<!-- align:start -->` block — never as
  * frontmatter, so it can't collide with the `name`/`description` keys a skill loader requires. */
@@ -29,5 +43,30 @@ export function renderVersionStamp(version: string): string {
  * stale on its own, distinct from a present-but-outdated version. */
 export function parseSkillVersionMarker(content: string): string | undefined {
   const match = new RegExp(`<!--\\s*${VERSION_MARKER_PREFIX}:\\s*(\\S+)\\s*-->`).exec(content);
+  return match?.[1];
+}
+
+/** The exact bytes hashed for the content-hash stamp: the rendered skill body, before `install.ts`
+ * assembles it with the FRONTMATTER, `<!-- align:start/end -->` markers, and version stamp. Reusing
+ * this one function from both the writer (`install.ts`) and the reader (`doctor.ts`'s `stale-skill`
+ * advisory) is what guarantees they can never independently drift into hashing different things —
+ * reuses the repo's existing content-hash utility (`sha256Hex`, `core/build/hash.ts`), the same one
+ * `docContentHash` uses, rather than inventing a second hashing scheme. */
+export function computeSkillContentHash(body: string): string {
+  return sha256Hex(body);
+}
+
+/** Rendered directly below the version stamp, inside the same `<!-- align:start -->` block. */
+export function renderContentHashStamp(hash: string): string {
+  return `<!-- ${CONTENT_HASH_MARKER_PREFIX}: ${hash} -->`;
+}
+
+/** Extracts the stamped content hash from an installed SKILL.md's content, or `undefined` if the
+ * file predates content-hash stamping (no marker present). `doctor.ts` treats a missing hash marker
+ * the same way it treats an install with nothing to compare against: stay silent rather than nag an
+ * install that simply predates this feature — it already gets a distinct "predates version
+ * stamping" advisory if the version marker itself is also missing. */
+export function parseSkillContentHashMarker(content: string): string | undefined {
+  const match = new RegExp(`<!--\\s*${CONTENT_HASH_MARKER_PREFIX}:\\s*(\\S+)\\s*-->`).exec(content);
   return match?.[1];
 }

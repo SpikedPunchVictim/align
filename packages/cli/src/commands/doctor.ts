@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import type { Command } from 'commander';
 import {
   buildUncertaintyAdvisories,
   computeDeepImportHits,
@@ -12,7 +13,8 @@ import {
 import { TypeScriptPlugin, UNMAPPED_COMPONENT, findDeadAliases, findOrphanedPackages } from '@spikedpunch/align-plugin-typescript';
 import { loadConfig } from '../config.js';
 import { ALIGN_VERSION } from '../telemetry/index.js';
-import { parseSkillVersionMarker } from '../skill/version-stamp.js';
+import { parseSkillVersionMarker, parseSkillContentHashMarker, computeSkillContentHash } from '../skill/version-stamp.js';
+import { renderSkillMarkdown } from '../skill/render.js';
 import { detectVersionSkewAdvisory } from '../version-skew.js';
 
 const UNMAPPED_EXAMPLES = 5;
@@ -52,6 +54,17 @@ export interface DoctorOptions {
    * `resolveRepoRootForDoctor`.
    */
   readonly extraAdvisories?: readonly Advisory[];
+  /**
+   * The built `commander` program (`buildProgram()`), needed to recompute the current skill body
+   * for the `stale-skill` content-hash comparison (ADR 021 gap 3) — `renderSkillMarkdown`'s
+   * CLI-inventory section walks a real `Command` tree, so doctor can't render "what the skill
+   * should currently look like" without one. `program.ts`'s `doctor` action always passes its own
+   * already-built `program` closure variable in (same pattern as `skill.ts`'s action, avoiding a
+   * cycle back to `program.ts` — see `skill/cli-inventory.ts`'s doc comment). Left `undefined` in
+   * tests that don't exercise the content-hash path: `buildStaleSkillAdvisory` treats a missing
+   * program the same as a missing content-hash marker — nothing to compare against, stay silent.
+   */
+  readonly program?: Command;
 }
 
 export interface DoctorJsonPayload {
@@ -76,8 +89,16 @@ interface DoctorReport {
  * install that's simply behind the running binary's own `ALIGN_VERSION`. Deliberately simple
  * string inequality, not semver comparison — any mismatch, including a missing marker, means
  * "refresh"; there's no notion of a snapshot being "close enough".
+ *
+ * ADR 021 gap 3: a version match alone doesn't prove the content is unchanged — a skill
+ * re-rendered at the same version (the normal case during development, or any patch that touches
+ * skill text without bumping `ALIGN_VERSION`) was previously undetectable. When the version
+ * matches, this also compares the installed content-hash marker against a freshly recomputed hash
+ * of the current skill body. Two cases stay silent rather than nagging: an install that predates
+ * content-hash stamping (no marker to compare against), and no `program` being available to
+ * recompute the current body with — both are "nothing to compare", not "definitely fine".
  */
-function buildStaleSkillAdvisory(rootDir: string): Advisory | undefined {
+function buildStaleSkillAdvisory(rootDir: string, program: Command | undefined): Advisory | undefined {
   const filePath = path.join(rootDir, '.claude', 'skills', 'align', 'SKILL.md');
   if (!fs.existsSync(filePath)) return undefined;
 
@@ -96,10 +117,22 @@ function buildStaleSkillAdvisory(rootDir: string): Advisory | undefined {
       message: `installed align skill snapshot is v${installedVersion} (current: v${ALIGN_VERSION}) — run \`align skill --install\` to refresh`,
     };
   }
+
+  const installedContentHash = parseSkillContentHashMarker(content);
+  if (installedContentHash === undefined || program === undefined) return undefined;
+  const currentContentHash = computeSkillContentHash(renderSkillMarkdown('all', program));
+  if (installedContentHash !== currentContentHash) {
+    return {
+      kind: 'stale-skill',
+      message:
+        `installed align skill snapshot content has changed since it was installed (version v${ALIGN_VERSION} still ` +
+        `matches, but the rendered content differs) — run \`align skill --install\` to refresh`,
+    };
+  }
   return undefined;
 }
 
-async function collectDoctorReport(rootDir: string): Promise<DoctorReport> {
+async function collectDoctorReport(rootDir: string, program: Command | undefined): Promise<DoctorReport> {
   const advisories: Advisory[] = [];
   let uncertain: readonly UncertaintyMarker[] = [];
 
@@ -109,7 +142,7 @@ async function collectDoctorReport(rootDir: string): Promise<DoctorReport> {
   const versionSkew = detectVersionSkewAdvisory(rootDir);
   if (versionSkew !== undefined) advisories.push(versionSkew);
 
-  const staleSkill = buildStaleSkillAdvisory(rootDir);
+  const staleSkill = buildStaleSkillAdvisory(rootDir, program);
   if (staleSkill !== undefined) advisories.push(staleSkill);
 
   const loaded = await loadConfig(rootDir).catch((err: unknown) => {
@@ -243,7 +276,7 @@ async function collectDoctorReport(rootDir: string): Promise<DoctorReport> {
  * doctor exists to help someone understand.
  */
 export async function runDoctor(rootDir: string, options: DoctorOptions = { json: false }): Promise<number> {
-  const collected = await collectDoctorReport(rootDir);
+  const collected = await collectDoctorReport(rootDir, options.program);
   const advisories = [...(options.extraAdvisories ?? []), ...collected.advisories];
   const { uncertain } = collected;
 

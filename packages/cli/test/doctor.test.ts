@@ -328,6 +328,9 @@ describe('align doctor', () => {
       expect(logs.join('\n')).not.toContain('stale-skill');
     });
   });
+  // ADR 021 gap 3's content-hash-on-top-of-version comparison has its own file,
+  // doctor-stale-skill-content-hash.test.ts — kept out of this file to stay under the repo's own
+  // arch.metric 500-line-per-file limit (docs/ARCHITECTURE-RULES.md).
 
   // ADR 019 Mode 2 (ACCEPTED, v1 = import-graph-only), docs/proposals/reconciled-build-order.md #3
   // — the ungoverned-edge gap report. Fixture reproduces the ADR's kluster demo shape: apiDomain's

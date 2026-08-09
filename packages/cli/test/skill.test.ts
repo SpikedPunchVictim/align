@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { runSkill } from '../src/commands/skill.js';
 import { renderSkillMarkdown } from '../src/skill/render.js';
 import { renderCondensedFixingSkill } from '../src/skill/condensed.js';
+import { computeSkillContentHash } from '../src/skill/version-stamp.js';
 import { buildProgram } from '../src/program.js';
 import { ALIGN_VERSION } from '../src/telemetry/index.js';
 
@@ -113,6 +114,52 @@ describe('align skill --install — version stamp', () => {
 
       expect(content.match(/<!-- align-skill-version:/g)).toHaveLength(1);
       expect(content).toContain(`<!-- align-skill-version: ${ALIGN_VERSION} -->`);
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('align skill --install — content hash stamp (ADR 021 gap 3)', () => {
+  it('stamps a content-hash marker computed over the rendered body only, below the version stamp', async () => {
+    const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-skill-hash-test-'));
+    try {
+      const program = buildProgram();
+      await runSkill(rootDir, { topic: 'all', install: true }, program);
+      const filePath = path.join(rootDir, '.claude', 'skills', 'align', 'SKILL.md');
+      const content = fs.readFileSync(filePath, 'utf8');
+
+      const marker = /<!-- align-skill-content-hash: (\S+) -->/.exec(content);
+      expect(marker).not.toBeNull();
+
+      // REGRESSION GUARD (ADR 021 gap 3's critical trap): the marker must equal the hash of the
+      // rendered body ALONE — never the assembled file. If install.ts ever hashed FRONTMATTER +
+      // the version stamp + the body instead of the body alone, this equality would fail, because
+      // the version stamp/frontmatter text is not part of what body-only hashing covers. Hashing
+      // the whole file would make this advisory churn on every align release for no reason.
+      const body = renderSkillMarkdown('all', program);
+      expect(marker?.[1]).toBe(computeSkillContentHash(body));
+
+      const startIdx = content.indexOf('<!-- align:start -->');
+      const versionIdx = content.indexOf(`<!-- align-skill-version: ${ALIGN_VERSION} -->`);
+      const hashIdx = content.indexOf(marker![0]);
+      const endIdx = content.indexOf('<!-- align:end -->');
+      expect(versionIdx).toBeGreaterThan(startIdx);
+      expect(hashIdx).toBeGreaterThan(versionIdx);
+      expect(hashIdx).toBeLessThan(endIdx);
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('re-running --install updates the content hash in place without duplicating the marker', async () => {
+    const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-skill-hash-test-'));
+    try {
+      await runSkill(rootDir, { topic: 'all', install: true }, buildProgram());
+      await runSkill(rootDir, { topic: 'all', install: true }, buildProgram());
+      const filePath = path.join(rootDir, '.claude', 'skills', 'align', 'SKILL.md');
+      const content = fs.readFileSync(filePath, 'utf8');
+      expect(content.match(/<!-- align-skill-content-hash:/g)).toHaveLength(1);
     } finally {
       fs.rmSync(rootDir, { recursive: true, force: true });
     }

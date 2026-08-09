@@ -193,10 +193,11 @@ export function buildProgram(): Command {
       // so it uses `resolveRepoRootForDoctor` rather than `resolveRootOrFail`/`requireRepoRoot`.
       const resolved = resolveRepoRootForDoctor('align doctor', process.cwd());
       if ('root' in resolved) {
-        process.exitCode = await runDoctor(resolved.root, { json: opts.json });
+        process.exitCode = await runDoctor(resolved.root, { json: opts.json, program });
       } else {
         process.exitCode = await runDoctor(process.cwd(), {
           json: opts.json,
+          program,
           extraAdvisories: [{ kind: 'repo-not-found', message: resolved.notFoundMessage }],
         });
       }

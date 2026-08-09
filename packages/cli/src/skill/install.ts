@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import type { Command } from 'commander';
 import { ALIGN_VERSION } from '../telemetry/index.js';
 import { renderSkillMarkdown } from './render.js';
-import { renderVersionStamp } from './version-stamp.js';
+import { renderVersionStamp, renderContentHashStamp, computeSkillContentHash } from './version-stamp.js';
 
 const START_MARKER = '<!-- align:start -->';
 const END_MARKER = '<!-- align:end -->';
@@ -36,10 +36,13 @@ description: >-
  * be complete since it isn't re-run per interaction.
  *
  * The written block is stamped with the installing binary's `ALIGN_VERSION` (`version-stamp.ts`):
- * a human-visible line plus a machine-parseable marker comment, both near the top of the block.
+ * a human-visible line plus a machine-parseable version marker, plus a content-hash marker (ADR
+ * 021 gap 3) computed over the rendered body BEFORE the version stamp is applied — so the hash
+ * reflects only the skill content, not the version bump, and doctor's staleness check can catch a
+ * body change even when `ALIGN_VERSION` didn't move. Both markers sit near the top of the block.
  * Because the whole file is fully regenerated on every `--install` run (see above), re-running
- * naturally updates the stamp in place — there is no separate "patch the existing stamp" step, and
- * no risk of the block or the stamp duplicating.
+ * naturally updates both stamps in place — there is no separate "patch the existing stamp" step,
+ * and no risk of the block or the stamps duplicating.
  */
 export function writeSkillFile(rootDir: string, program: Command): string {
   const dir = path.join(rootDir, '.claude', 'skills', 'align');
@@ -47,7 +50,9 @@ export function writeSkillFile(rootDir: string, program: Command): string {
   fs.mkdirSync(dir, { recursive: true });
 
   const body = renderSkillMarkdown('all', program);
-  const content = `${FRONTMATTER}\n\n${START_MARKER}\n${renderVersionStamp(ALIGN_VERSION)}\n\n${body}\n${END_MARKER}\n`;
+  const contentHash = computeSkillContentHash(body);
+  const content =
+    `${FRONTMATTER}\n\n${START_MARKER}\n${renderVersionStamp(ALIGN_VERSION)}\n${renderContentHashStamp(contentHash)}\n\n${body}\n${END_MARKER}\n`;
   fs.writeFileSync(filePath, content, 'utf8');
   return filePath;
 }
