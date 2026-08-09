@@ -107,18 +107,76 @@ artifacts written by a newer align may encode fingerprints this binary cannot re
 
 ### `align upgrade`
 
-A consent-gated flow over mechanisms that already exist:
+A consent-gated flow:
 
 1. Read `version.json`; report the transition (or "unknown → current").
-2. Run `check` and show the `baselineDebt` delta — the measured 6-of-207 shape.
-3. Prune orphaned entries and re-accept the churned ones **only after explicit user consent**,
-   scoped and reviewable.
+2. Run every **validator** registered for the version range and report what it finds.
+3. Run `check` and show the `baselineDebt` delta.
+4. Prune orphaned entries, re-accept the churned ones, and apply any **transforms** —
+   **only after explicit user consent**, scoped and reviewable.
 
 It inherits ADR 023's two tiers: it refuses outright on an errored scan, and on an incomplete
 scan (`complete: false`) it refuses to **delete** without `--allow-incomplete` while still
 reporting the transition and the delta. This matters more for `upgrade` than for `prune`, because
 upgrade is the command a user runs *once*, at the moment they are least able to tell a
 fingerprint change from a real one.
+
+### The migration registry — three tiers, keyed by version
+
+A per-version registry, applied in order across the detected range. Each entry carries up to three
+things, and they are separated because their risk profiles are not comparable:
+
+| Tier | Mutates? | Runs | Purpose |
+|---|---|---|---|
+| **Notes** | no | always | authored prose explaining what changed and why |
+| **Validators** | no | always | detect and report state affected by the change |
+| **Transforms** | **yes** | only on consent | mechanically fix what a validator found |
+
+**Notes** are authored in `UPGRADING.md` and *compiled* into the registry — never authored twice.
+This follows ADR 011 exactly (a markdown doc is the source, the artifact is generated, a content
+hash detects drift), and it exists to satisfy ADR 021's one-record invariant: embedding notes in
+the binary while also shipping `UPGRADING.md` would be two records of one fact, guaranteed to
+diverge. **align never generates migration prose from a diff** — it selects and assembles authored
+text for the detected range. A tool inventing descriptions of its own behaviour is a tool
+inventing facts.
+
+**Validators are the tier that earns the most and risks the least**, and they cover a failure mode
+the baseline flow cannot reach at all. The `**` whole-segment change can make a component selector
+match zero files; no command can decide what that selector *should* be, but detecting that it will
+reclassify — and naming the files — is exactly what align is for. Validators are read-only, always
+run (including under `--notes`), and never require consent.
+
+**Transforms** are consent-gated and constrained:
+
+- **Every transform requires a validator** that detects its precondition. Nothing is mutated that
+  has not first been proven to need mutating, and the validator must be runnable standalone so a
+  user can see the finding without accepting the fix.
+- **Transforms must be idempotent.** Users re-run upgrade; applying twice must equal applying once.
+- **A transform that edits `align.config.ts` gets the strictest handling.** That file is authored,
+  executable user code, and this repo has already shipped bugs where marker-block handling
+  destroyed config content (audit 2026-08-03, BUG #10/#11/#12 — an orphaned start marker caused the
+  next run to delete everything up to the block, which for `align.config.ts` meant the ruleset).
+  Config transforms must reuse `init/marker-block.ts`'s well-formedness discipline, refuse rather
+  than guess, and never silently rewrite a region they did not author.
+- Transforms inherit ADR 023's refusal tiers.
+
+**A released version with no registry entry is a build failure, not an empty section.** A missing
+entry would otherwise render as "nothing to know about this version," which is the false-green
+shape — silence read as an all-clear.
+
+### Flags
+
+- `--notes` — print the assembled notes and validator findings for the detected range and exit.
+  Read-only; mutates nothing. This is the multi-version-hop answer: a user on 0.1.4 arriving at
+  0.6.0 gets the union of the intervening entries in order, not four documents to reconcile.
+  `align` is the only thing that knows the range — a static document cannot filter itself.
+- `--from <version>` — override the detected starting version. Covers a missing or distrusted
+  `version.json` stamp, and lets a user preview a hop before taking it.
+- `--allow-incomplete` — ADR 023 tier 2 override.
+
+**At 0.2.0 every hop is a single hop**, since there is exactly one prior release. Range assembly
+and single-entry selection are therefore the same code today; build the shape that generalizes and
+let the assembly logic prove itself when a third release exists.
 
 ### Design Reserve — designed, deliberately not built
 
@@ -130,9 +188,18 @@ Recorded with the evidence that kept them out, so they are not re-proposed from 
   artifact-level granularity outright by citing the 2.8% churn figure — that number measures churn
   *magnitude* and says nothing about provenance *granularity*. Recorded here because the misapplied
   number nearly shipped a stamp that could not answer its own question.)
-- **A migration-step registry (version-pair → transform).** 2.8% churn on 215 entries does not
-  justify a migration engine. Promote when a change lands that cannot be expressed as
-  prune-and-re-accept.
+- ~~**A migration-step registry (version-pair → transform).**~~ **PROMOTED 2026-08-08** — see
+  "The migration registry" above. The reserve entry read: *"2.8% churn on 215 entries does not
+  justify a migration engine."* That reasoning was defective in the same way as the entry above it:
+  **2.8% measures baseline churn and says nothing about config-level breakage.** The `**`
+  whole-segment change can make a component selector match zero files and fail the whole
+  architecture phase — a failure mode the churn measurement never touched, because it is not a
+  baseline problem at all. A number was applied to a question it did not bear on, for the second
+  time in one ADR.
+
+  Promoted with the tier separation that the original framing lacked: notes and validators are
+  read-only and always run, and only transforms mutate. Most of the value the reserve was blocking
+  lived in **validation**, which carries none of the risk that justified reserving it.
 - **Automatic accept without consent.** Rejected on the same grounds as ADR 006's baseline
   doctrine: accepting debt is a human decision.
 - **An MCP `align_upgrade` tool.** **Rejected, not deferred.** ADR 006 — an agent must not grant
@@ -188,8 +255,20 @@ promotion-on-evidence doctrine applied to our own design.
   disagrees with their artifacts — which is the intent.
 - `align upgrade` is a thin command. If a future change genuinely cannot be expressed as
   prune-and-re-accept, the reserve above is where the design already is.
-- **`UPGRADING.md`'s three-step ceremony is over-specified relative to the measurement** and
-  should be revised to lead with `align upgrade`, keeping the manual steps as the fallback.
+- **`UPGRADING.md` changes role rather than going away.** Its three-step ceremony is superseded by
+  `align upgrade` and should be dropped. What remains — why fingerprints changed, config-level
+  breakage needing human judgment, and no-action-required behaviour changes — becomes the
+  **authored source** the notes registry compiles from, so the document is maintained once and
+  surfaced by the tool rather than found by the user.
+- Its section structure becomes load-bearing: sections must be version-keyed so the compiler can
+  select a range. This is a constraint on an existing document, and a release whose section is
+  missing or misnamed fails the build.
+- `align upgrade` is no longer a thin command. That is a deliberate reversal of this ADR's
+  original scope cut, recorded in the Design Reserve above with the reasoning error that caused it.
+- **The repo has no CHANGELOG.** `UPGRADING.md`'s "changes that need nothing from you" section is
+  release notes wearing a migration guide's clothes, and it is there because there is nowhere else
+  to put it. Left as-is deliberately — a CHANGELOG with no release automation behind it rots — but
+  named here so the double duty is a choice rather than an oversight.
 
 ## Evidence
 
