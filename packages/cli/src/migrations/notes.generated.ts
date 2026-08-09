@@ -1,0 +1,45 @@
+// GENERATED FILE — do not hand-edit.
+//
+// Compiled from the repo-root UPGRADING.md by scripts/compile-upgrading-notes.mjs (ADR 011's
+// doc-is-source pattern applied to ADR 022's notes tier). UPGRADING.md itself is not published
+// in the npm package (it is not listed in package.json's "files", and it lives outside
+// packages/cli/src entirely, so tsc would not even see it) — this file is how its notes reach an
+// installed `align`: it is ordinary checked-in TypeScript, compiled by the CLI's normal
+// `tsc` build into dist alongside every other module, which IS published.
+//
+// Re-run `node packages/cli/scripts/compile-upgrading-notes.mjs` after editing UPGRADING.md.
+// `migration-notes-drift.test.ts` fails if UPGRADING_MD_CONTENT_HASH below no longer matches
+// the doc's current content — that is the drift detector, not a suggestion.
+//
+// Generated at: 2026-08-09T19:32:50.262Z
+import type { MigrationNote } from './types.js';
+
+/** sha256Hex (16-char) of UPGRADING.md's full text at compile time. */
+export const UPGRADING_MD_CONTENT_HASH = "373de4ff0b9a110d";
+
+/** Migration notes compiled from UPGRADING.md, keyed by the exact version heading text
+ * ("## <version>") it was compiled from. */
+export const COMPILED_NOTES: Readonly<Record<string, readonly MigrationNote[]>> = {
+  "0.1.4": [
+    {
+      heading: "Why violation fingerprints changed",
+      body: "A full-codebase audit fixed 15 bugs. Most need nothing from you. Four of them change how align\ncomputes a violation's *fingerprint* — the identity `.align/baseline.json` uses to recognize a\nviolation you already accepted. When a fingerprint changes, a previously-accepted violation stops\nmatching its old baseline entry and reappears as new — not because your code changed, but because\nalign now describes the same finding differently.\n\n| Rule kind | Why it changed | Scale |\n|---|---|---|\n| `arch.no-cycles` | The reported cycle is now derived by BFS instead of a greedy walk that could return a path which was not a cycle at all. | Measured across six real repos: **~4%** of multi-node SCCs were reporting a phantom chain and are corrected; another **~1.4%** get a shorter, genuine cycle. |\n| `custom.host` | The violation's line number is no longer folded into its fingerprint, so a predicate finding survives reformatting. | Every baselined `custom.host` entry. |\n| `arch.no-dependency`, `arch.layers` | `**` in a component selector now matches whole path segments only, so files may reclassify into a different component. | Only repos whose selectors used an interior `**` (e.g. `src/**/index.ts`). |\n| `arch.metric` | `loc` no longer counts a phantom trailing line, so a file of exactly `max` lines correctly stops violating. | Files sitting at exactly the threshold. |\n\nNone of these self-heal via move-transfer — it requires the violation to have moved to a different\nfile, and these keep the same file.",
+    },
+    {
+      heading: "A correction preserved from an earlier draft of this document",
+      body: "An earlier draft of this section instructed a manual `align baseline prune` → `align check` →\n`align baseline accept` sequence and justified the *order* as a correctness requirement, on the\ngrounds that `align check` move-transfers your real baseline while `align baseline prune` does not.\n**That was wrong on both halves.** `align check` does move-transfer and persist\n(`commands/check.ts`), but so did `prune` — it built its store from your real baseline and ran the\nsame transfer logic (`commands/baseline.ts`, `baseline/store.ts`), passing a stub graph that\n`prune` then ignored. The two paths behaved identically; there was no correctness reason to run one\nbefore the other.\n\nThat specific ordering guidance no longer applies as guidance — the manual ceremony it described is\nsuperseded by `align upgrade`, which reconciles the baseline for you. The technical correction\nitself remains true and is kept here for the record rather than deleted: `prune` and `check` never\ndisagreed on move-transfer, and — see \"Baseline move-transfer only fires on a real move\" below —\nmove-transfer itself was tightened in this same release, so the hazard the original (wrong) claim\nwas worried about does not exist under either reading.",
+    },
+    {
+      heading: "Component selector `**` now matches whole path segments only",
+      body: "An interior `**` in a component selector (e.g. `app/**/model.ts`) used to match an arbitrary\nsubstring, crossing `/` boundaries — so `app/**/model.ts` could match `app/datamodel.ts`, a file\nwith no matching path-segment boundary at all. It now matches only whole path segments, the way\n`**` behaves in most other glob dialects.\n\nIf a selector relied on the old cross-boundary behavior, some files may now match a different\ncomponent or none at all — a config-level change that needs your judgment, not a mechanical fix.\nIf a component selector now matches zero files, `align check` fails with:\n\n```\nComponent 'x' (selector: ...) has zero files classified to it in this scan\n```\n\nThat is the fix working — the selector was matching files it should not have. Narrow or correct the\nselector. If the component is legitimately empty, set `empty: 'until-populated'` (it arms\nautomatically once files land) or `empty: 'allow'`.\n\nSimilarly, `**/`-leading and `{a,b}` brace patterns in `excludes` now behave the same way they\nalready did in component selectors — a root-level file matching `**/*.generated.ts` is now\ngenuinely excluded, and `{dist,build}/**` now works instead of silently matching nothing. If your\nexcludes relied on either being a no-op, you will see fewer violations, not more.",
+    },
+    {
+      heading: "`.align/version.json` provenance stamp",
+      body: "align now writes `.align/version.json` whenever it writes anything else under `.align/` (init,\nbuild --apply, export-ir, baseline accept/prune, and a check that moves a baseline entry). It\nrecords which align version last touched `.align/`, so `align check` and `align doctor` can tell\nyou when your artifacts were written by a different align than the one running now. Nothing to do —\nthis is informational only.",
+    },
+    {
+      heading: "Changes that need nothing from you",
+      body: "Worth knowing about, but no migration:\n\n- **A corrupt `.align/baseline.json` now fails loudly** instead of being read as empty. Previously\n  a merge-conflicted baseline was silently treated as \"nothing accepted\", and the next\n  `align baseline accept` overwrote the file, destroying every entry. If you hit the new error,\n  the most likely cause is an unresolved merge conflict — resolve it or restore from git.\n- **`align init` and `align build --apply` refuse to rewrite a malformed align block** in\n  `CLAUDE.md` or `align.config.ts` rather than guessing which content is yours. Previously an\n  orphaned start marker could cause the next run to delete everything between it and the block —\n  in `align.config.ts`, that meant your ruleset. If you see the new error, restore exactly one\n  `<!-- align:start -->` … `<!-- align:end -->` pair, or delete both markers and let align\n  re-append.\n- **Config errors print cleanly and exit non-zero** instead of emitting a raw Node stack trace.\n  This covers a syntax error in `align.config.ts`, a missing `default` export, a malformed\n  `excludes`/`compositionRoots`/`knownPublicDeepImports` export, and a corrupt or schema-invalid\n  `.align/generated-rules.json`. Schema-invalid `.align/` artifacts now name the file and list\n  the offending fields instead of dumping a raw validation error.\n- **`align agent run` twice in the same day works.** It used to crash on a branch-name collision;\n  it now resumes onto the existing `align/fixes-<date>` branch, and refuses to continue at all\n  if it cannot land on that branch.\n- **`align doctor` honours your excludes the same way `align check` does.** It previously used a\n  laxer matcher, so you may see fewer advisories.\n- **Baseline move-transfer only fires on a real move.** Previously an orphaned entry was\n  transferred onto any current violation with matching rule id + snippet in a different file —\n  so fixing a violation in one file while adding a textually identical one in another, in the\n  same commit, silently baselined the new one and left CI green. A transfer now requires the\n  orphan's own file to have genuinely disappeared from the scan. Renames still transfer, which\n  is what the mechanism exists for; `align baseline prune` was affected too and is also fixed.\n- **A fix proposal listing the same file twice is rejected** rather than silently applying only\n  one of the two entries' edits.\n\n`align doctor` still always exits 0, including on a config error, which it reports as a\n`config-error` advisory.",
+    },
+  ],
+};

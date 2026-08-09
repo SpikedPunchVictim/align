@@ -1,49 +1,26 @@
 # Upgrading align
 
-## Unreleased — next release after 0.1.4
+This document is the authored source for align's migration notes (ADR 022). It is compiled into
+the migration registry (`packages/cli/src/migrations/registry.ts`) that `align upgrade` reads —
+notes are authored **once, here**, and compiled, never hand-copied into a TypeScript literal that
+could drift from this text.
 
-This release fixes 15 bugs found in a full-codebase audit. Most need nothing from you.
-**Four of them change violation fingerprints**, which means some entries in your
-`.align/baseline.json` stop matching and reappear as new violations. This page tells you
-what to do about that, and in what order.
+Sections are version-keyed: every `##` heading names exactly one released version (a bare semver,
+e.g. `## 0.1.4`), and every `###` heading under it is one migration note. The compiler treats a
+misnamed or out-of-place heading as a build failure, not a section it can silently skip.
 
-### Do this once, in this order
+This document does not tell you what commands to run. It explains what changed and why, factually,
+per version. (Guided remediation is `align upgrade`'s job.)
 
-```bash
-git status                 # commit or stash first — .align/baseline.json will change
-align baseline prune       # STEP 1 — drop entries whose violations no longer exist
-align check                # STEP 2 — review what is now red
-align baseline accept      # STEP 3 — only after you have reviewed step 2
-```
+## 0.1.4
 
-#### Why this order
+### Why violation fingerprints changed
 
-`prune` first, then review, then `accept` — so you see what actually changed before consenting
-to it. That is the whole reason for the order in this release.
-
-Earlier drafts of this page claimed the order was a *correctness* requirement, on the grounds
-that `align check` move-transfers your real baseline while `align baseline prune` does not.
-**That was wrong on both halves.** `align check` does move-transfer and persist
-(`commands/check.ts`), but so did `prune` — it built its store from your real baseline and ran
-the same transfer logic (`commands/baseline.ts`, `baseline/store.ts`), passing a stub graph
-that `prune` then ignored. The two paths behaved identically.
-
-That hazard is gone regardless: this release also fixes move-transfer itself
-(see below), so an orphaned entry is only ever transferred when its own file has genuinely
-disappeared from the scan. The re-fingerprinted entries in this release keep their files, so
-nothing transfers and neither command can mis-attribute your debt. Run them in the order above
-because it makes the review clearer, not because a different order is dangerous.
-
-#### Why you should review before `accept`
-
-After `prune`, the re-fingerprinted violations come back as new. `align baseline accept` with
-no arguments accepts **everything currently red**, which includes any genuinely new debt
-introduced since your last run. Read `align check`'s output first, or scope the accept with
-`--rule <ruleId>`.
-
----
-
-### What changed fingerprints
+A full-codebase audit fixed 15 bugs. Most need nothing from you. Four of them change how align
+computes a violation's *fingerprint* — the identity `.align/baseline.json` uses to recognize a
+violation you already accepted. When a fingerprint changes, a previously-accepted violation stops
+matching its old baseline entry and reappears as new — not because your code changed, but because
+align now describes the same finding differently.
 
 | Rule kind | Why it changed | Scale |
 |---|---|---|
@@ -52,28 +29,58 @@ introduced since your last run. Read `align check`'s output first, or scope the 
 | `arch.no-dependency`, `arch.layers` | `**` in a component selector now matches whole path segments only, so files may reclassify into a different component. | Only repos whose selectors used an interior `**` (e.g. `src/**/index.ts`). |
 | `arch.metric` | `loc` no longer counts a phantom trailing line, so a file of exactly `max` lines correctly stops violating. | Files sitting at exactly the threshold. |
 
-None of these self-heal via move-transfer — it requires the violation to have moved to a
-different file, and these keep the same file. `prune` + `accept` is the only path.
+None of these self-heal via move-transfer — it requires the violation to have moved to a different
+file, and these keep the same file.
 
-### One error you may hit right after upgrading
+### A correction preserved from an earlier draft of this document
 
-If a component selector relied on `**` crossing path segments, it may now match zero files,
-and `align check` will fail with:
+An earlier draft of this section instructed a manual `align baseline prune` → `align check` →
+`align baseline accept` sequence and justified the *order* as a correctness requirement, on the
+grounds that `align check` move-transfers your real baseline while `align baseline prune` does not.
+**That was wrong on both halves.** `align check` does move-transfer and persist
+(`commands/check.ts`), but so did `prune` — it built its store from your real baseline and ran the
+same transfer logic (`commands/baseline.ts`, `baseline/store.ts`), passing a stub graph that
+`prune` then ignored. The two paths behaved identically; there was no correctness reason to run one
+before the other.
+
+That specific ordering guidance no longer applies as guidance — the manual ceremony it described is
+superseded by `align upgrade`, which reconciles the baseline for you. The technical correction
+itself remains true and is kept here for the record rather than deleted: `prune` and `check` never
+disagreed on move-transfer, and — see "Baseline move-transfer only fires on a real move" below —
+move-transfer itself was tightened in this same release, so the hazard the original (wrong) claim
+was worried about does not exist under either reading.
+
+### Component selector `**` now matches whole path segments only
+
+An interior `**` in a component selector (e.g. `app/**/model.ts`) used to match an arbitrary
+substring, crossing `/` boundaries — so `app/**/model.ts` could match `app/datamodel.ts`, a file
+with no matching path-segment boundary at all. It now matches only whole path segments, the way
+`**` behaves in most other glob dialects.
+
+If a selector relied on the old cross-boundary behavior, some files may now match a different
+component or none at all — a config-level change that needs your judgment, not a mechanical fix.
+If a component selector now matches zero files, `align check` fails with:
 
 ```
 Component 'x' (selector: ...) has zero files classified to it in this scan
 ```
 
-That is the fix working — the selector was matching files it shouldn't have. Narrow or correct
-the selector. If the component is legitimately empty, set `empty: 'until-populated'` (it arms
+That is the fix working — the selector was matching files it should not have. Narrow or correct the
+selector. If the component is legitimately empty, set `empty: 'until-populated'` (it arms
 automatically once files land) or `empty: 'allow'`.
 
 Similarly, `**/`-leading and `{a,b}` brace patterns in `excludes` now behave the same way they
 already did in component selectors — a root-level file matching `**/*.generated.ts` is now
-genuinely excluded, and `{dist,build}/**` now works instead of silently matching nothing. If
-your excludes relied on either being a no-op, you will see fewer violations, not more.
+genuinely excluded, and `{dist,build}/**` now works instead of silently matching nothing. If your
+excludes relied on either being a no-op, you will see fewer violations, not more.
 
----
+### `.align/version.json` provenance stamp
+
+align now writes `.align/version.json` whenever it writes anything else under `.align/` (init,
+build --apply, export-ir, baseline accept/prune, and a check that moves a baseline entry). It
+records which align version last touched `.align/`, so `align check` and `align doctor` can tell
+you when your artifacts were written by a different align than the one running now. Nothing to do —
+this is informational only.
 
 ### Changes that need nothing from you
 
@@ -110,14 +117,3 @@ Worth knowing about, but no migration:
 
 `align doctor` still always exits 0, including on a config error, which it reports as a
 `config-error` advisory.
-
----
-
-### If you have no baseline
-
-Nothing to do. Run `align check` as usual.
-
-### If `align check` was already red
-
-Fix or accept as you normally would; the procedure above is only about preserving debt you had
-already accepted.

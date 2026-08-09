@@ -17,38 +17,34 @@
  * versions now would assert a fact nobody verified — worse than the honest gap. Enforcement here
  * starts at the version this slice ships in and applies going forward: every version from here on
  * must have an entry, but this registry makes no completeness claim about 0.1.0–0.1.3.
+ *
+ * **Notes come from `notes.generated.ts`, never a hand-typed literal here** (ADR 022, ADR 021's
+ * one-record invariant). That file is compiled from the repo-root `UPGRADING.md` by
+ * `scripts/compile-upgrading-notes.mjs` (`notes-compiler.ts` is the actual compiler; the script is
+ * just the I/O around it) — see that generated file's own doc comment for how its content reaches
+ * a published, installed `align` even though `UPGRADING.md` itself does not ship in the npm
+ * package. `migration-notes-drift.test.ts` fails if `notes.generated.ts` falls out of sync with
+ * `UPGRADING.md`'s current text (its embedded content hash no longer matches).
+ *
+ * **`hasNotesForVersion` extends the completeness invariant above from "has an entry" to "the
+ * entry has notes".** ADR 022, verbatim: a missing entry "would otherwise render as 'nothing to
+ * know about this version,' which is the false-green shape — silence read as an all-clear." An
+ * entry that exists but carries zero notes is the identical false-green shape one layer down, so
+ * it is checked as its own predicate rather than folded into `hasEntryForVersion` (which must stay
+ * true for "entry exists, notes pending" during authoring — the two questions are genuinely
+ * different and collapsing them would make the first check's own failure message ambiguous about
+ * which condition actually failed).
  */
 import type { VersionRegistryEntry } from './types.js';
+import { COMPILED_NOTES } from './notes.generated.js';
 import { globDoubleStarSelectorDriftValidator } from './validators/glob-double-star-drift.js';
+
+const CURRENT_ENTRY_VERSION = '0.1.4';
 
 export const MIGRATION_REGISTRY: readonly VersionRegistryEntry[] = [
   {
-    version: '0.1.4',
-    notes: [
-      {
-        heading: '`.align/version.json` provenance stamp',
-        body:
-          'align now writes `.align/version.json` whenever it writes anything else under `.align/` ' +
-          '(init, build --apply, export-ir, baseline accept/prune, and a check that moves a baseline ' +
-          'entry). It records which align version last touched `.align/`, so `align check` and ' +
-          '`align doctor` can tell you when your artifacts were written by a different align than the ' +
-          'one running now. Nothing to do — this is informational only.',
-        placeholder: true,
-      },
-      {
-        heading: 'Component selector `**` now matches whole path segments only',
-        body:
-          'An interior `**` in a component selector (e.g. `app/**/model.ts`) used to match an ' +
-          'arbitrary substring, crossing `/` boundaries — so `app/**/model.ts` could match ' +
-          '`app/datamodel.ts`, a file with no matching path-segment boundary at all. It now matches ' +
-          'only whole path segments, the way `**` behaves in most other glob dialects. If a selector ' +
-          'relied on the old cross-boundary behavior, some files may now match a different component ' +
-          'or none at all. This version\'s registered validator detects that drift directly against ' +
-          'your repo\'s actual selectors and files, and reports which selectors and how many files ' +
-          'are affected.',
-        placeholder: true,
-      },
-    ],
+    version: CURRENT_ENTRY_VERSION,
+    notes: COMPILED_NOTES[CURRENT_ENTRY_VERSION] ?? [],
     validators: [globDoubleStarSelectorDriftValidator],
     // No transform this slice (task #16 slice B is registry infrastructure only — see the task's
     // scope note). ADR 022 names "rewrite this selector so its match set is exactly what it was
@@ -61,4 +57,12 @@ export const MIGRATION_REGISTRY: readonly VersionRegistryEntry[] = [
 /** ADR 022's completeness invariant, as a predicate a test can assert against directly. */
 export function hasEntryForVersion(registry: readonly VersionRegistryEntry[], version: string): boolean {
   return registry.some((entry) => entry.version === version);
+}
+
+/** The same invariant, one layer deeper: does the version's entry actually carry notes? See this
+ * file's module doc comment for why this is a separate predicate rather than folded into
+ * `hasEntryForVersion`. */
+export function hasNotesForVersion(registry: readonly VersionRegistryEntry[], version: string): boolean {
+  const entry = registry.find((e) => e.version === version);
+  return entry !== undefined && entry.notes.length > 0;
 }

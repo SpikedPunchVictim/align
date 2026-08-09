@@ -17,16 +17,16 @@
 /**
  * Authored prose explaining what changed and why (ADR 022's "Notes" tier). Pure data, no I/O.
  *
- * ADR 022 specifies notes are eventually *compiled* from `UPGRADING.md` (never hand-authored
- * twice, ADR 021's one-record invariant) — that compiler is a later slice. `placeholder: true`
- * marks a note authored directly here, ahead of that compile step, so nobody mistakes hand-written
- * placeholder prose for the authored `UPGRADING.md` source of truth once the compiler exists to
- * tell them apart.
+ * ADR 022 requires notes to be *compiled* from `UPGRADING.md`, never hand-authored twice (ADR
+ * 021's one-record invariant) — `notes-compiler.ts` is that compiler, and `notes.generated.ts`
+ * (checked in, produced by `scripts/compile-upgrading-notes.mjs`) is its output. There is
+ * therefore no "authored directly in TypeScript" escape hatch for this type any more: every
+ * `MigrationNote` a `VersionRegistryEntry` carries must trace back to a `###` section in
+ * `UPGRADING.md`.
  */
 export interface MigrationNote {
   readonly heading: string;
   readonly body: string;
-  readonly placeholder?: boolean;
 }
 
 /**
