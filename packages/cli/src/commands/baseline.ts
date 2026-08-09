@@ -3,7 +3,7 @@ import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, writeBaseline } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
-import { refuseIfRunErrored } from '../errored-run.js';
+import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
 import { computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
 
 /**
@@ -65,16 +65,30 @@ export async function baselineAccept(rootDir: string, ruleId?: string, telemetry
 }
 
 /**
- * Prune is the only command that DELETES accepted consent decisions, so it is the one place the
- * errored-gate asymmetry is destructive rather than merely wrong: an errored gate reports
- * `violations: []`, which made every baseline entry look orphaned and got it deleted while the
- * command printed "Pruned N fixed violation(s)" and exited 0 (bug hunt 2026-08-08, BUG #18 —
- * reproduced by shadowing a component so `align check` reports `verdict: 'error'`). An absent
- * violation on an incomplete scan means "not verified", never "fixed" — the same lesson
- * `computeBaselineDebt` (`commands/check.ts`) records for the three reporting sites; see
- * `refuseIfRunErrored` (`errored-run.ts`), which is now the single guard for this class.
+ * Prune is the only command that DELETES accepted consent decisions, so it is the one place both
+ * tiers of ADR 023's completeness invariant are destructive rather than merely wrong:
+ *
+ *   - **Tier 1 (errored, no override):** an errored gate reports `violations: []`, which made every
+ *     baseline entry look orphaned and got it deleted while the command printed "Pruned N fixed
+ *     violation(s)" and exited 0 (bug hunt 2026-08-08, BUG #18 — reproduced by shadowing a
+ *     component so `align check` reports `verdict: 'error'`). An absent violation on a run that
+ *     evaluated nothing means "not verified", never "fixed" — the same lesson `computeBaselineDebt`
+ *     (`commands/check.ts`) records for the three reporting sites.
+ *   - **Tier 2 (incomplete, overridable via `--allow-incomplete`):** a run that evaluated real rules
+ *     but couldn't resolve every external dependency (`complete: false`) drops edges from the
+ *     graph, so a violation routed through a dropped edge is unobservable, not fixed — its baseline
+ *     entry looks orphaned for a reason unrelated to the code. Reproduces today on `test-apps/n8n`
+ *     (verdict red, complete false, 6 orphans).
+ *
+ * `refuseIfRunErrored`/`refuseIfRunIncomplete` (`errored-run.ts`) are the single guards for this
+ * class. Tier 2 is evaluated AFTER `store.prune` (itself pure/in-memory — no I/O) so its refusal
+ * can name the precise at-risk count, but BEFORE `writeBaseline` persists anything, so a refusal
+ * still leaves the baseline file untouched. A pure move-transfer (nothing actually at risk of
+ * deletion) is never refused by tier 2, and even in a refused run that also had moves pending, nothing
+ * is lost by deferring them: `align check`'s `persistMovedBaseline` (`commands/check.ts`)
+ * independently transfers the same moves, unconditionally, on every run.
  */
-export async function baselinePrune(rootDir: string, telemetryPreConfig?: boolean): Promise<number> {
+export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, telemetryPreConfig?: boolean): Promise<number> {
   // loadConfig can fail six ways, including a corrupt `.align/generated-rules.json` (bug hunt
   // 2026-08-03, BUG #14) — caught here instead of crashing with a raw Node stack trace.
   let loaded: Awaited<ReturnType<typeof loadConfig>>;
@@ -89,7 +103,8 @@ export async function baselinePrune(rootDir: string, telemetryPreConfig?: boolea
   const store = new InMemoryBaselineStore(previous.entries);
   const { orchestrator } = createOrchestrator(ruleset, [], hostRules);
   const run = await orchestrator.check({ rootDir, excludes });
-  // BEFORE the store is consulted and before anything is written (see this function's doc comment).
+  // Tier 1, BEFORE the store is consulted and before anything is written (see this function's doc
+  // comment). No override — an errored scan evaluated no rules at all.
   const refusal = refuseIfRunErrored('align baseline prune', run, 'refusing to prune the baseline');
   if (refusal !== undefined) return refusal;
   const allViolations = run.gates.flatMap((g) => g.violations);
@@ -103,6 +118,10 @@ export async function baselinePrune(rootDir: string, telemetryPreConfig?: boolea
     return reportCliError('align baseline prune', err);
   }
   const result = store.prune(allViolations, knownFiles);
+  // Tier 2 — see this function's doc comment for why this runs here (after `store.prune`, before
+  // `writeBaseline`) and why deferring on refusal loses nothing.
+  const incompleteRefusal = refuseIfRunIncomplete('align baseline prune', run, result.removed.length, allowIncomplete ?? false);
+  if (incompleteRefusal !== undefined) return incompleteRefusal;
   writeBaseline(rootDir, store.snapshot());
   console.log(
     `Pruned ${result.removed.length} fixed violation(s) from the baseline; ` +

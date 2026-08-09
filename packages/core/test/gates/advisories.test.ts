@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildBaselineGrowthAdvisories, buildUncertaintyAdvisories } from '../../src/gates/advisories.js';
+import { buildBaselineGrowthAdvisories, buildUncertaintyAdvisories, isRunComplete } from '../../src/gates/advisories.js';
 import { computeFingerprint } from '../../src/baseline/fingerprint.js';
 import { toComponentName, toRepoRelativePath, toRuleId } from '../../src/types/branded.js';
 import type { BaselineEntry } from '../../src/baseline/store.js';
+import type { CheckRun } from '../../src/gates/types.js';
 import type { UncertaintyMarker } from '../../src/types/graph.js';
 import type { Violation } from '../../src/types/violation.js';
 
@@ -172,5 +173,33 @@ describe('buildBaselineGrowthAdvisories', () => {
 
   it('returns an empty array when there are no violations', () => {
     expect(buildBaselineGrowthAdvisories([], [])).toEqual([]);
+  });
+});
+
+// ADR 023 "second axis: incomplete ≠ errored" — the single shared predicate consumed by both
+// `payload/builder.ts`'s `complete` field and the CLI's tier-2 `refuseIfRunIncomplete` guard
+// (`packages/cli/src/errored-run.ts`). Pinned here directly so a future edit to either consumer
+// can't silently re-inline the `.some(...)` expression this function replaced.
+describe('isRunComplete', () => {
+  function runWithAdvisories(advisories: CheckRun['advisories']): CheckRun {
+    return {
+      verdict: 'green',
+      gates: [],
+      advisories,
+      scannedAt: Date.now(),
+      ungroundedComponents: [],
+    };
+  }
+
+  it('is true when no missing-dependencies advisory fired', () => {
+    expect(isRunComplete(runWithAdvisories([]))).toBe(true);
+    expect(isRunComplete(runWithAdvisories([{ kind: 'uncertainty', message: 'x' }]))).toBe(true);
+  });
+
+  it('is false when a missing-dependencies advisory fired, regardless of other advisories present', () => {
+    expect(isRunComplete(runWithAdvisories([{ kind: 'missing-dependencies', message: 'deps missing' }]))).toBe(false);
+    expect(
+      isRunComplete(runWithAdvisories([{ kind: 'uncertainty', message: 'x' }, { kind: 'missing-dependencies', message: 'deps missing' }])),
+    ).toBe(false);
   });
 });

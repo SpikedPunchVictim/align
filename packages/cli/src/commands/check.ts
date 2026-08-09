@@ -1,6 +1,7 @@
 import {
   assertNoCustomHostRules,
   buildMcpCheckPayload,
+  isRunComplete,
   renderViolationMessage,
   type BaselineDebt,
   type BaselineEntry,
@@ -366,7 +367,7 @@ function printHuman(
   }
   // Provisional when the graph was built without the repo's external deps (a missing-dependencies
   // advisory fired) — mirrors the payload `complete: false` so a human skimming to the verdict line
-  // isn't misled by a green that couldn't evaluate external-edge rules.
-  const incomplete = run.advisories.some((a) => a.kind === 'missing-dependencies');
-  console.log(`verdict: ${run.verdict}${incomplete ? ' (provisional — dependencies not fully installed)' : ''}`);
+  // isn't misled by a green that couldn't evaluate external-edge rules. `isRunComplete` is the one
+  // shared predicate for this axis (ADR 023) — see its doc comment (`gates/advisories.ts`).
+  console.log(`verdict: ${run.verdict}${isRunComplete(run) ? '' : ' (provisional — dependencies not fully installed)'}`);
 }

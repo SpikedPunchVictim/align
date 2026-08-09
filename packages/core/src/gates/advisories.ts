@@ -4,7 +4,24 @@ import type { RuleIR } from '../types/ir.js';
 import { findUngroundedExternalSelectors } from '../rules/external-match.js';
 import type { BaselineEntry } from '../baseline/store.js';
 import type { Violation } from '../types/violation.js';
-import type { Advisory } from './types.js';
+import type { Advisory, CheckRun } from './types.js';
+
+/**
+ * Whether a `CheckRun` resolved the whole dependency graph — `false` iff a `missing-dependencies`
+ * advisory fired (built below, when unresolvable external specifiers are found). This is the ONE
+ * shared predicate for that axis (ADR 023's "second axis: incomplete ≠ errored"): it started as an
+ * expression inlined at the MCP payload builder's `complete` field
+ * (`payload/builder.ts`, `!run.advisories.some((a) => a.kind === 'missing-dependencies')`), and
+ * would have become a second, driftable copy the moment a consumer outside the payload builder
+ * needed the same check — which is exactly what happened: `errored-run.ts`'s tier-2 incomplete-scan
+ * guard needs it too, to decide whether `align baseline prune` may safely delete. ADR 023 names
+ * this pattern directly — five independent copies of a related asymmetry (errored vs. "fixed") is
+ * why that ADR exists at all. Both `buildMcpCheckPayload` and the CLI's incomplete-run guard call
+ * this function; neither re-derives it from `run.advisories`.
+ */
+export function isRunComplete(run: CheckRun): boolean {
+  return !run.advisories.some((a) => a.kind === 'missing-dependencies');
+}
 
 /**
  * Groups uncertainty markers by reason (ADR 004's uncertainty vocabulary) into one advisory per

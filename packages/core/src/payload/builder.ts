@@ -2,6 +2,7 @@ import type { ComponentName, RepoRelativePath, RuleId } from '../types/branded.j
 import type { Category } from '../types/violation.js';
 import type { UngroundedComponent } from '../components/registry.js';
 import type { Advisory, CheckRun, GateStatus } from '../gates/types.js';
+import { isRunComplete } from '../gates/advisories.js';
 import type { RuleIR } from '../types/ir.js';
 import type { Violation } from '../types/violation.js';
 
@@ -79,7 +80,7 @@ export function buildMcpCheckPayload(run: CheckRun, options: BuildCheckPayloadOp
   // baselined count with an honest `delta: 0` (this path measures no change, it doesn't claim the
   // debt is zero). On an error run the counts are untrustworthy (gates report 0), so stay at zeros.
   const baselineDebt = options.baselineDebt ?? fallbackBaselineDebt(run);
-  const complete = !run.advisories.some((a) => a.kind === 'missing-dependencies');
+  const complete = isRunComplete(run);
 
   return {
     verdict: run.verdict,

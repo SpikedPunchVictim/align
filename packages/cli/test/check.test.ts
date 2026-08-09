@@ -15,7 +15,26 @@ let tmpDir: string;
 function copyFixture(name: string): string {
   const dest = fs.mkdtempSync(path.join(os.tmpdir(), 'align-cli-test-'));
   fs.cpSync(path.join(fixturesDir, name), dest, { recursive: true });
+  linkAlignCore(dest);
   return dest;
+}
+
+/**
+ * Every fixture's `align.config.ts` imports `@spikedpunch/align-core/dsl`. In a real repo that
+ * resolves via a normal devDependency install; a fixture copied to a bare tmpdir has no
+ * `node_modules` at all, so the SCANNER (which walks and resolves imports across the whole repo,
+ * not just `loadConfig`'s own dynamic `import()` — `plugin-typescript/src/scanner.ts`) reports
+ * `align.config.ts`'s own import as an unresolvable external specifier: a `missing-dependencies`
+ * advisory (`complete: false`) that is purely a test-harness artifact, never present for a real,
+ * properly-installed repo (verified: `align check` on this monorepo itself reports no such
+ * advisory). ADR 023 tier 2 (`baselinePrune`'s `refuseIfRunIncomplete`) is the first consumer that
+ * actually acts on `complete`, which is what surfaced this — symlinking the real built core package
+ * in mirrors a real install and keeps these fixtures' scans `complete: true`, matching production.
+ */
+function linkAlignCore(dest: string): void {
+  const scopeDir = path.join(dest, 'node_modules', '@spikedpunch');
+  fs.mkdirSync(scopeDir, { recursive: true });
+  fs.symlinkSync(path.join(here, '..', '..', 'core'), path.join(scopeDir, 'align-core'), 'dir');
 }
 
 afterEach(() => {

@@ -144,12 +144,20 @@ export function buildProgram(): Command {
   });
 
   addTelemetryOptions(
-    baseline.command('prune').description('Remove baseline entries for violations that no longer exist; report moved entries.'),
-  ).action(async (opts: { telemetry?: boolean }) => {
+    baseline
+      .command('prune')
+      .description('Remove baseline entries for violations that no longer exist; report moved entries.')
+      .option(
+        '--allow-incomplete',
+        'proceed with deletion even though this scan could not resolve all dependencies (ADR 023 tier 2) — ' +
+          'an absent violation on an incomplete scan may be unobservable rather than fixed',
+        false,
+      ),
+  ).action(async (opts: { allowIncomplete: boolean; telemetry?: boolean }) => {
     const rootDir = resolveRootOrFail('align baseline prune');
     if (rootDir === undefined) return;
     const telemetryPreConfig = resolveTelemetryPreConfig({ telemetry: opts.telemetry });
-    process.exitCode = await baselinePrune(rootDir, telemetryPreConfig);
+    process.exitCode = await baselinePrune(rootDir, opts.allowIncomplete, telemetryPreConfig);
   });
 
   baseline
