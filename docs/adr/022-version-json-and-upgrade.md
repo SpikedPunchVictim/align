@@ -142,6 +142,36 @@ reporting the transition and the delta. This matters more for `upgrade` than for
 upgrade is the command a user runs *once*, at the moment they are least able to tell a
 fingerprint change from a real one.
 
+#### Who updates `version.json`, and when
+
+`alignVersion` needs no special handling: it advances through the stamping choke point inside the
+artifact writers, so it updates automatically as soon as `upgrade` writes the baseline.
+
+**`baselineReconciledBy` is different and must be set explicitly** — that field exists precisely
+because the choke point does *not* advance it (incidental writers would otherwise mark a baseline
+"reconciled" that nobody reviewed). `align upgrade` is its second and only other writer besides
+`align init`. Three rules govern it:
+
+1. **Stamp last.** Only after consent, and only after the reconciliation has actually completed.
+   The ordering is not symmetric and the wrong one looks equally reasonable, so it is written
+   down: stamping *before* the work means a run that then fails records a reconciliation that
+   never happened, and the next `upgrade` skips real churn. Stamping *after* means a failure
+   leaves `alignVersion` advanced but `baselineReconciledBy` stale — and the next `upgrade`
+   correctly re-runs. **The safe direction is the one where a crash leaves work looking undone.**
+2. **Never stamp without doing the work.** `--notes` is read-only and stamps nothing. A refusal —
+   an errored scan, or an incomplete one without `--allow-incomplete` — stamps nothing. Recording
+   reconciliation on a run that refused to reconcile would be the false-green shape in a new place.
+3. **Partial consent does not count as reconciled.** If `upgrade` surfaces churn and the user
+   accepts some entries while deferring others, `baselineReconciledBy` is **not** advanced. The
+   field means "the baseline was brought into agreement with this version," and partial means it
+   was not. The repeat-prompt concern that moved the unknown-provenance advisory to `doctor` does
+   not apply here: `upgrade` is a command a user chooses to run, not one CI runs on every push, so
+   a residual reminder is a correct signal rather than ambient noise.
+
+Note the field's current setter is named for `init`'s use (`seedVersionStamp`). With a second
+caller it should be renamed to something that covers both — the operation is "record that the
+baseline was reconciled under this version", not "seed".
+
 ### The migration registry — three tiers, keyed by version
 
 A per-version registry, applied in order across the detected range. Each entry carries up to three
