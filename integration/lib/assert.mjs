@@ -56,6 +56,24 @@ export function evaluateAssert(assertSpec, snapshots, currentState) {
     if (since === undefined) throw new Error(`assert: no snapshot named '${assertSpec.since}'`);
     const before = resolveNormalized(since, assertSpec.file);
     const after = resolveNormalized(currentState, assertSpec.file);
+    if (before === undefined && after === undefined) {
+      // Both undefined means the file was ABSENT at both points, not that it was present and
+      // identical. `before === after` alone can't tell those apart (undefined === undefined is
+      // true), which is exactly the false-green this function's docstring promises is impossible
+      // ("surfaced as a clear failure rather than a false pass on two undefineds") but the code,
+      // before this fix, did not deliver. A file that never existed is not "unchanged" — it's a
+      // scenario bug (wrong path, or asserting before the file was ever created) — so both
+      // fileUnchanged and fileChanged fail loudly here rather than one of them passing vacuously.
+      return {
+        pass: false,
+        failures: [
+          `assert ${kind}: '${assertSpec.file}' was absent both at snapshot '${assertSpec.since}' and now — there is nothing to compare, ` +
+            'this is very likely a scenario bug (wrong file path, or the assertion runs before the file is ever created)',
+        ],
+        before,
+        after,
+      };
+    }
     const identical = before === after;
     if (kind === 'fileUnchanged') {
       return identical

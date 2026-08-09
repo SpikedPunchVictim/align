@@ -48,7 +48,9 @@ Flags:
 - `--gate-target <version>` — which target's results decide the process exit code (default:
   `local` if present in `--targets`, else the first target). Other targets' failures are printed
   but never fail the process — this is how a scenario can be RUN against a known-buggy published
-  version (proving the harness can go red) without that being treated as a CI failure.
+  version (proving the harness can go red) without that being treated as a CI failure. **Must be
+  one of `--targets`** — an unmatched `--gate-target` (a typo, e.g. `locl`) is a hard error at
+  startup, not a silent zero-row match that reports success.
 - `--out <dir>` — where to write results (default `integration/results/<timestamp>/`).
 - `--keep-all` — keep every working copy, not just failed ones (default: working copies are
   deleted on a PASS and preserved on FAIL/ERROR for post-hoc diagnosis).
@@ -80,6 +82,28 @@ Every run writes, per `(target, scenario)` pair, under `--out`:
 
 `summary.json` (one per run, at the top of `--out`) is the whole run's matrix:
 `(target, scenarioId) -> pass/fail/errored`.
+
+## Enforcing the red/green proof (`expectFailOn`)
+
+A scenario file may declare `expectFailOn: ['0.1.4']` (a plain array of target strings) alongside
+its `id`/`project`/`steps`. This makes the scenario's whole reason for existing — "this MUST go red
+against a version known to have the bug" (ADR 025 §5) — a machine-checked property of the run, not
+prose in a comment. If any target named in `expectFailOn` is included in `--targets` for this
+invocation, and that scenario PASSES against it, `run.mjs` reports a **red/green calibration
+break** and exits non-zero — independent of `--gate-target`, since this represents the harness's
+own ability to detect a known bug breaking, not a per-target result. `scenarios/prune-errored-run-
+destroys-baseline.mjs` sets `expectFailOn: ['0.1.4']`; run it with `--targets 0.1.4,local` (or any
+target list including `0.1.4`) and both the ordinary gate AND the calibration check are exercised.
+
+## Scenario/spec validation
+
+Every scenario file is validated at LOAD time (`lib/spec-validate.mjs`, called from `run.mjs`
+before any scenario executes) — a scenario with an unrecognized `expect`/`assert` key, an `expect`
+block that asserts nothing (`{}`), an empty-string content check (`stdoutContains: ''`), a step
+with more than one action key, or a `project` field that doesn't match a real `projects/*.mjs` id,
+throws immediately and the run never starts. This closes the class of false green where a typo'd
+key (`stdouContains`, `exitCode`) silently degrades a real assertion into a no-op that passes on
+every version, including the buggy one the scenario exists to catch.
 
 A scenario result is one of three things, and they mean different things:
 
@@ -115,8 +139,8 @@ in-code version of this table (this section is a human-readable mirror of it):
 | `volatile-json-keys` | `.align/*.json` fields named `acceptedAt`, `exportedAt`, `builtAt`, `generatedAt`, `scannedAt` — blanked by exact key name | Only ever masks the named field's own value, never a sibling. A regression that stamps the WRONG baseline entry is still visible, because `fingerprint`/`ruleId`/`file`/`acceptedBy` are compared unnormalized. |
 | `absolute-path-to-repo-relative` | The working copy's absolute path (and its macOS `/private/...` realpath) in any text | A bug that reads a genuinely different, unrelated tree would still normalize away IF that tree happens to share the working copy's path prefix — doesn't for the common case (paths from a different scenario run, a different project). |
 | `wall-clock-durations` | `123ms`, `1.4s`-shaped tokens in free text | A component/file legitimately named with a trailing "ms"/"s" segment (none exist in align's own output today). |
-| `iso-timestamps` | ISO-8601 timestamps in free text (`align baseline show`'s human output) | Shape-only — a timestamp that's the right SHAPE but the wrong VALUE (off-by-one-day) is NOT caught by this rule; assertions needing an exact value must read the structured JSON field instead. |
-| `known-align-versions` | The five published version strings (`0.1.0`–`0.1.4`) in free text, unless a capture requests `keepVersion: true` | None of increment 1's scenarios assert ON the installed version, so this is safe by default; a future version-skew scenario must opt out. |
+| `iso-timestamps` | ISO-8601 timestamps in free text, either Zulu (`...Z`) or an explicit numeric UTC offset (`...+00:00`) | Shape-only — a timestamp that's the right SHAPE but the wrong VALUE (off-by-one-day) is NOT caught by this rule; assertions needing an exact value must read the structured JSON field instead. |
+| `known-align-versions` | The five published version strings (`0.1.0`–`0.1.4`) in free text, unless a capture requests `keepVersion: true`. Boundary-anchored: a match is never preceded/followed by a digit or `.`, so `10.1.4`, `@nestjs/core@10.1.3`, etc. are left alone and distinct versions never collide on one placeholder. | None of increment 1's scenarios assert ON the installed version, so this is safe by default; a future version-skew scenario must opt out. |
 
 Content hashes: none of increment 1's captured artifacts (`.align/baseline.json`, `.align/ruleset-ir.json`
 when present, `align.config.ts`, the CLAUDE.md block) embed a volatile content hash today — the
@@ -153,6 +177,16 @@ Every install is verified afterward (`installAlignVersion` reads back
 was requested) — a silently-wrong-version install would otherwise produce a confusing scenario
 failure several steps later instead of a clear one immediately.
 
+For `local` specifically, the version-string check alone cannot detect a silent registry fallback:
+the working tree's version (`0.1.4`) equals the latest PUBLISHED version for the entire life of an
+unreleased bump, so a registry-resolved `0.1.4` and a genuine local-tarball `0.1.4` report the same
+version string. Two additional, independent checks run only for `local`
+(`verifyLocalInstallAuthenticity` in `lib/version-install.mjs`): every one of the four
+`@spikedpunch/*` packages must show a `file:`-prefixed `resolved` field in `package-lock.json`, and
+each package's installed `dist/index.js` must be sha256-identical to the working tree's own build.
+Either check failing throws loudly rather than silently testing a Frankenstein mix of local and
+published packages.
+
 ## Adding a scenario
 
 A scenario is a plain data object (no functions) with an `id`, a `project`, and an ordered `steps`
@@ -168,6 +202,15 @@ array. Each step is exactly one of:
 { assert: { kind: 'exists', file: '...', equals: true | false } }
 ```
 
+A scenario may also declare a top-level `expectFailOn: ['0.1.4', ...]` — see "Enforcing the
+red/green proof" above.
+
+`expect`/`assert` are validated at load time (`lib/spec-validate.mjs`): every key above is the
+COMPLETE known set for its block — anything else throws immediately rather than being silently
+ignored. `fileUnchanged`/`fileChanged` compare NORMALIZED text (volatile JSON keys blanked, see the
+Normalization section) — not raw bytes — and fail loudly (both kinds) if the file was absent at
+both the snapshot and now, rather than treating "never existed" as "unchanged".
+
 Declare the CORRECT/fixed behavior — see "Why `{ install: 'target' }`" above. Add a new named
 mutation to `lib/mutations.mjs` rather than inlining filesystem edits into a scenario file;
 scenarios stay pure data.
@@ -181,6 +224,22 @@ guaranteed real violation, a `violation: { fromComponent, toComponent, because }
 (verify the one-directional dependency actually exists at the pinned commit by grep, both
 directions, before relying on it — see `projects/nest.mjs`'s comment for the exact check run
 against nest).
+
+## Reproducibility details
+
+- **Child-process environment is sanitized**, not inherited wholesale (`lib/exec.mjs`'s
+  `sanitizeEnv`): only a small allowlist (`PATH`, `HOME`, proxy/registry config, ...) passes
+  through, and `NO_COLOR`/`FORCE_COLOR`/`CI` are forced to fixed values regardless of the host or
+  CI shell that invoked `run.mjs`. Without this, ANSI escape codes or CI-mode output shape changes
+  leaking in from the invoking shell would make every content assertion depend on who/where the
+  harness was run from.
+- **The project base-checkout cache key** (`lib/project.mjs`) includes a fingerprint of the
+  install command, node version, and npm version, not just the project id and pinned sha — so
+  changing `installCmd` (e.g. adding a flag) invalidates the cache instead of silently reusing a
+  stale dependency tree installed under the old command.
+- **The `local` tarball cache directory is unique per invocation** (`<runId>-<pid>`, cleaned up on
+  exit) — `packLocalTarballs` unconditionally deletes and repacks its destination directory on
+  every 'local' install, so two concurrent `run.mjs` invocations sharing one directory would race.
 
 ## What increment 1 does NOT cover
 

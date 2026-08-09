@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { prepareProjectBase, materializeWorkingCopy } from './lib/project.mjs';
 import { runScenario } from './lib/scenario-runner.mjs';
 import { ensureDir, removeDir, writeJson } from './lib/fs-utils.mjs';
+import { validateScenario } from './lib/spec-validate.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const alignRepoRoot = path.join(here, '..');
@@ -46,13 +47,45 @@ async function loadProject(id) {
   return mod.default;
 }
 
+/** All known project ids (`projects/*.mjs`'s `.id`), used to validate every scenario's `project`
+ * field references a REAL project (F4's "unmatched scenario" check) — independent of which
+ * `--project` this particular invocation is running, so a typo'd `project: 'nestt'` is caught even
+ * if nobody ever runs `--project nestt` (which would trivially fail for an unrelated reason). */
+async function loadKnownProjectIds() {
+  const dir = path.join(here, 'projects');
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.mjs')).sort();
+  const ids = [];
+  for (const f of files) {
+    const mod = await import(path.join(dir, f));
+    ids.push(mod.default.id);
+  }
+  return ids;
+}
+
 async function loadScenarios(filterIds, projectId) {
   const dir = path.join(here, 'scenarios');
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.mjs')).sort();
+  const knownProjectIds = await loadKnownProjectIds();
   const all = [];
   for (const f of files) {
     const mod = await import(path.join(dir, f));
-    all.push(mod.default);
+    const scenario = mod.default;
+    // F1: reject a malformed spec (unknown expect/assert keys, an expect that asserts nothing, an
+    // empty-string content check, ...) at LOAD time, for every scenario file that exists on disk —
+    // not just the ones this invocation happens to select — so a bad scenario can never run, even
+    // partially, regardless of --scenarios/--project filtering.
+    validateScenario(scenario);
+    // F4 "unmatched scenario" check: a scenario's `project` must name a REAL project, or it's a
+    // typo that would otherwise silently drop the scenario out of every run's pool forever,
+    // without ever producing an error (loadProject/`--project` only ever loads the project you
+    // pass; a typo in a scenario file's `project` field is invisible to that path).
+    if (!knownProjectIds.includes(scenario.project)) {
+      throw new Error(
+        `scenario '${scenario.id}' (${f}) declares project '${scenario.project}', which does not match any known project ` +
+          `(${knownProjectIds.join(', ')}) — likely a typo. This is a load-time error so the scenario can't silently vanish from every run's pool.`,
+      );
+    }
+    all.push(scenario);
   }
   // A scenario declares the project it was authored against (mutations like
   // 'introduce-arch-violation' read project-specific component names) — running it against a
@@ -63,7 +96,17 @@ async function loadScenarios(filterIds, projectId) {
   for (const s of pool) {
     if (s.project !== projectId) throw new Error(`scenario '${s.id}' is authored for project '${s.project}', not '${projectId}'`);
   }
-  if (filterIds === undefined) return pool;
+  if (filterIds === undefined) {
+    // F4: an empty scenario pool (no scenario file targets `projectId` at all — e.g. a project
+    // with no scenarios written for it yet, or every candidate scenario's `project` field is
+    // typo'd so it silently dropped out of `forProject` above) must be a hard error. Left
+    // unchecked, `main()`'s matrix stays empty, the gate-failure filter over zero rows finds
+    // nothing, and the run reports "all scenarios passed" for having done nothing at all.
+    if (pool.length === 0) {
+      throw new Error(`no scenarios found for project '${projectId}' — refusing to report a zero-scenario run as passing. Known scenarios: ${all.map((s) => `${s.id}(${s.project})`).join(', ') || '(none)'}`);
+    }
+    return pool;
+  }
   const byId = new Map(pool.map((s) => [s.id, s]));
   return filterIds.map((id) => {
     const s = byId.get(id);
@@ -104,10 +147,21 @@ function toNormalizedStep(step) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  // F4: a `--gate-target` that matches zero rows of the matrix (a typo, e.g. 'locl' instead of
+  // 'local') previously exited 0 unconditionally — the gate-failure filter over zero matching rows
+  // finds nothing to fail on, even if every actual target failed. A gate target must be one of the
+  // targets this invocation is actually testing.
+  if (args.gateTarget !== undefined && !args.targets.includes(args.gateTarget)) {
+    throw new Error(`--gate-target '${args.gateTarget}' is not among --targets (${args.targets.join(', ')}) — refusing to run: a gate target matching no results would silently report success.`);
+  }
   const gateTarget = args.gateTarget ?? (args.targets.includes('local') ? 'local' : args.targets[0]);
   const cacheRoot = path.join(alignRepoRoot, 'integration', 'results', '.cache');
-  const tarballCacheDir = path.join(cacheRoot, 'tarballs');
   const runId = new Date().toISOString().replace(/[:.]/g, '-');
+  // F12: unique per-invocation (runId + pid) tarball cache dir, not a shared `tarballs/` directory
+  // — `packLocalTarballs` (lib/version-install.mjs) unconditionally `removeDir`s then repacks its
+  // destDir on every 'local' install, so two concurrent `run.mjs` invocations sharing one shared
+  // dir would race (one run's removeDir deleting the tarball the other is mid-install from).
+  const tarballCacheDir = path.join(cacheRoot, 'tarballs', `${runId}-${process.pid}`);
   const outDir = args.out ?? path.join(alignRepoRoot, 'integration', 'results', runId);
   ensureDir(outDir);
 
@@ -124,43 +178,51 @@ async function main() {
   /** @type {{target: string, scenarioId: string, pass: boolean, errored: boolean}[]} */
   const matrix = [];
 
-  for (const target of args.targets) {
-    for (const scenario of scenarios) {
-      const workDir = path.join(cacheRoot, 'work', `${runId}--${target}--${scenario.id}`);
-      log(`\n=== ${scenario.id} @ ${target} ===`);
-      materializeWorkingCopy(basePath, workDir);
+  try {
+    for (const target of args.targets) {
+      for (const scenario of scenarios) {
+        const workDir = path.join(cacheRoot, 'work', `${runId}--${target}--${scenario.id}`);
+        log(`\n=== ${scenario.id} @ ${target} ===`);
+        materializeWorkingCopy(basePath, workDir);
 
-      const result = await runScenario(scenario, { project, target, workingDir: workDir, alignRepoRoot, tarballCacheDir, log });
+        const result = await runScenario(scenario, { project, target, workingDir: workDir, alignRepoRoot, tarballCacheDir, log });
 
-      const scenarioOutDir = path.join(outDir, target, scenario.id);
-      ensureDir(scenarioOutDir);
-      writeJson(path.join(scenarioOutDir, 'steps.json'), result.steps);
-      writeJson(path.join(scenarioOutDir, 'normalized.json'), result.steps.map(toNormalizedStep));
-      writeJson(path.join(scenarioOutDir, 'result.json'), {
-        scenarioId: result.scenarioId,
-        target: result.target,
-        pass: result.pass,
-        errored: result.errored,
-        errorMessage: result.errorMessage,
-        stepFailures: result.steps.filter((s) => s.pass === false).map((s) => ({ index: s.index, kind: s.kind, failures: s.failures })),
-      });
+        const scenarioOutDir = path.join(outDir, target, scenario.id);
+        ensureDir(scenarioOutDir);
+        writeJson(path.join(scenarioOutDir, 'steps.json'), result.steps);
+        writeJson(path.join(scenarioOutDir, 'normalized.json'), result.steps.map(toNormalizedStep));
+        writeJson(path.join(scenarioOutDir, 'result.json'), {
+          scenarioId: result.scenarioId,
+          target: result.target,
+          pass: result.pass,
+          errored: result.errored,
+          errorMessage: result.errorMessage,
+          stepFailures: result.steps.filter((s) => s.pass === false).map((s) => ({ index: s.index, kind: s.kind, failures: s.failures })),
+        });
 
-      const status = result.errored ? 'ERROR' : result.pass ? 'PASS' : 'FAIL';
-      log(`--- ${scenario.id} @ ${target}: ${status} ---`);
-      if (status !== 'PASS') {
-        if (result.errored) log(`    harness error: ${result.errorMessage}`);
-        for (const s of result.steps.filter((s2) => s2.pass === false)) {
-          log(`    step ${s.index} (${s.kind}) failed: ${s.failures.join('; ')}`);
+        const status = result.errored ? 'ERROR' : result.pass ? 'PASS' : 'FAIL';
+        log(`--- ${scenario.id} @ ${target}: ${status} ---`);
+        if (status !== 'PASS') {
+          if (result.errored) log(`    harness error: ${result.errorMessage}`);
+          for (const s of result.steps.filter((s2) => s2.pass === false)) {
+            log(`    step ${s.index} (${s.kind}) failed: ${s.failures.join('; ')}`);
+          }
         }
+
+        matrix.push({ target, scenarioId: scenario.id, pass: result.pass, errored: result.errored });
+
+        // Keep the working copy for post-hoc diagnosis on failure (ADR 025 §2) — remove it on
+        // success to bound disk usage across a multi-target, multi-scenario run.
+        if (result.pass && !args.keepAll) removeDir(workDir);
+        else log(`    working copy preserved: ${workDir}`);
       }
-
-      matrix.push({ target, scenarioId: scenario.id, pass: result.pass, errored: result.errored });
-
-      // Keep the working copy for post-hoc diagnosis on failure (ADR 025 §2) — remove it on
-      // success to bound disk usage across a multi-target, multi-scenario run.
-      if (result.pass && !args.keepAll) removeDir(workDir);
-      else log(`    working copy preserved: ${workDir}`);
     }
+  } finally {
+    // F12: the tarball cache dir is unique to this invocation (runId + pid) — clean it up
+    // unconditionally (success or failure) so `results/.cache/tarballs/` doesn't accumulate one
+    // directory per run forever. Packing is always cheap (packLocalTarballs never uses a
+    // staleness cache), so there is no reuse value in keeping it around.
+    removeDir(tarballCacheDir);
   }
 
   log('\n=== summary ===');
@@ -189,6 +251,31 @@ async function main() {
       `[run] non-gate target failure(s) (informational — e.g. the red/green proof against a known-buggy published version): ` +
         nonGateFailures.map((m) => `${m.scenarioId}@${m.target}`).join(', '),
     );
+  }
+
+  // F3: enforce the red-on-known-buggy-version proof instead of treating it as purely
+  // informational. A scenario's `expectFailOn` (e.g. `['0.1.4']` on
+  // prune-errored-run-destroys-baseline) names targets it is PINNED to fail against — if one of
+  // those targets was actually tested this run and it PASSED, the harness's ability to detect the
+  // bug it exists to catch has broken (a normalization change, an F1-style typo, or an actual
+  // upstream fix landing in a version this harness still expects to be buggy). This check is
+  // independent of `--gate-target`: a calibration break is a harness-integrity failure, not a
+  // per-target result, so it fails the run regardless of which target is being gated on.
+  const calibrationBreaks = [];
+  for (const scenario of scenarios) {
+    for (const target of scenario.expectFailOn ?? []) {
+      if (!args.targets.includes(target)) continue; // not exercised this run — nothing to check
+      const m = matrix.find((m2) => m2.target === target && m2.scenarioId === scenario.id);
+      if (m !== undefined && m.pass) calibrationBreaks.push(`${scenario.id}@${target}`);
+    }
+  }
+  if (calibrationBreaks.length > 0) {
+    log(
+      `\n[run] RED/GREEN CALIBRATION BROKEN: these scenario/target pairs are pinned (via 'expectFailOn') to prove a real bug by ` +
+        `going RED, but they PASSED instead: ${calibrationBreaks.join(', ')}. The harness can no longer demonstrate the regression ` +
+        `it exists to catch — treat this as a release blocker, not an informational note.`,
+    );
+    process.exitCode = 1;
   }
 }
 

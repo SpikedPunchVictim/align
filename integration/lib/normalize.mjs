@@ -81,14 +81,21 @@ const TEXT_RULES = [
     name: 'iso-timestamps',
     description:
       'Replaces ISO-8601 timestamps in free text (e.g. `align baseline show`\'s ' +
-      '`accepted 2026-08-08T...`) with `<normalized-timestamp>`.',
+      '`accepted 2026-08-08T...`) with `<normalized-timestamp>`, accepting either a Zulu (`Z`) ' +
+      'suffix or an explicit numeric UTC offset (`+00:00`, `-05:00`). F8: the original pattern ' +
+      'required a trailing `Z` and nothing else, so `2026-08-09T08:16:18.690+00:00` (a shape ' +
+      'genuinely produced by tools this harness shells out to, e.g. `git log --date=iso-strict`) ' +
+      'passed through untouched and became a spurious per-run diff. Widened rather than ' +
+      "documented-as-Zulu-only, because align's own timestamps (`Date#toISOString()`) are always " +
+      'Z-suffixed but this rule runs over ALL captured free text, including third-party output ' +
+      'this harness does not control the format of.',
     masks:
       'A regression that prints the right SHAPE of timestamp but the wrong VALUE (off-by-one-day, ' +
       'wrong timezone) — shape-only text normalization cannot distinguish "correct timestamp" from ' +
       '"wrong but plausible timestamp". Assertions that care about a specific accepted-at value ' +
       'must read the structured JSON field, not the human text.',
     apply(text) {
-      return text.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z/g, PLACEHOLDER_TIMESTAMP);
+      return text.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})/g, PLACEHOLDER_TIMESTAMP);
     },
   },
 ];
@@ -103,17 +110,34 @@ const TEXT_RULES = [
  */
 const KNOWN_ALIGN_VERSIONS = ['0.1.0', '0.1.1', '0.1.2', '0.1.3', '0.1.4'];
 
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * F7 fix: matches a known align version ONLY as a standalone token — not preceded or followed by
+ * a digit or a `.`. Plain `String#split(v).join(...)` (the original implementation) had no
+ * boundaries at all, so it matched `0.1.4` as a SUBSTRING of `nest v10.1.4` (-> `v1<normalized-
+ * version>`), of `@nestjs/core@10.1.3`, and — the critical failure — of BOTH `10.1.1` and
+ * `10.1.4`, which normalized to the identical placeholder and made a genuine third-party
+ * dependency-version difference in captured output invisible to every comparison. The lookbehind/
+ * lookahead here require a non-digit, non-`.` on both sides, so `10.1.4`'s embedded `0.1.4` is
+ * left alone (preceded by the digit `1`) while a genuinely standalone `0.1.4` (preceded by
+ * whitespace, `@`, start-of-string, etc.) still normalizes.
+ */
+const KNOWN_VERSION_PATTERN = new RegExp(`(?<![\\d.])(?:${KNOWN_ALIGN_VERSIONS.map(escapeRegExp).join('|')})(?![\\d.])`, 'g');
+
 /**
  * MASKS (version normalization specifically): every scenario in increment 1 is version-agnostic
  * — none of them assert "the installed align identifies itself as X". A scenario that DOES care
  * (a future version-skew or `align docs`/`align skill` cross-version comparison scenario, ADR 025
  * §7 table) must request `keepVersion: true` on its capture calls, or this rule would normalize
- * away the exact signal being tested.
+ * away the exact signal being tested. Genuinely confined to align's own five published versions
+ * now that boundary anchors are in place (F7) — before the fix, "confined to align's own five
+ * published versions" was aspirational prose the substring-replace implementation did not honor.
  */
 function normalizeVersionInText(text) {
-  let out = text;
-  for (const v of KNOWN_ALIGN_VERSIONS) out = out.split(v).join(PLACEHOLDER_VERSION);
-  return out;
+  return text.replace(KNOWN_VERSION_PATTERN, PLACEHOLDER_VERSION);
 }
 
 /** Normalizes one string of free text: absolute paths, then durations, then ISO timestamps, then
@@ -174,9 +198,15 @@ export const NORMALIZATION_CATALOG = [
   ...TEXT_RULES.map((r) => ({ name: r.name, description: r.description, masks: r.masks })),
   {
     name: 'known-align-versions',
-    description: 'Replaces the five published align version strings (0.1.0–0.1.4) with a placeholder in free text, unless a capture explicitly requests keepVersion: true.',
+    description:
+      'Replaces the five published align version strings (0.1.0–0.1.4) with a placeholder in free text, unless a capture ' +
+      'explicitly requests keepVersion: true. Boundary-anchored (not a plain substring match, F7): a match must not be ' +
+      'preceded or followed by a digit or `.`, so `10.1.4`, `@nestjs/core@10.1.3`, and similar embeddings are left alone, ' +
+      'and `10.1.1`/`10.1.4` no longer collide on the same placeholder.',
     masks:
       'Version-agnostic by default. A scenario asserting ON the installed version must opt out ' +
-      'via keepVersion — none of the increment-1 scenarios do.',
+      'via keepVersion — none of the increment-1 scenarios do. Still cannot distinguish a WRONG align version from the ' +
+      'right one if both happen to be in the five-item known list and keepVersion is not requested — that tradeoff is ' +
+      'inherent to normalizing versions away at all, not specific to this fix.',
   },
 ];

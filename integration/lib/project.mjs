@@ -4,10 +4,26 @@
 // owns the cheap, per-scenario half (installing align itself into an already-prepared copy).
 import * as path from 'node:path';
 import { run } from './exec.mjs';
-import { ensureDir, exists, removeDir, cloneDir, writeJson } from './fs-utils.mjs';
+import { ensureDir, exists, removeDir, cloneDir, writeJson, sha256String } from './fs-utils.mjs';
+
+/**
+ * F11: the base-cache key must capture everything that affects the INSTALLED dependency state of
+ * the cached checkout, not just which project/commit it is. The original key was `<id>-<sha>`
+ * only — `project.installCmd` (e.g. adding/removing `--legacy-peer-deps`), the npm version, and
+ * the node version can all change what a `npm ci`/`npm install` in that directory actually
+ * produces, and none of them are reflected in the pinned commit's sha. Bump nest's install flags
+ * without touching `sha` and a warm cache would silently keep serving the OLD dependency tree —
+ * exactly the "dependency state is accidental" failure mode ADR 025 §4 says the container exists
+ * to prevent, reintroduced at the cache layer.
+ */
+function installFingerprint(project) {
+  const npmVersion = run('npm', ['--version']).stdout.trim();
+  const installCmdStr = `${project.installCmd.command} ${project.installCmd.args.join(' ')}`;
+  return sha256String(JSON.stringify({ installCmdStr, nodeVersion: process.version, npmVersion })).slice(0, 12);
+}
 
 function baseDir(cacheRoot, project) {
-  return path.join(cacheRoot, 'base', `${project.id}-${project.sha}`);
+  return path.join(cacheRoot, 'base', `${project.id}-${project.sha}-${installFingerprint(project)}`);
 }
 
 function markerPath(dir) {

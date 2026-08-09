@@ -6,6 +6,42 @@ import { spawnSync } from 'node:child_process';
 
 const TEN_MB = 10 * 1024 * 1024;
 
+// F10: variables passed through unconditionally from whatever environment invoked `run.mjs` (a
+// dev shell, a CI runner). Kept minimal and justified per entry — this is not "everything except a
+// denylist", it is an allowlist of what a `git`/`npm`/`node` child process actually needs to
+// function, plus network-proxy configuration (needed for `npm install`/`git fetch` to succeed
+// behind a corporate proxy — stripping these would trade reproducibility for "the harness cannot
+// run at all" in that environment, which is a worse failure).
+const ENV_ALLOWLIST_KEYS = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'SHELL', 'TMPDIR', 'TMP', 'TEMP'];
+const ENV_PASSTHROUGH_KEYS = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'npm_config_registry'];
+
+/**
+ * Builds a sanitized child-process environment from `source` (normally `process.env`): only the
+ * allow/passthrough-listed keys survive, and three specific variables are forced to a fixed value
+ * regardless of what the host/CI environment set — `FORCE_COLOR`/`NO_COLOR` (ANSI escape codes in
+ * captured stdout/stderr would corrupt every `stdoutContains`-style content assertion) and `CI`
+ * (some tools change their own output shape when they detect a CI environment). `npm_config_*`
+ * variables (other than the registry passthrough above) are deliberately NOT forwarded — a host or
+ * CI shell commonly exports several (`npm_config_loglevel`, `npm_config_fund`, ...) that would
+ * silently change how `npm install`/`npm ci` behaves between two otherwise-identical invocations
+ * of this harness.
+ */
+export function sanitizeEnv(source = process.env) {
+  const out = {};
+  for (const key of ENV_ALLOWLIST_KEYS) {
+    if (source[key] !== undefined) out[key] = source[key];
+  }
+  for (const key of ENV_PASSTHROUGH_KEYS) {
+    if (source[key] !== undefined) out[key] = source[key];
+  }
+  out.NO_COLOR = '1';
+  delete out.FORCE_COLOR;
+  delete out.CI;
+  return out;
+}
+
+const HARNESS_ENV = sanitizeEnv(process.env);
+
 /**
  * Runs `command` with `args` in `cwd` and returns the full captured result. Never throws on a
  * non-zero exit — a non-zero exit is frequently the EXPECTED outcome under test (a refusal, a red
@@ -16,7 +52,7 @@ export function run(command, args, options = {}) {
   const start = Date.now();
   const result = spawnSync(command, args, {
     cwd: options.cwd,
-    env: options.env ?? process.env,
+    env: options.env ?? HARNESS_ENV,
     encoding: 'utf8',
     maxBuffer: TEN_MB,
     timeout: options.timeoutMs ?? 5 * 60 * 1000,

@@ -21,7 +21,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { run } from './exec.mjs';
-import { ensureDir, removeDir, readJson, writeJson } from './fs-utils.mjs';
+import { ensureDir, removeDir, readJson, writeJson, sha256File } from './fs-utils.mjs';
 
 const LOCAL_PACKAGES_IN_DEPENDENCY_ORDER = ['core', 'plugin-typescript', 'agent', 'cli'];
 const SCOPED_NAME = {
@@ -91,6 +91,73 @@ function writePackageJsonFor(workingDir, version, tarballs) {
 }
 
 /**
+ * F5: the ORIGINAL authenticity check compared the installed `align-cli` version string against
+ * `packages/cli/package.json`'s version — but that string equals the latest PUBLISHED version
+ * (`0.1.4`) for the entire life of an unreleased bump, which is the permanent steady state between
+ * releases (align's own version field doesn't move until a release, see the release process this
+ * file's header comment describes). If the `overrides` field ever silently stopped applying —
+ * `pnpm`/`npm` behavior change, a workspace `.npmrc` shadowing it, a lockfile quirk — npm would
+ * fall back to resolving `align-cli@0.1.4`/`align-core@0.1.4` from the REGISTRY, and the version
+ * check alone could not tell that apart from a genuine local install: both report `0.1.4`.
+ *
+ * Two INDEPENDENT, stronger checks, both required to pass:
+ *
+ *   1. `package-lock.json` provenance: every one of the four `@spikedpunch/*` packages must have
+ *      resolved from a `file:` spec (a local tarball), not a registry URL. This directly verifies
+ *      the "resolved specs are file: tarballs" property — a registry fallback shows up as a
+ *      `https://registry.npmjs.org/...` (or similar) `resolved` field instead.
+ *   2. Content check: `dist/index.js` for each package, as actually installed into
+ *      `node_modules`, must be BYTE-IDENTICAL (sha256) to the working tree's own build. A registry
+ *      install of the same version number is a genuinely different build (different source at
+ *      publish time) and would fail this even in the pathological case where check 1 were somehow
+ *      also fooled.
+ */
+function verifyLocalInstallAuthenticity(workingDir, alignRepoRoot, log) {
+  const lockPath = path.join(workingDir, 'package-lock.json');
+  if (!fs.existsSync(lockPath)) {
+    throw new Error(`local install authenticity check: ${lockPath} does not exist — cannot verify align was resolved from a local tarball, not the registry.`);
+  }
+  const lock = readJson(lockPath);
+  const lockedPackages = lock.packages ?? {};
+
+  for (const pkg of LOCAL_PACKAGES_IN_DEPENDENCY_ORDER) {
+    const scopedName = SCOPED_NAME[pkg];
+    const key = `node_modules/${scopedName}`;
+    const entry = lockedPackages[key];
+    if (entry === undefined) {
+      throw new Error(`local install authenticity check: package-lock.json has no entry for '${key}' — cannot verify its resolution source.`);
+    }
+    const resolved = entry.resolved ?? '';
+    if (!resolved.startsWith('file:')) {
+      throw new Error(
+        `local install authenticity check FAILED for ${scopedName}: package-lock.json resolved it from '${resolved}', not a local file: tarball. ` +
+          `This means 'local' may silently be testing a REGISTRY package instead of the working tree under review — the ` +
+          `npm 'overrides' field this install depends on did not apply as expected.`,
+      );
+    }
+
+    const shortName = scopedName.split('/')[1];
+    const installedDist = path.join(workingDir, 'node_modules', '@spikedpunch', shortName, 'dist', 'index.js');
+    const workingTreeDist = path.join(alignRepoRoot, 'packages', pkg, 'dist', 'index.js');
+    if (!fs.existsSync(installedDist)) {
+      throw new Error(`local install authenticity check: ${installedDist} does not exist after install.`);
+    }
+    if (!fs.existsSync(workingTreeDist)) {
+      throw new Error(`local install authenticity check: ${workingTreeDist} does not exist — run \`pnpm -r build\` before installing 'local'.`);
+    }
+    const installedHash = sha256File(installedDist);
+    const workingTreeHash = sha256File(workingTreeDist);
+    if (installedHash !== workingTreeHash) {
+      throw new Error(
+        `local install authenticity check FAILED for ${scopedName}: installed dist/index.js (sha256 ${installedHash}) does not match the ` +
+          `working tree's own build (sha256 ${workingTreeHash}) at ${workingTreeDist} — 'local' is not testing the code under review.`,
+      );
+    }
+  }
+  log('[version-install] local install authenticity verified: all four packages resolved from file: tarballs, dist/index.js content matches the working tree build');
+}
+
+/**
  * Installs align `version` ('local' or a published version string) as a devDependency into
  * `workingDir` — the real user flow (ADR 025 task brief: "a transitive or global install is not
  * sufficient — align emits a specific error for this"). Runs a real `npm install` every call
@@ -122,6 +189,14 @@ export function installAlignVersion(workingDir, version, options) {
   const expectedVersion = version === 'local' ? readJson(path.join(options.alignRepoRoot, 'packages', 'cli', 'package.json')).version : version;
   if (installedVersion !== expectedVersion) {
     throw new Error(`align ${version} install produced align-cli@${installedVersion}, expected @${expectedVersion}`);
+  }
+
+  // F5: the version-string check above is necessary but not sufficient for 'local' — see
+  // `verifyLocalInstallAuthenticity`'s doc comment for why a version-string match alone cannot
+  // distinguish a genuine local-tarball install from a silent registry fallback resolving the
+  // same version number.
+  if (version === 'local') {
+    verifyLocalInstallAuthenticity(workingDir, options.alignRepoRoot, options.log ?? (() => {}));
   }
 
   return { installLog: install, installedVersion };
