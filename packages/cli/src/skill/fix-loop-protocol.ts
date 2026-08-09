@@ -39,9 +39,13 @@ export const FIX_LOOP_PROTOCOL: readonly ProtocolPoint[] = [
   {
     summary: 'Baseline acceptance is a HUMAN decision.',
     detail:
-      '`align baseline accept` / `align_baseline_accept` (gated off by default, ADR 006) tolerates a violation ' +
-      'as existing debt — it does not fix it. An agent under pressure to reach green must not self-serve this; ' +
-      'propose it to the human instead of calling it unprompted.',
+      '`align baseline accept --rule <ruleId>` is the human-run CLI command that tolerates a violation as ' +
+      'existing debt — it does not fix it. Over MCP, `align_propose_rules`\'s `accept_new_into_baseline` ' +
+      'parameter is the only path that writes to the baseline, and it is gated behind `allowBaselineFromMcp` ' +
+      '(an align.config.ts export a human adds, default false, ADR 006/024) — with the gate off it is refused ' +
+      'outright, not silently ignored. An agent under pressure to reach green must not ask a human to flip ' +
+      'that flag just to self-serve; propose baselining the debt to the human and let them decide instead of ' +
+      'calling it unprompted.',
   },
   {
     summary: 'Explain on demand, not by default.',

@@ -21,6 +21,7 @@ import { computeBaselineDebt } from '../commands/check.js';
 import { DEFAULT_DOC_PATH, proposeFromClientSubmission, writeBuildArtifacts, type DryRunResult } from '../commands/build.js';
 import { renderCondensedFixingSkill } from '../skill/condensed.js';
 import { withVersionSkew } from '../version-skew.js';
+import { decideMcpBaselineWrite } from './baseline-gate.js';
 
 /** Shared by `align_check`/`align_violations`: runs a fresh check and persists any move-transfer
  * (ADR 006) the run performed, so a renamed file's baselined violation doesn't need a separate
@@ -230,6 +231,27 @@ export function createMcpServer(rootDir: string): McpServer {
 
       if (apply !== true) {
         return { content: [{ type: 'text', text: JSON.stringify(diffPayload, null, 2) }] };
+      }
+
+      // ADR 024 (implementing ADR 006:40-43): the single gate over every MCP-reachable
+      // `.align/baseline.json` write. Only checked when this call would actually attempt one
+      // (`accept_new_into_baseline: true` AND there is new debt to accept) — with no new
+      // violations `acceptNewIntoBaseline` is inert either way (`writeBuildArtifacts` below), so
+      // there is nothing for the gate to refuse. Checked BEFORE calling `writeBuildArtifacts` (and
+      // thus before any of its three artifact writes) so a refusal here means nothing was written
+      // at all, and so the refusal message can name this specific gate and its CLI escape hatch
+      // instead of being indistinguishable from `writeBuildArtifacts`'s own unrelated ADR 006
+      // build-time consent-required refusal (which fires independently of this flag whenever
+      // `accept_new_into_baseline` is absent/false and new debt exists).
+      if (accept_new_into_baseline === true && result.impact.addedNew.length > 0) {
+        const { allowBaselineFromMcp } = await loadConfig(rootDir);
+        const decision = decideMcpBaselineWrite(
+          allowBaselineFromMcp,
+          result.impact.addedNew.map((v) => v.ruleId),
+        );
+        if (!decision.allowed) {
+          return { isError: true, content: [{ type: 'text', text: decision.message }] };
+        }
       }
 
       // `writeBuildArtifacts` throws (rather than returning `{ ok: false }`) when it reads a

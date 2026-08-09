@@ -23,7 +23,7 @@ export function baseline(): string {
 - \`align init\` seeds the baseline from the first check. Interactive: asks. CI/non-interactive: requires \`--accept-existing\`, else exits red — silence is never consent.
 - \`align baseline accept [--rule <ruleId>]\` accepts current violations (optionally scoped to one rule). \`align baseline show\` lists what's baselined; \`align baseline prune\` drops entries for violations that no longer exist (and refuses, changing nothing, when the check errored — an incomplete scan proves nothing was fixed).
 
-Entries are fingerprinted on a **content-snippet hash, not a line number**, so moving or lightly editing a file doesn't un-baseline or double-count — \`prune\` reports moved entries rather than treating them as new. The MCP server never self-serves acceptance (\`allowBaselineFromMcp\` defaults \`false\`): an agent can't grant itself amnesty from a rule it's failing.`;
+Entries are fingerprinted on a **content-snippet hash, not a line number**, so moving or lightly editing a file doesn't un-baseline or double-count — \`prune\` reports moved entries rather than treating them as new. The MCP server never self-serves acceptance: any MCP-reachable baseline write is gated behind \`allowBaselineFromMcp\` (an \`align.config.ts\` export a human adds, defaults \`false\`) — today that governs \`align_propose_rules\`'s \`accept_new_into_baseline\` parameter, which is refused outright (not silently ignored) while the gate is off, naming \`align baseline accept --rule <ruleId>\` as the CLI equivalent. An agent can't grant itself amnesty from a rule it's failing.`;
 }
 
 export function greenfield(): string {

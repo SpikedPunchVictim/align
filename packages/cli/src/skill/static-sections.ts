@@ -67,11 +67,15 @@ export function renderBaselineConsentSection(): string {
     '  and without the flag `align init` exits red.',
     '- `align baseline accept [--rule <ruleId>]` accepts current violations (optionally scoped to one rule) —',
     '  a human-invoked CLI command.',
-    '- **MCP never self-serves baseline acceptance by default**: `align_baseline_accept` is gated behind',
-    '  `allowBaselineFromMcp`, default `false`. An agent cannot grant itself amnesty from a rule it is failing.',
-    '  If a violation looks like it should be baselined as pre-existing debt rather than fixed, say so to the',
-    "  human and let them run the acceptance — don't call an acceptance tool unprompted under pressure to turn",
-    '  a red verdict green.',
+    '- **MCP never self-serves baseline acceptance by default**: any MCP-reachable write to the baseline is',
+    '  gated behind `allowBaselineFromMcp` — an `align.config.ts` export a human adds, default `false`. Today',
+    '  that governs `align_propose_rules`\'s `accept_new_into_baseline` parameter (scoped narrowly to violations',
+    '  newly introduced by the rules proposed in that same call, never arbitrary pre-existing debt). With the',
+    '  gate off, `accept_new_into_baseline: true` is refused outright — not silently ignored — and the refusal',
+    '  names the CLI equivalent (`align baseline accept --rule <ruleId>`). An agent cannot grant itself amnesty',
+    '  from a rule it is failing. If a violation looks like it should be baselined as pre-existing debt rather',
+    "  than fixed, say so to the human and let them run the acceptance — don't call an acceptance tool",
+    '  unprompted under pressure to turn a red verdict green.',
   ].join('\n');
 }
 

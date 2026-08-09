@@ -1,15 +1,9 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { createMcpServer } from '../src/mcp/server.js';
 import { ALIGN_VERSION } from '../src/telemetry/index.js';
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-const fixturesDir = path.join(here, 'fixtures');
+import { connectedClient, fixturesDir, textOf } from './mcp-test-helpers.js';
 
 /**
  * Builds `dir/node_modules` the same way the whole-directory `fs.symlinkSync(realNodeModules, ...)`
@@ -62,21 +56,6 @@ function writeMinimalAlignRepo(dir: string): void {
     `import { defineProject } from '@spikedpunch/align-core/dsl';\nexport default defineProject({ components: { app: 'src/**' } });\n`,
     'utf8',
   );
-}
-
-async function connectedClient(rootDir: string): Promise<Client> {
-  const server = createMcpServer(rootDir);
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: 'test-client', version: '0.0.0' });
-  await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
-  return client;
-}
-
-function textOf(result: Awaited<ReturnType<Client['callTool']>>): string {
-  const content = result.content as { type: string; text?: string }[];
-  const first = content[0];
-  if (first === undefined || first.text === undefined) throw new Error('expected a text content block');
-  return first.text;
 }
 
 describe('align mcp — align_check', () => {

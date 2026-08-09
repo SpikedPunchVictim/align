@@ -44,6 +44,18 @@ export interface LoadedConfig {
   // portable `RulesetIR`. Read from an optional named `knownPublicDeepImports` export; `[]` when
   // absent (the built-in seed still applies -- this list only ADDS to it, never replaces it).
   readonly knownPublicDeepImports: readonly string[];
+  // ADR 006:40-43 / ADR 024: the single gate over every MCP-reachable write to
+  // `.align/baseline.json` — today that's `align_propose_rules`'s `accept_new_into_baseline`
+  // (`mcp/server.ts`). Default `false` (an agent cannot grant itself amnesty from a rule it is
+  // failing); a human opts in per-project by adding `export const allowBaselineFromMcp = true;` to
+  // align.config.ts — no MCP tool can set this, only a human editing the repo config can. Same
+  // deviation shape as `excludes`/`hostRules`/`telemetry`/`compositionRoots`/
+  // `knownPublicDeepImports`: an MCP-authorization concern, not a rule-evaluation concern, so it
+  // doesn't belong in the portable `RulesetIR`. Unlike those siblings this is never optional at the
+  // `LoadedConfig` boundary — there is exactly one source (this config export, no CLI flag/env var
+  // precedence chain the way `telemetry` has), so "absent" is resolved to its default (`false`)
+  // right here rather than carried as `undefined` for every caller to re-default.
+  readonly allowBaselineFromMcp: boolean;
 }
 
 /** Validates an optional `string[]` sibling export (`excludes`/`compositionRoots`/
@@ -58,6 +70,19 @@ function readStringArrayExport(value: unknown, exportName: string): readonly str
   if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
     const got = Array.isArray(value) ? 'an array with non-string entries' : typeof value;
     throw new Error(`\`${exportName}\` in ${CONFIG_FILENAME} must be a string[] — got ${got}.`);
+  }
+  return value;
+}
+
+/** Same fail-fast discipline as `readStringArrayExport`, for the one boolean-shaped sibling export
+ * (`allowBaselineFromMcp`) — this one is security-relevant (it authorizes an MCP-reachable
+ * `.align/baseline.json` write, ADR 024), so a malformed value must be a loud config-load error,
+ * never a value silently coerced to truthy/falsy. `undefined` (the export is absent) resolves to
+ * the documented default, `false`. */
+function readBooleanExport(value: unknown, exportName: string): boolean {
+  if (value === undefined) return false;
+  if (typeof value !== 'boolean') {
+    throw new Error(`\`${exportName}\` in ${CONFIG_FILENAME} must be a boolean — got ${typeof value}.`);
   }
   return value;
 }
@@ -100,6 +125,7 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
     telemetry?: boolean;
     compositionRoots?: readonly string[];
     knownPublicDeepImports?: readonly string[];
+    allowBaselineFromMcp?: boolean;
   };
   try {
     mod = (await import(pathToFileURL(configPath).href)) as typeof mod;
@@ -120,14 +146,15 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
   const telemetry = mod.telemetry !== undefined ? { telemetry: mod.telemetry } : {};
   const compositionRoots = readStringArrayExport(mod.compositionRoots, 'compositionRoots');
   const knownPublicDeepImports = readStringArrayExport(mod.knownPublicDeepImports, 'knownPublicDeepImports');
+  const allowBaselineFromMcp = readBooleanExport(mod.allowBaselineFromMcp, 'allowBaselineFromMcp');
 
   if (!includeGenerated) {
-    return { ruleset: mod.default, excludes, hostRules, compositionRoots, knownPublicDeepImports, ...telemetry };
+    return { ruleset: mod.default, excludes, hostRules, compositionRoots, knownPublicDeepImports, allowBaselineFromMcp, ...telemetry };
   }
 
   const generated = readGeneratedRules(rootDir);
   if (generated === undefined) {
-    return { ruleset: mod.default, excludes, hostRules, compositionRoots, knownPublicDeepImports, ...telemetry };
+    return { ruleset: mod.default, excludes, hostRules, compositionRoots, knownPublicDeepImports, allowBaselineFromMcp, ...telemetry };
   }
 
   const mergedRules = mergeGeneratedRules(mod.default.rules, generated.rules);
@@ -137,6 +164,7 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
     hostRules,
     compositionRoots,
     knownPublicDeepImports,
+    allowBaselineFromMcp,
     ...telemetry,
   };
 }
