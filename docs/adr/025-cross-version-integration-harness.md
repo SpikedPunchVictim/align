@@ -128,9 +128,40 @@ present in a published version, the harness is not yet working, regardless of wh
 - Lives at the repo root (`integration/` or similar), not under `packages/` — it is not a
   published package.
 
-### 7. Scenarios required for 0.2.0
+### 7. Coverage — every command, not just the upgrade path
 
-Minimum set, each mapping to a commitment made in ADRs 021–024:
+The harness's advantage is running **real commands against real project state**. Scoping it to
+`upgrade` would waste most of that. **Every CLI command carries at least one scenario**, and a new
+command or flag is not complete without one.
+
+| Command | Scenarios | Invariants worth pinning |
+|---|---|---|
+| `init` | fresh project; repo with pre-existing violations; re-run over an existing baseline | non-interactive requires `--accept-existing` (ADR 006); refuses a malformed marker block |
+| `check` | green; red; `--json`; `--frozen-rules`; `--untrusted` | exit 0 **iff** green; `--untrusted` never imports `align.config.ts` (ADR 014) |
+| `export-ir` | write, then `check --untrusted` consumes it; `--out` to a non-default path | the IR round-trips; a moved IR still loads |
+| `baseline` | `accept` (bare and `--rule`); `prune`; `show` | `accept` never deletes; `prune` refusal leaves the file byte-identical |
+| `explain` | known rule id; unknown rule id | unknown id fails cleanly, no stack trace |
+| `doctor` | clean repo; dead tsconfig aliases; unmapped files; empty components; orphaned workspace packages; stale skill; **corrupt config**; **no repo root** | **exit code is ALWAYS 0** — including on a config error and with no repo root |
+| `build` | dry-run (writes nothing); `--apply`; `--verify` after a doc edit | dry-run leaves the tree untouched; `--verify` goes red on drift |
+| `mcp` | each registered tool over stdio; the ADR 024 gate off and on | a corrupt baseline surfaces as an error response, not a crash |
+| `skill` | print; `--install`; re-install after a version bump | the content hash covers the body, not the version stamp (ADR 021 gap 3) |
+| `docs` | topic list; each topic renders | prose is version-matched to the installed binary |
+| `telemetry` | with a populated `.align/telemetry.jsonl`; with none | absent file is not an error |
+| `upgrade` | see the cross-version table below | — |
+
+`doctor`'s always-zero exit deserves its own emphasis: it is a contract the project has **already
+broken once**. During the 2026-08-03 audit, a config-error fix applied uniformly across commands
+gave `doctor` a non-zero exit path, and it was caught by review rather than by a test. That is
+precisely the class of regression this harness exists to catch mechanically.
+
+**`agent` is out of scope.** It requires `ANTHROPIC_API_KEY` and a live model, which Decision 1
+forbids inside the harness. It is exercised separately (`test-apps/AGENT_LIVE_REPORT.md`,
+`AGENT_LIVE_KIMI_REPORT.md`). This boundary is deliberate: the harness's value is that no model
+participates in it, and admitting one command as an exception would forfeit that for all of them.
+
+#### Cross-version scenarios required for 0.2.0
+
+The subset that can only be expressed across versions, each mapping to a commitment in ADRs 021–024:
 
 | Scenario | Proves |
 |---|---|
@@ -140,7 +171,8 @@ Minimum set, each mapping to a commitment made in ADRs 021–024:
 | prune on an errored scan | ADR 023 tier 1 — and the red-on-0.1.4 proof above |
 | `accept_new_into_baseline` with the gate off, then on | ADR 024 |
 | `doctor` after a version bump without re-installing the skill | ADR 021 gap 3 |
-| `init` on a fresh project | the day-one path |
+| `check` under a version-skewed install (binary ≠ installed core) | ADR 021 gap 1 — needs two versions present at once |
+| `docs` and `skill` output compared across two installed versions | version-matched prose actually tracks the binary |
 
 ## Alternatives considered
 
@@ -161,8 +193,14 @@ routine friction for a signal that only changes meaningfully at release boundari
 
 - A release acquires a new prerequisite. `align upgrade`'s transform tier stays **unproven live**
   until the harness has driven it, and that phrasing is required in release notes until it has.
-- The harness becomes a maintenance surface: a new command or flag needs a scenario, and every
-  release needs its migration entry exercised.
+- The harness becomes a maintenance surface, and a broad one: **every command carries a scenario**,
+  so a new command or flag is not complete without one, and every release needs its migration entry
+  exercised. This is a real ongoing cost, accepted because the alternative — a harness that only
+  covers the upgrade path — leaves the majority of the CLI verified solely by fixtures running the
+  working-tree build.
+- Command invariants that are currently prose become executable: `doctor` always exits 0, `check`
+  exits 0 iff green, `build` dry-run writes nothing, `baseline accept` never deletes. Several of
+  these are stated in doc comments today and enforced by nothing.
 - Normalization rules are load-bearing. If they are too aggressive they hide real diffs; too
   lax and every run is noise. Expect to iterate on them, and treat a normalization change as a
   change to what the harness can detect.
