@@ -15,7 +15,7 @@ import { loadConfig } from '../config.js';
 import { ALIGN_VERSION } from '../telemetry/index.js';
 import { parseSkillVersionMarker, parseSkillContentHashMarker, computeSkillContentHash } from '../skill/version-stamp.js';
 import { renderSkillMarkdown } from '../skill/render.js';
-import { detectVersionSkewAdvisory } from '../version-skew.js';
+import { buildUnknownProvenanceAdvisory, detectVersionSkewAdvisory } from '../version-skew.js';
 
 const UNMAPPED_EXAMPLES = 5;
 /** Stage 2 live-probe DX finding, carried into Stage 3: the agent had to script against the
@@ -144,6 +144,13 @@ async function collectDoctorReport(rootDir: string, program: Command | undefined
 
   const staleSkill = buildStaleSkillAdvisory(rootDir, program);
   if (staleSkill !== undefined) advisories.push(staleSkill);
+
+  // Absent `.align/version.json` is reported HERE and never by `align check` (ADR 022, amended
+  // 2026-08-09) — it is not a defect and carries no action, it is the permanent steady state for
+  // pre-0.2.0 installs and for any repo that only ever runs `check`. The actionable half (a stamp
+  // that DISAGREES with the running binary) stays on `check`, where CI will see it.
+  const unknownProvenance = buildUnknownProvenanceAdvisory(rootDir);
+  if (unknownProvenance !== undefined) advisories.push(unknownProvenance);
 
   const loaded = await loadConfig(rootDir).catch((err: unknown) => {
     advisories.push({

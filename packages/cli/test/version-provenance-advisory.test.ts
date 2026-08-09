@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runCheck } from '../src/commands/check.js';
 import { ALIGN_VERSION } from '../src/telemetry/index.js';
+import { buildUnknownProvenanceAdvisory } from '../src/version-skew.js';
 
 // ADR 021/022: `align check` reads `.align/version.json` and advises when the running binary
 // differs from the stamp — a DIFFERENT signal from the pre-existing global-vs-local `version-skew`
@@ -60,14 +61,18 @@ async function readAdvisories(dir: string): Promise<{ kind: string; message: str
 }
 
 describe('align check — .align/version.json provenance advisory', () => {
-  it('absent stamp: a distinct "unknown provenance" advisory, never an error, never blocks the verdict', async () => {
+  // ADR 022 amended 2026-08-09: an absent stamp is NOT a check-time signal. It is the permanent
+  // steady state for every pre-0.2.0 install and for every repo that only runs `check` (the CI
+  // case — a check never creates the file), so advising on it here meant a non-actionable warning
+  // on every run whose only remedy was to mutate the repo. That trains users past advisories and
+  // would take the actionable `artifact-version-skew` case below down with it. The observation
+  // moved to `align doctor`, the read-only survey command; see doctor.test.ts.
+  it('absent stamp: SILENT on check — no provenance advisory, verdict unaffected', async () => {
     tmpDir = copyFixture('simple-app');
     const code = await runCheck(tmpDir, { json: false });
-    expect(code).toBe(0); // verdict green — an advisory must never flip this
+    expect(code).toBe(0); // verdict green — unchanged
     const advisories = await readAdvisories(tmpDir);
-    const advisory = advisories.find((a) => a.kind === 'artifact-version-unknown');
-    expect(advisory).toBeDefined();
-    expect(advisory?.message).not.toContain('ZodError');
+    expect(advisories.some((a) => a.kind === 'artifact-version-unknown')).toBe(false);
   });
 
   it('stamp matches the running binary: no provenance advisory at all', async () => {
@@ -118,5 +123,25 @@ describe('align check — .align/version.json provenance advisory', () => {
     expect(code).toBe(1);
     expect(errors.join('\n')).toContain('version.json');
     expect(errors.join('\n')).not.toContain('    at '); // no raw Node stack trace leaking through
+  });
+});
+
+// The other half of the split (ADR 022, amended 2026-08-09): `check` stays silent on an absent
+// stamp; `doctor` — align's read-only advisory survey — is where the observation surfaces.
+describe('align doctor — unknown artifact provenance', () => {
+  it('absent stamp: doctor reports it, and says plainly that nothing needs doing', () => {
+    tmpDir = copyFixture('simple-app');
+    const advisory = buildUnknownProvenanceAdvisory(tmpDir);
+    expect(advisory?.kind).toBe('artifact-version-unknown');
+    expect(advisory?.message).toContain('nothing needs doing');
+    // Must not tell a user to run `align init` — in a polyglot monorepo already initialized in a
+    // subproject that is precisely the wrong advice, and `program-repo-root.test.ts` guards it.
+    expect(advisory?.message).not.toContain('align init');
+  });
+
+  it('present stamp: doctor stays silent, so the skew case is never double-reported', () => {
+    tmpDir = copyFixture('simple-app');
+    writeStamp(tmpDir, '0.0.1'); // a MISMATCHED stamp — still doctor's silence, `check`'s signal
+    expect(buildUnknownProvenanceAdvisory(tmpDir)).toBeUndefined();
   });
 });

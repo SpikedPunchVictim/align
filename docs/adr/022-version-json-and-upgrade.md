@@ -85,8 +85,23 @@ existing prune/check/accept flow.**
   corrupt-≠-absent discipline the baseline reader gained in the audit
   (`packages/cli/src/align-dir.ts` — a corrupt artifact throws and names its likely cause; it is
   never silently read as empty).
-- **Absent is a legitimate state.** Every install created before 0.2.0 has no `version.json`.
-  Absence means "unknown, predates stamping" and produces an advisory, never an error.
+- **Absent is a legitimate state, and is reported by `align doctor` — not `align check`.**
+  Every install created before 0.2.0 has no `version.json`. Absence means "unknown, predates
+  stamping"; it is never an error.
+
+  **Amended 2026-08-09.** This ADR originally said absence "produces an advisory" on `check`, and
+  that was wrong — the implementation followed it literally and the result was immediately visible
+  on align's own repo. An absent stamp is not a defect and carries no action. It is the permanent
+  steady state for every pre-0.2.0 install *and* for every repo whose users only run `check`,
+  which is the CI case and therefore most repos, because a check never creates the file. So the
+  advisory fired on every run, could only be silenced by mutating the repo, and would never clear
+  on its own. That is how an advisory channel gets tuned out — taking the one genuinely actionable
+  signal here, `artifact-version-skew`, down with it.
+
+  `align doctor` is align's read-only advisory survey and already carries every observation of
+  this shape (dead tsconfig aliases, empty components, unmapped files, a stale skill snapshot).
+  Someone running `doctor` is asking to be told about their setup; someone running `check` is
+  asking whether their architecture holds. The observation belongs to the first question.
 - **Write discipline — this is the spec, and it is narrower than "unconditionally".** Any command
   that writes an `.align/` artifact also stamps `alignVersion`: `init`, `build --apply`,
   `export-ir`, `baseline accept`/`prune`, `upgrade`, and `check` on the move-transfer path
@@ -100,10 +115,16 @@ existing prune/check/accept flow.**
 ### `align check` reads it
 
 `align check` — not only `align upgrade` — reads `version.json` and emits an advisory when the
-running binary differs from the stamp. **CI runs `check`, not `upgrade`.** A skew signal that only
-appears in a command nobody runs in automation is not a signal. The downgrade direction
+running binary **differs from** the stamp. **CI runs `check`, not `upgrade`.** A skew signal that
+only appears in a command nobody runs in automation is not a signal. The downgrade direction
 (stamp newer than the running binary) is the more dangerous one and is called out explicitly:
 artifacts written by a newer align may encode fingerprints this binary cannot reproduce.
+
+**Only the mismatch case reaches `check`.** A missing stamp is silent here and surfaces in
+`doctor` instead, per the amendment above. The distinction is actionability: a stamp that
+disagrees with the running binary tells a user something about the artifacts they are about to
+trust, and is rare. An absent stamp tells them nothing they can act on, and is permanent for most
+repos.
 
 ### `align upgrade`
 

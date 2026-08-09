@@ -113,14 +113,16 @@ function compareVersions(a: string, b: string): number {
  * (e.g. a correctly-matched local install, but a baseline nobody has touched since an old release).
  *
  * Three outcomes, each deliberately distinct:
- *  - **Absent stamp** → a low-key `artifact-version-unknown` advisory, never an error. Every
- *    install created before 0.2.0 has no stamp, and a repo whose users only ever run `align check`
- *    (the common case — CI runs `check`, never a mutating command) keeps no stamp indefinitely,
- *    by design (ADR 022: "a check must not mutate the repo it is checking"). That is a normal,
- *    expected, permanent steady state for many repos, not a defect — surfaced as an advisory
- *    (never blocking, never elevated to red) so a user who DOES want provenance knows to run a
- *    stamping command, not silently left wondering why `align upgrade` (once it exists) has
- *    nothing to reconcile.
+ *  - **Absent stamp** → `undefined` HERE, and reported by `align doctor` instead
+ *    (`buildUnknownProvenanceAdvisory`, `commands/doctor.ts`). ADR 022 originally put this on
+ *    `align check`; that was wrong and the ADR was amended. An absent stamp is the normal,
+ *    permanent steady state for every pre-0.2.0 install and for every repo whose users only run
+ *    `check` — which is the CI case, i.e. most repos — because a check must not mutate the repo it
+ *    is checking and therefore never creates the file. Advising on it from `check` meant a
+ *    non-actionable warning on every run that the user could only silence by mutating their repo,
+ *    which is how an advisory channel gets tuned out and takes the skew advisory below down with
+ *    it. `doctor` is the read-only survey command — the place someone asks "tell me about my
+ *    setup" — so the observation lives there.
  *  - **Stamp matches the running binary** → `undefined`, no advisory (the common, lockstep case).
  *  - **Stamp differs** → an `artifact-version-skew` advisory, with the direction called out
  *    explicitly rather than a generic "differs": a stamp OLDER than the running binary (the
@@ -137,16 +139,9 @@ function compareVersions(a: string, b: string): number {
  */
 export function detectArtifactVersionSkewAdvisory(rootDir: string): Advisory | undefined {
   const stamp = readVersionFile(rootDir);
-  if (stamp === undefined) {
-    return {
-      kind: 'artifact-version-unknown',
-      message:
-        `.align/ carries no version.json stamp, so it's unknown which align version last wrote it — either ` +
-        `this install predates 0.2.0, or nothing in .align/ has been written since (a plain 'align check' ` +
-        `never creates this file). Run a command that writes .align/ (e.g. 'align init', 'align baseline accept') ` +
-        `to record provenance.`,
-    };
-  }
+  // Absent → not a check-time signal. See this function's doc comment and
+  // `buildUnknownProvenanceAdvisory` below.
+  if (stamp === undefined) return undefined;
   if (stamp.alignVersion === ALIGN_VERSION) return undefined;
 
   const cmp = compareVersions(stamp.alignVersion, ALIGN_VERSION);
@@ -171,6 +166,37 @@ export function detectArtifactVersionSkewAdvisory(rootDir: string): Advisory | u
       `since changed, so new-looking debt may be reappearing debt rather than a real regression. Review new ` +
       `debt before accepting it as real; reconcile manually (prune stale entries, re-run check, re-accept real ` +
       `churn) if in doubt.`,
+  };
+}
+
+/**
+ * The absent-stamp half of artifact provenance, split out of
+ * `detectArtifactVersionSkewAdvisory` so it reaches `align doctor` ONLY — never `align check`.
+ *
+ * Why the split (ADR 022, amended 2026-08-09): an absent stamp is not a defect and carries no
+ * action. It is the permanent steady state for every install created before 0.2.0, and for every
+ * repo whose users only run `align check` — the CI case — because a check never writes the file.
+ * On `check` this produced a warning on every run whose only remedy was "mutate your repo to
+ * silence me", which trains users to skim past advisories and costs us the one signal in this
+ * area that IS actionable: `artifact-version-skew`.
+ *
+ * `doctor` is align's read-only advisory survey and already carries every other observation of
+ * this shape (dead tsconfig aliases, empty components, unmapped files, a stale skill snapshot).
+ * Someone running `doctor` is asking to be told about their setup; someone running `check` is
+ * asking whether their architecture holds.
+ *
+ * Returns `undefined` when a stamp exists — including when it disagrees with the running binary,
+ * because that case is `detectArtifactVersionSkewAdvisory`'s and must not be double-reported.
+ */
+export function buildUnknownProvenanceAdvisory(rootDir: string): Advisory | undefined {
+  if (readVersionFile(rootDir) !== undefined) return undefined;
+  return {
+    kind: 'artifact-version-unknown',
+    message:
+      `.align/ carries no version.json stamp, so which align version last wrote these artifacts is unknown — ` +
+      `either this install predates 0.2.0, or nothing in .align/ has been written since (a plain 'align check' ` +
+      `never creates the file, by design). Nothing is wrong and nothing needs doing: provenance is simply ` +
+      `unrecorded, and the next command that writes .align/ will record it.`,
   };
 }
 
