@@ -11,3 +11,7 @@ coverage/
 
 # npm pack artifacts (RELEASING.md inspection step)
 *.tgz
+
+# cross-version integration harness (ADR 025): run output, cloned projects, packed tarballs —
+# reproducible from integration/{scenarios,projects,lib} on demand, never committed.
+integration/results/

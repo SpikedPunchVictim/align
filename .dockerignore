@@ -1,0 +1,9 @@
+.git
+node_modules
+**/node_modules
+**/dist
+coverage
+test-apps
+integration/results
+*.tgz
+.DS_Store
