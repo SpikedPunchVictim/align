@@ -13,6 +13,12 @@ import { toRepoRelativePath, type HostPredicate, type HostRuleContext, type Host
 export const excludes = [
   'test-apps',
   'docs/evidence',
+  // Agent tooling scratch space. `.claude/worktrees/` holds full git worktrees of THIS repo, so
+  // without this every fixture tree inside them re-enters the scan under a path the
+  // `packages/*/test/fixtures` excludes below cannot match (those are prefix-anchored, and a
+  // worktree adds a prefix) — a seeded cycle fixture then surfaces as a real violation of align's
+  // own architecture. A nested checkout is never part of the parent repo's architecture.
+  '.claude',
   'packages/core/test/fixtures',
   'packages/plugin-typescript/test/fixtures',
   'packages/cli/test/fixtures',
