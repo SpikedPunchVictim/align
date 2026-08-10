@@ -21,7 +21,7 @@ const exampleTransform: Transform = {
   id: 'example-transform',
   description: 'example',
   idempotent: true,
-  preview: () => ({ description: 'example', filesAffected: [] }),
+  preview: () => ({ status: 'nothing-to-do', description: 'example', filesAffected: [] }),
   apply: () => {},
 };
 

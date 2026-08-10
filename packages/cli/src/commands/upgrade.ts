@@ -216,33 +216,6 @@ export async function runUpgrade(rootDir: string, options: UpgradeOptions): Prom
   const deltaStr = baselineDebt.delta === 0 ? '0' : `${baselineDebt.delta > 0 ? '+' : ''}${baselineDebt.delta}`;
   console.log(`\nbaselined debt: ${baselineDebt.previous} → ${baselineDebt.current} (${deltaStr})`);
 
-  if (previousBaseline.length === 0) {
-    console.log('No baseline exists — nothing to reconcile.');
-    return 0;
-  }
-
-  // `acceptAtRisk` (below) wants the REAL-baseline run's filtered violations — "currently red,
-  // i.e. not yet tolerated" is exactly what `baselineAccept` would additionally accept. The prune
-  // preview needs something different: `InMemoryBaselineStore.prune`'s orphan detection
-  // (`baseline/store.ts`) decides "is this entry's fingerprint still present ANYWHERE in the
-  // current scan" — fed the REAL-baseline run's filtered set, every entry that is STILL correctly
-  // tolerated would look orphaned too (its violation is filtered OUT of `run.gates[].violations`
-  // precisely because it IS baselined). `baselinePrune`/`baselineAccept` themselves avoid this by
-  // scanning with an EMPTY baseline (`commands/baseline.ts`'s `createOrchestrator(ruleset, [],
-  // hostRules)`) so nothing is filtered — reused here via a second scan for the same reason, so the
-  // preview agrees exactly with what those commands will actually do when invoked.
-  const acceptAtRisk = run.gates.flatMap((g) => g.violations).length;
-  const { orchestrator: fullOrchestrator } = createOrchestrator(ruleset, [], hostRules);
-  const fullRun = await fullOrchestrator.check({ rootDir, excludes });
-  const allViolations = fullRun.gates.flatMap((g) => g.violations);
-
-  let knownFiles: ReadonlySet<RepoRelativePath>;
-  try {
-    knownFiles = await orchestrator.knownFiles({ rootDir, excludes });
-  } catch (err) {
-    return reportCliError('align upgrade', err);
-  }
-
   // Mirrors `init.ts`'s exact interactive-vs-CI ternary, with one addition: an explicit `confirm`
   // override (test-only — see `UpgradeOptions.confirm`'s doc comment) always counts as "we have a
   // way to prompt," independent of `nonInteractive`/stdin — the override IS the interactive channel
@@ -253,13 +226,57 @@ export async function runUpgrade(rootDir: string, options: UpgradeOptions): Prom
   const yes = options.yes === true;
   const confirmFn = options.confirm ?? defaultConfirm;
 
-  const pruneOutcome = await reconcilePrune(rootDir, run, previousBaseline, allViolations, knownFiles, options, isInteractive, yes, confirmFn);
-  const acceptOutcome = await reconcileAccept(rootDir, acceptAtRisk, options, isInteractive, yes, confirmFn);
+  // Baseline prune/accept have nothing to do without a baseline — computed as trivial outcomes
+  // rather than even scanning again, matching the ORIGINAL early-return's intent for those two
+  // tiers specifically. The transform tier is a DIFFERENT concern (ADR 022: config-level drift,
+  // independent of whether a baseline has ever been created) and must run regardless — a fresh
+  // repo that has never run `baseline accept` can still have a stale `**` selector, and `align
+  // upgrade` is exactly where that gets surfaced and offered a fix.
+  const hasBaseline = previousBaseline.length > 0;
+  let pruneOutcome: ActionOutcome = { actionable: false, reconciled: true };
+  let acceptOutcome: ActionOutcome = { actionable: false, reconciled: true };
+
+  if (hasBaseline) {
+    // `acceptAtRisk` (below) wants the REAL-baseline run's filtered violations — "currently red,
+    // i.e. not yet tolerated" is exactly what `baselineAccept` would additionally accept. The prune
+    // preview needs something different: `InMemoryBaselineStore.prune`'s orphan detection
+    // (`baseline/store.ts`) decides "is this entry's fingerprint still present ANYWHERE in the
+    // current scan" — fed the REAL-baseline run's filtered set, every entry that is STILL correctly
+    // tolerated would look orphaned too (its violation is filtered OUT of `run.gates[].violations`
+    // precisely because it IS baselined). `baselinePrune`/`baselineAccept` themselves avoid this by
+    // scanning with an EMPTY baseline (`commands/baseline.ts`'s `createOrchestrator(ruleset, [],
+    // hostRules)`) so nothing is filtered — reused here via a second scan for the same reason, so
+    // the preview agrees exactly with what those commands will actually do when invoked.
+    const acceptAtRisk = run.gates.flatMap((g) => g.violations).length;
+    const { orchestrator: fullOrchestrator } = createOrchestrator(ruleset, [], hostRules);
+    const fullRun = await fullOrchestrator.check({ rootDir, excludes });
+    const allViolations = fullRun.gates.flatMap((g) => g.violations);
+
+    let knownFiles: ReadonlySet<RepoRelativePath>;
+    try {
+      knownFiles = await orchestrator.knownFiles({ rootDir, excludes });
+    } catch (err) {
+      return reportCliError('align upgrade', err);
+    }
+
+    pruneOutcome = await reconcilePrune(rootDir, run, previousBaseline, allViolations, knownFiles, options, isInteractive, yes, confirmFn);
+    acceptOutcome = await reconcileAccept(rootDir, acceptAtRisk, options, isInteractive, yes, confirmFn);
+  }
+
   const transformOutcomes = await reconcileTransforms(rootDir, selection.entries, isInteractive, yes, confirmFn);
 
   const outcomes = [pruneOutcome, acceptOutcome, ...transformOutcomes];
   const anyActionable = outcomes.some((o) => o.actionable);
   const fullyReconciled = outcomes.every((o) => !o.actionable || o.reconciled);
+
+  if (!hasBaseline && !anyActionable) {
+    // Nothing to reconcile at all: no baseline was ever created, and no transform found anything
+    // actionable either. Genuinely a no-op — `baselineReconciledBy` is not stamped, because its
+    // meaning ("the baseline was brought into agreement with this version") presumes a baseline
+    // exists in the first place.
+    console.log('No baseline exists — nothing to reconcile.');
+    return 0;
+  }
 
   if (!anyActionable) {
     console.log('\nBaseline already agrees with this check — nothing to prune or re-accept.');
@@ -353,10 +370,21 @@ async function reconcileAccept(
   return { actionable: true, reconciled: acceptCode === 0 };
 }
 
-/** Transform tier (ADR 022) — wired but, at this version, always empty: the registry (slice B/C,
- * `migrations/registry.ts`) carries no `TransformWithValidator` entries yet (slice E). Every
- * transform, once one exists, previews and asks for its own consent the same way prune/accept do;
- * an empty range trivially returns no outcomes and can never block the stamp. */
+/** Transform tier (ADR 022). Mirrors `reconcilePrune`/`reconcileAccept`'s actionable/reconciled
+ * shape exactly, using `TransformPreview.status` (`migrations/types.ts`) to decide which of three
+ * things happens for each transform:
+ *
+ *  - `'nothing-to-do'` — this transform's precondition wasn't found in this repo. No prompt;
+ *    `{ actionable: false, reconciled: true }`, the same "0 at risk" shape `reconcilePrune`/
+ *    `reconcileAccept` return when there's nothing for THEM to do either.
+ *  - `'refused'` — something was found, but the transform itself is refusing to touch it (an
+ *    unverifiable rewrite, an unlocatable/ambiguous config literal, a dirty working tree, ...).
+ *    No prompt — there is nothing safe to consent TO — but `{ actionable: true, reconciled: false
+ *    }`, so this blocks `baselineReconciledBy` exactly like an ADR-023 `--allow-incomplete`
+ *    refusal does. The reason is printed unconditionally (`preview.description`) so the refusal is
+ *    visible even though nothing was asked.
+ *  - `'ready'` — the ordinary consent-then-`apply` path.
+ */
 async function reconcileTransforms(
   rootDir: string,
   entries: ReturnType<typeof selectRange>['entries'],
@@ -368,6 +396,18 @@ async function reconcileTransforms(
   for (const entry of entries) {
     for (const { transform } of entry.transforms) {
       const preview = await transform.preview(rootDir);
+
+      if (preview.status === 'nothing-to-do') {
+        outcomes.push({ actionable: false, reconciled: true });
+        continue;
+      }
+
+      if (preview.status === 'refused') {
+        console.log(`\n${preview.description}`);
+        outcomes.push({ actionable: true, reconciled: false });
+        continue;
+      }
+
       const consented = yes || (isInteractive && (await confirmFn(`\nApply transform '${transform.id}' (${preview.description})?`)));
       if (!consented) {
         console.log(nonConsentMessage(isInteractive, yes, `applying transform '${transform.id}'`));

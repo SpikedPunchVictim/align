@@ -127,3 +127,27 @@ export function createNodeGitEffects(rootDir: string): GitEffects {
 
 // `paths` arrive as branded RepoRelativePath[] at call sites but git() only needs plain strings.
 type RepoRelativePathLike = string;
+
+/**
+ * Test-support helper: initializes `dir` as a fresh git repo with one commit containing everything
+ * currently in it (`git init` + `config user.*` + `add -A` + `commit`). Exists so tests ACROSS
+ * packages that need a real repo to exercise real git-backed behavior — this package's own
+ * `test/e2e-git.test.ts`, and `@spikedpunch/align-cli`'s transform/upgrade tests that need a real
+ * working tree to check `isWorktreeClean()` against — share ONE audited git shell-out rather than
+ * each duplicating raw `child_process` calls. This file (`git.ts`) is already align's one audited,
+ * execFile-only git rails file (this module's own doc comment); adding this here means no OTHER
+ * file, in this package or any consumer, ever needs its own `node:child_process` import just to
+ * bootstrap a test repo — `@spikedpunch/align-cli`'s `cannotDependOn(external('node:child_process'))`
+ * rule (align.config.ts, ADR 017 Part A) stays intact rather than needing a test-file carve-out.
+ *
+ * NOT part of `GitEffects` — that interface models operating on an EXISTING user repo
+ * (`align agent run` never creates one), so `init` has no place there. This is deliberately a
+ * free function, not a method, for exactly that reason.
+ */
+export async function initTestGitRepo(dir: string): Promise<void> {
+  await git(dir, ['init', '-q', '-b', 'main']);
+  await git(dir, ['config', 'user.email', 'test@example.com']);
+  await git(dir, ['config', 'user.name', 'Align Test']);
+  await git(dir, ['add', '-A']);
+  await git(dir, ['commit', '-q', '-m', 'initial commit']);
+}

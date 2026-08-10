@@ -103,6 +103,19 @@ export interface LoadConfigOptions {
 
 export const CONFIG_FILENAME = 'align.config.ts';
 
+// Node's ESM module cache is keyed by resolved URL, so re-importing the SAME `align.config.ts`
+// path within one process would otherwise return the module instance from the FIRST import even
+// after the file changes on disk. Harmless for the common case (one process per CLI invocation),
+// but wrong for `align mcp` (a long-running process that can call `loadConfig` again after a user
+// edits the file mid-session) and for a future `align upgrade` run that applies more than one
+// config-mutating transform in sequence within the same process — the second transform's own
+// `loadConfig` must see the first transform's write, not a stale pre-write snapshot. A per-process
+// monotonic counter (not `Date.now()`, whose millisecond resolution is not fine enough to
+// guarantee two calls in the same tick get distinct query strings) makes every call a genuine
+// fresh import, matching ADR 005's "no stale cache to distrust" doctrine already established for
+// scans.
+let importCacheBuster = 0;
+
 /**
  * Loads `align.config.ts` from the repo root. Node 22+ strips TypeScript types natively on
  * dynamic import of a `.ts` file (verified: no `tsx`/`jiti` dependency needed for erasable
@@ -128,7 +141,8 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
     allowBaselineFromMcp?: boolean;
   };
   try {
-    mod = (await import(pathToFileURL(configPath).href)) as typeof mod;
+    importCacheBuster += 1;
+    mod = (await import(`${pathToFileURL(configPath).href}?align-reload=${importCacheBuster}`)) as typeof mod;
   } catch (err) {
     // A target repo that hasn't installed @spikedpunch/align-core as a local devDependency yet
     // (align.config.ts's own `import ... from '@spikedpunch/align-core/dsl'`) fails here with a

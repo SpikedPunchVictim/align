@@ -38,6 +38,7 @@
 import type { VersionRegistryEntry } from './types.js';
 import { COMPILED_NOTES } from './notes.generated.js';
 import { globDoubleStarSelectorDriftValidator } from './validators/glob-double-star-drift.js';
+import { globDoubleStarSelectorRewriteTransform } from './transforms/glob-double-star-rewrite.js';
 
 const CURRENT_ENTRY_VERSION = '0.1.4';
 
@@ -46,11 +47,10 @@ export const MIGRATION_REGISTRY: readonly VersionRegistryEntry[] = [
     version: CURRENT_ENTRY_VERSION,
     notes: COMPILED_NOTES[CURRENT_ENTRY_VERSION] ?? [],
     validators: [globDoubleStarSelectorDriftValidator],
-    // No transform this slice (task #16 slice B is registry infrastructure only — see the task's
-    // scope note). ADR 022 names "rewrite this selector so its match set is exactly what it was
-    // before 0.2.0" as a legitimate future transform candidate for this exact validator's finding,
-    // once a transform is actually implemented and paired with it.
-    transforms: [],
+    // task #16 slice E: "rewrite this selector so its match set is exactly what it was before
+    // 0.2.0" (ADR 022's headline 0.2.0 transform candidate), paired with the validator above per
+    // its own precondition.
+    transforms: [{ validator: globDoubleStarSelectorDriftValidator, transform: globDoubleStarSelectorRewriteTransform }],
   },
 ];
 

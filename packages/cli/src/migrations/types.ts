@@ -61,8 +61,29 @@ export interface Validator {
 /**
  * What a transform WOULD do, computed without writing anything — the "blast radius inspectable
  * before it runs" requirement (ADR 022's compensating controls, "Preview by default").
+ *
+ * `status` distinguishes the three states `align upgrade`'s consent flow needs to tell apart
+ * (`commands/upgrade.ts`'s `reconcileTransforms`, mirroring the actionable/reconciled shape its
+ * prune/accept steps already use for the exact same reason — ADR 023's `--allow-incomplete`
+ * refusal also blocks a step without ever asking for consent):
+ *
+ *  - `'nothing-to-do'` — this transform's precondition wasn't found in this repo. No consent
+ *    prompt; `apply` is expected to be a no-op.
+ *  - `'refused'` — the precondition WAS found, but this transform is refusing to touch it (an
+ *    unverifiable rewrite, an unlocatable/ambiguous literal, a dirty working tree, ...). No
+ *    consent prompt either — there is nothing safe to consent TO — but this counts as an
+ *    outstanding, unresolved item for `align upgrade`'s stamping rules: `baselineReconciledBy`
+ *    must not advance while something real is going unfixed, even something this transform itself
+ *    declined to touch.
+ *  - `'ready'` — safe to apply; the ordinary consent-then-`apply` path.
+ *
+ * A single boolean (or `filesAffected.length === 0`) cannot express this: "nothing found" and
+ * "found something, refusing to touch it" both legitimately produce an empty `filesAffected` (in
+ * neither case does anything get written), but they must be told apart because only the first one
+ * is fine to silently skip.
  */
 export interface TransformPreview {
+  readonly status: 'nothing-to-do' | 'refused' | 'ready';
   readonly description: string;
   readonly filesAffected: readonly string[];
 }

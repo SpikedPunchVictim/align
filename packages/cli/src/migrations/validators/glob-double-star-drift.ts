@@ -3,10 +3,7 @@
  * selectors whose real match set differs between the pre-0.2.0 `**` semantics and the current
  * whole-segment semantics (commit 6d6c9c1).
  */
-import { globMatch } from '@spikedpunch/align-core';
-import { TypeScriptPlugin } from '@spikedpunch/align-plugin-typescript';
-import { loadConfig } from '../../config.js';
-import { legacyGlobMatch } from '../legacy-glob.js';
+import { findAffectedGlobDoubleStarSelectors } from '../glob-double-star-shared.js';
 import type { Validator, ValidatorFinding } from '../types.js';
 
 /**
@@ -36,37 +33,12 @@ export const globDoubleStarSelectorDriftValidator: Validator = {
     'Flags glob-kind component selectors containing an interior `**/` whose match set differs ' +
     'between the pre-0.2.0 (cross-segment) and current (whole-segment) `**` semantics.',
   async run(rootDir: string): Promise<readonly ValidatorFinding[]> {
-    const loaded = await loadConfig(rootDir).catch(() => undefined);
-    if (loaded === undefined) return [];
-
-    const plugin = new TypeScriptPlugin();
-    const graph = await plugin.scanner
-      .scan({ rootDir, components: loaded.ruleset.components, excludes: loaded.excludes })
-      .catch(() => undefined);
-    if (graph === undefined) return [];
-
-    const allFiles = graph.nodes.map((node) => node.file);
-    const findings: ValidatorFinding[] = [];
-
-    for (const [name, def] of Object.entries(loaded.ruleset.components)) {
-      if (def.selector.kind !== 'glob') continue;
-      for (const pattern of def.selector.patterns) {
-        if (!pattern.includes('**/')) continue; // trailing `**` is unaffected — nothing to compare
-
-        const oldMatches = new Set(allFiles.filter((file) => legacyGlobMatch(pattern, file)));
-        const newMatches = new Set(allFiles.filter((file) => globMatch(pattern, file)));
-        const lost = [...oldMatches].filter((file) => !newMatches.has(file));
-        const gained = [...newMatches].filter((file) => !oldMatches.has(file));
-        if (lost.length === 0 && gained.length === 0) continue;
-
-        findings.push({
-          summary:
-            `Component '${name}' selector '${pattern}': ${lost.length} file(s) no longer match under ` +
-            `the new whole-segment \`**\` semantics, ${gained.length} file(s) newly match.`,
-          affectedFiles: [...lost, ...gained].sort(),
-        });
-      }
-    }
-    return findings;
+    const affected = await findAffectedGlobDoubleStarSelectors(rootDir);
+    return affected.map(({ component, pattern, lost, gained }) => ({
+      summary:
+        `Component '${component}' selector '${pattern}': ${lost.length} file(s) no longer match under ` +
+        `the new whole-segment \`**\` semantics, ${gained.length} file(s) newly match.`,
+      affectedFiles: [...lost, ...gained].sort(),
+    }));
   },
 };
