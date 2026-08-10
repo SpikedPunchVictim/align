@@ -270,6 +270,14 @@ requirements, not suggestions:
 - `--from <version>` — override the detected starting version. Covers a missing or distrusted
   `version.json` stamp, and lets a user preview a hop before taking it.
 - `--allow-incomplete` — ADR 023 tier 2 override.
+- `-y, --yes` — consent, non-interactively. **Added during implementation, not in this ADR's
+  original list.** It falls out of ADR 006's consent doctrine rather than being a new idea: `align
+  init` already requires an explicit `--accept-existing` in CI because *silence is never consent*,
+  and `upgrade` mutates strictly more. Without it, `upgrade` would be unusable in automation, or
+  would have to treat non-interactivity as agreement — which is the thing ADR 006 forbids.
+  Interactive runs ask **two** questions (prune orphaned entries; re-accept churned ones) because
+  those are two distinct decisions; `--yes` answers both. Two questions are also what make
+  *partial consent* a reachable state rather than a theoretical one.
 
 **At 0.2.0 every hop is a single hop**, since there is exactly one prior release. Range assembly
 and single-entry selection are therefore the same code today; build the shape that generalizes and

@@ -276,7 +276,12 @@ async function runUntrustedCheck(rootDir: string, options: CheckOptions): Promis
   return emit(finalRun, options, undefined, computeBaselineDebt(previousBaseline, run));
 }
 
-function persistMovedBaseline(rootDir: string, run: CheckRun, baselineStore: InMemoryBaselineStore): void {
+/** Exported so `align upgrade` (`commands/upgrade.ts`, ADR 022) can reuse this exact move-transfer
+ * persistence instead of a second copy — its own initial scan needs the identical "always persist a
+ * rename, never gate it on consent" behavior a plain `align check` already has (ADR 006: a rename
+ * must not turn CI red for one cycle, and ADR 023's "transfer-only" exemption deliberately does not
+ * call `refuseIfRunErrored` here either — see this function's own logic below). */
+export function persistMovedBaseline(rootDir: string, run: CheckRun, baselineStore: InMemoryBaselineStore): void {
   // Move-transfer (ADR 006) mutated the in-memory store during `check` — persist so a rename
   // doesn't need a separate `align baseline prune` run to stop being reported every time.
   if (run.advisories.some((a) => a.kind === 'baseline-moved')) {

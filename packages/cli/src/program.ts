@@ -3,6 +3,7 @@ import { runCheck } from './commands/check.js';
 import { runExportIr } from './commands/export-ir.js';
 import { runInit } from './commands/init.js';
 import { baselineAccept, baselinePrune, baselineShow } from './commands/baseline.js';
+import { runUpgrade } from './commands/upgrade.js';
 import { runExplain } from './commands/explain.js';
 import { runDoctor } from './commands/doctor.js';
 import { runBuild, DEFAULT_DOC_PATH } from './commands/build.js';
@@ -169,6 +170,39 @@ export function buildProgram(): Command {
       if (rootDir === undefined) return;
       process.exitCode = await baselineShow(rootDir, opts.rule);
     });
+
+  addTelemetryOptions(
+    program
+      .command('upgrade')
+      .description(
+        'Guided, consent-gated wrapper over the existing prune/check/accept flow (ADR 022): reports ' +
+          'the version transition, runs every registered validator, shows the baselineDebt delta, then ' +
+          'prunes orphaned entries and re-accepts churned ones ONLY after explicit consent.',
+      )
+      .option('--notes', 'print the assembled notes + validator findings for the detected range and exit (read-only)', false)
+      .option('--from <version>', 'override the detected starting version (a missing/distrusted stamp, or previewing a hop)')
+      .option(
+        '--allow-incomplete',
+        'proceed with the prune (deletion) half of reconciliation even though this scan could not ' +
+          'resolve all dependencies (ADR 023 tier 2)',
+        false,
+      )
+      .option('-y, --yes', 'explicit non-interactive consent to reconcile the baseline (silence is never consent — ADR 006)', false),
+  ).action(
+    async (opts: { notes: boolean; from?: string; allowIncomplete: boolean; yes: boolean; telemetry?: boolean }) => {
+      const rootDir = resolveRootOrFail('align upgrade');
+      if (rootDir === undefined) return;
+      const telemetryPreConfig = resolveTelemetryPreConfig({ telemetry: opts.telemetry });
+      const code = await runUpgrade(rootDir, {
+        notes: opts.notes,
+        allowIncomplete: opts.allowIncomplete,
+        yes: opts.yes,
+        ...(opts.from !== undefined ? { from: opts.from } : {}),
+        ...(telemetryPreConfig !== undefined ? { telemetryPreConfig } : {}),
+      });
+      process.exitCode = code;
+    },
+  );
 
   program
     .command('explain <ruleId>')

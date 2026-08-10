@@ -13,7 +13,7 @@ import { ensureTelemetryGitignored } from '../init/gitignore.js';
 import { offerAlignScript } from '../init/npm-script.js';
 import { createOrchestrator } from '../composition-root.js';
 import { CONFIG_FILENAME, loadConfig } from '../config.js';
-import { writeBaseline, ensureAlignDir, seedVersionStamp } from '../align-dir.js';
+import { writeBaseline, ensureAlignDir, recordBaselineReconciled } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored } from '../errored-run.js';
 
@@ -153,14 +153,14 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
 
   if (violations.length === 0) {
     // `writeBaseline` (a `.align/` artifact writer, `align-dir.ts`) stamps `alignVersion` on its
-    // own; `seedVersionStamp` is the ADDITIONAL, init-only write of `baselineReconciledBy` (ADR
-    // 022) — every `init` run re-establishes the baseline from a fresh check, which IS the
-    // "deliberate reconciliation" that field records. Both can throw on a corrupted
-    // `.align/version.json` (same corrupt-≠-absent discipline as every other artifact reader),
-    // caught here the same way every other refusal in this command is.
+    // own; `recordBaselineReconciled` is the ADDITIONAL, init/upgrade-only write of
+    // `baselineReconciledBy` (ADR 022) — every `init` run re-establishes the baseline from a fresh
+    // check, which IS the "deliberate reconciliation" that field records. Both can throw on a
+    // corrupted `.align/version.json` (same corrupt-≠-absent discipline as every other artifact
+    // reader), caught here the same way every other refusal in this command is.
     try {
       writeBaseline(rootDir, []);
-      seedVersionStamp(rootDir);
+      recordBaselineReconciled(rootDir);
     } catch (err) {
       return reportCliError('align init', err);
     }
@@ -202,7 +202,7 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
         acceptedBy: options.acceptExisting ? ('accept-existing' as const) : ('init-seed' as const),
       })),
     );
-    seedVersionStamp(rootDir);
+    recordBaselineReconciled(rootDir);
   } catch (err) {
     return reportCliError('align init', err);
   }

@@ -6,7 +6,7 @@ import { readVersionFile } from '../src/align-dir.js';
 import { versionFileSchema } from '../src/version-file.js';
 
 // ADR 022 (`.align/version.json`) — `readVersionFile` is the one reader both the write-side
-// stamping choke point (`stampAlignVersion`/`seedVersionStamp`, `align-dir.ts`) and the `align
+// stamping choke point (`stampAlignVersion`/`recordBaselineReconciled`, `align-dir.ts`) and the `align
 // check` provenance advisory (`version-skew.ts`) share. These tests pin its contract directly,
 // mirroring `artifact-schema-errors.test.ts`'s BUG #16 coverage for the other three artifact
 // readers (`readBaseline`/`readGeneratedRules`/`readRulesetIr`): absent is never an error, but a

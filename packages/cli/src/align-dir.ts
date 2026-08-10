@@ -89,7 +89,7 @@ function versionFilePath(rootDir: string): string {
  * schema validation throws — the same corrupt-≠-absent discipline as `readBaseline`/
  * `readGeneratedRules`/`readRulesetIr` above, naming the file in the thrown message. This function
  * backs both the `align check` provenance advisory (`version-skew.ts`) and the internal
- * read-merge-write inside `stampAlignVersion`/`seedVersionStamp` below — one reader, not two that
+ * read-merge-write inside `stampAlignVersion`/`recordBaselineReconciled` below — one reader, not two that
  * could drift on what "corrupt" means.
  */
 export function readVersionFile(rootDir: string): VersionFile | undefined {
@@ -123,7 +123,7 @@ function writeVersionFile(rootDir: string, data: VersionFile): void {
  * (`version-skew.ts`) and `refuseIfRunErrored`/`refuseIfRunIncomplete` (`errored-run.ts`) already
  * establish: one shared function, never a copy re-inlined at a new call site.
  *
- * Deliberately never touches `baselineReconciledBy` — see `seedVersionStamp` below for why that
+ * Deliberately never touches `baselineReconciledBy` — see `recordBaselineReconciled` below for why that
  * field has exactly one writer (`init`) plus, later, `align upgrade`.
  *
  * Deliberately NOT wired into `writeTelemetryState`/`appendTelemetryLine`: telemetry is opt-in,
@@ -141,20 +141,27 @@ function stampAlignVersion(rootDir: string): void {
 }
 
 /**
- * `align init`'s seed of `.align/version.json` (ADR 022) — the only OTHER writer of
- * `baselineReconciledBy` besides the future `align upgrade`. Not `check`, not `accept`, not
- * `prune`: those write through `stampAlignVersion` above, which deliberately never touches this
- * field. `baselineReconciledBy` answers "has this baseline been reconciled under the running
- * version?", not "who last wrote baseline.json" — an incidental writer (a move-transfer, a scoped
- * accept) must not be able to advance it, which is the entire point of restricting it to this one
- * call plus `upgrade`.
+ * Records that `.align/baseline.json` has been deliberately reconciled against a check under the
+ * RUNNING align version (ADR 022) — the operation both writers below share, which is why this
+ * function (originally named `seedVersionStamp`, for `init`'s sole use) was renamed once `align
+ * upgrade` became its second caller: "seed" no longer described what `upgrade` does to an
+ * already-`.align/`-having repo. Not `check`, not `accept`, not `prune`: those write through
+ * `stampAlignVersion` above, which deliberately never touches this field. `baselineReconciledBy`
+ * answers "has this baseline been reconciled under the running version?", not "who last wrote
+ * baseline.json" — an incidental writer (a move-transfer, a scoped accept) must not be able to
+ * advance it, which is the entire point of restricting it to these two call sites.
  *
- * Every `align init` run — including a re-run against a repo that already has `.align/` — re-seeds
- * both fields, because every `init` run re-establishes the baseline from a fresh check (`runInit`
- * always ends by writing `.align/baseline.json`, seeded or empty); that IS the "deliberate
- * reconciliation" this field exists to record.
+ * **`align init`** calls this unconditionally at the end of every run — including a re-run against
+ * a repo that already has `.align/` — because every `init` run re-establishes the baseline from a
+ * fresh check (`runInit` always ends by writing `.align/baseline.json`, seeded or empty); that IS
+ * the "deliberate reconciliation" this field exists to record.
+ *
+ * **`align upgrade`** (`commands/upgrade.ts`) calls this LAST — after explicit consent AND after
+ * the reconciliation (prune + re-accept + any transforms) has actually completed — never before,
+ * and never on a partial consent (ADR 022's three rules for this field; see `runUpgrade`'s own doc
+ * comment for how it enforces the ordering and the partial-consent case).
  */
-export function seedVersionStamp(rootDir: string): void {
+export function recordBaselineReconciled(rootDir: string): void {
   const current = readVersionFile(rootDir);
   writeVersionFile(rootDir, { ...current, alignVersion: ALIGN_VERSION, baselineReconciledBy: ALIGN_VERSION });
 }

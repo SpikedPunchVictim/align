@@ -4,7 +4,7 @@
  * nothing in core's pure evaluation logic (`evaluateRule`, the orchestrator, the baseline store)
  * ever needs to read this file — it is consulted only by two CLI-side, I/O-adjacent concerns: the
  * `align check` version-skew advisory (`version-skew.ts`) and the write-discipline choke point
- * (`align-dir.ts`'s `stampAlignVersion`/`seedVersionStamp`). Core stays framework/I-O-free by
+ * (`align-dir.ts`'s `stampAlignVersion`/`recordBaselineReconciled`). Core stays framework/I-O-free by
  * construction (ADR 021's "have core read its own package.json" alternative was rejected for
  * exactly this reason); putting a schema core never consumes into core would be an import with no
  * caller on the other side. `baseline/schema.ts` lives in core only because `BaselineEntry` is a
@@ -30,7 +30,7 @@ import { z } from 'zod';
  *    specified that and was wrong, because `baseline.json` has incidental writers (a move-transfer
  *    on any `align check`, a scoped `baseline accept --rule`) that would make a "last writer" field
  *    read as current after routine CI, defeating the field's purpose. Written ONLY by `align init`
- *    (which seeds it) and, later, `align upgrade` (which reconciles it) — see `seedVersionStamp`'s
+ *    (which seeds it) and `align upgrade` (which reconciles it) — see `recordBaselineReconciled`'s
  *    doc comment in `align-dir.ts`. Optional: absent on every install created before 0.2.0, and
  *    absent even on a 0.2.0+ repo until `align init` has actually run.
  */
