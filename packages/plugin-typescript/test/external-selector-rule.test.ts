@@ -34,7 +34,20 @@ describe('external(...) selector rules against a real scan (ADR 017 Part A falsi
 
     beforeAll(() => {
       wsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'align-external-selector-test-'));
-      fs.cpSync(path.join(fixturesDir, 'external-imports'), wsRoot, { recursive: true });
+      // `filter` is load-bearing, not tidiness. Isolating the DESTINATION was not enough: the
+      // SOURCE is the checked-in fixture that `scanner.test.ts` concurrently creates and removes
+      // `node_modules/left-pad` inside (`scanner.test.ts`'s external-package-retention suite,
+      // which uses `fixturesDir/external-imports` directly). A recursive copy could enumerate a
+      // file that the other worker then deleted and fail with ENOENT mid-copy, throwing from this
+      // hook — which vitest reports as a failure plus THREE SKIPPED tests, the exact
+      // `79 passed | 3 skipped` signature observed on 2026-08-09. Skipping `node_modules` removes
+      // the only mutable part of the source tree from the copy, and costs nothing: the three
+      // files written immediately below are this suite's own `left-pad`, so the fixture's copy
+      // was never wanted in the first place.
+      fs.cpSync(path.join(fixturesDir, 'external-imports'), wsRoot, {
+        recursive: true,
+        filter: (src) => path.basename(src) !== 'node_modules',
+      });
       const pkgDir = path.join(wsRoot, 'node_modules', 'left-pad');
       fs.mkdirSync(pkgDir, { recursive: true });
       fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: 'left-pad', version: '1.0.0', main: 'index.js' }));
