@@ -375,3 +375,7 @@ describe('`align baseline prune` on an incomplete (complete: false) run — ADR 
     expect(errors.join('\n')).toMatch(/did not complete/);
   });
 });
+
+// `align init`'s tier-2 coverage (ADR 023's 2026-08-11 amendment: both write paths, one guard) is
+// in `init-incomplete-baseline.test.ts` — split out to stay under this repo's own `arch.metric`
+// 500-line-per-file rule.

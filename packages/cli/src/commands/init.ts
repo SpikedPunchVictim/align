@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline/promises';
 import { defineProject, type ComponentsInput } from '@spikedpunch/align-core/dsl';
-import { toComponentName } from '@spikedpunch/align-core';
+import { toComponentName, type BaselineEntry, type CheckRun, type ViolationId } from '@spikedpunch/align-core';
 import { TypeScriptPlugin } from '@spikedpunch/align-plugin-typescript';
 import { detectComponents } from '../init/detect-components.js';
 import { suggestLayers } from '../init/suggest-layers.js';
@@ -13,9 +13,9 @@ import { ensureTelemetryGitignored } from '../init/gitignore.js';
 import { offerAlignScript } from '../init/npm-script.js';
 import { createOrchestrator } from '../composition-root.js';
 import { CONFIG_FILENAME, loadConfig } from '../config.js';
-import { writeBaseline, ensureAlignDir, recordBaselineReconciled } from '../align-dir.js';
+import { writeBaseline, readBaseline, ensureAlignDir, recordBaselineReconciled } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
-import { refuseIfRunErrored } from '../errored-run.js';
+import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
 
 export interface InitOptions {
   readonly acceptExisting: boolean;
@@ -35,6 +35,47 @@ export interface InitOptions {
   readonly yes?: boolean;
   /** `--no-scripts`: skip the npm-script offer entirely — no prompt, no write. */
   readonly noScripts?: boolean;
+  /** `--allow-incomplete` (ADR 023 tier 2, amended 2026-08-11 to cover `align init`): proceed with
+   * a baseline write that would drop existing entries even though this scan could not resolve all
+   * dependencies (a `missing-dependencies` advisory — `complete: false`). Without it, `init`
+   * refuses both the zero-violations reset and the seed-path overwrite rather than silently
+   * dropping an entry whose violation merely became unobservable, not fixed. Identical in name and
+   * semantics to `align baseline prune`/`align upgrade`'s flag of the same name — see
+   * `refuseIfBaselineWriteAtRisk` below for the one guard both of `init`'s write paths share. */
+  readonly allowIncomplete?: boolean;
+}
+
+/**
+ * ADR 023's amendment (2026-08-11): tier 2 extends to `align init`, at BOTH write paths, through
+ * ONE guard — the amendment's own "Alternatives considered" rejects guarding each path
+ * independently as "precisely how this class reached five copies." This is that one guard.
+ *
+ * `init` never reads the baseline it overwrites, and `writeBaseline` is a full replace
+ * (`align-dir.ts:206`), so on a `complete: false` scan BOTH of `init`'s write paths can silently
+ * drop accepted entries whose violation merely became unobservable — dropped external edges hiding
+ * a cycle/dependency, not the violation actually being fixed. Reproduced 2026-08-11 against
+ * `simple-app-violation-incomplete`, output in the ADR amendment verbatim.
+ *
+ * At-risk count is one formula for both branches: existing on-disk entries whose fingerprint is
+ * absent from the entry set the write is about to persist.
+ *   - Zero-violations path (`persistedFingerprints` empty) ⇒ every existing entry is at risk.
+ *   - Seed path (`persistedFingerprints` = the current scan's violation ids) ⇒ only the entries the
+ *     scan no longer observes are at risk.
+ *   - A first `init` with no existing baseline ⇒ `existing` is `[]` ⇒ 0, and `refuseIfRunIncomplete`
+ *     already treats `atRiskCount === 0` as "nothing to refuse" — never blocked.
+ *
+ * Delegates the actual errored-vs-incomplete decision to `refuseIfRunIncomplete` (`errored-run.ts`)
+ * rather than re-deciding it here, the same "one shared function, never a copy re-inlined" pattern
+ * `stampAlignVersion`/`refuseIfRunErrored` already establish.
+ */
+function refuseIfBaselineWriteAtRisk(
+  run: CheckRun,
+  existing: readonly BaselineEntry[],
+  persistedFingerprints: ReadonlySet<ViolationId>,
+  allowIncomplete: boolean,
+): number | undefined {
+  const atRiskCount = existing.filter((entry) => !persistedFingerprints.has(entry.fingerprint)).length;
+  return refuseIfRunIncomplete('align init', run, atRiskCount, allowIncomplete);
 }
 
 export async function runInit(rootDir: string, options: InitOptions): Promise<number> {
@@ -127,6 +168,22 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     return reportCliError('align init', err);
   }
   const { ruleset, excludes, hostRules } = loaded;
+
+  // ADR 023 amendment (2026-08-11): `init` must read the baseline it is about to overwrite before
+  // either write path runs, applying the same corrupt-≠-absent discipline every other baseline
+  // consumer already applies (`tryReadBaseline`, `commands/baseline.ts:17-24`) — a corrupt
+  // `.align/baseline.json` is reported and refused, never silently replaced with `[]` or a fresh
+  // seed. This was the last remaining silent-overwrite path: every other `.align/` artifact reader
+  // in this command already fails loudly on corruption (`loadConfig`, above); the baseline itself
+  // did not, because until this amendment `init` never read it at all.
+  let existingBaseline: BaselineEntry[];
+  try {
+    existingBaseline = readBaseline(rootDir);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return reportCliError('align init', new Error(`${message} Repair or delete the file, then re-run \`align init\`.`));
+  }
+
   const { orchestrator } = createOrchestrator(ruleset, [], hostRules);
   const run = await orchestrator.check({ rootDir, excludes });
   // `align init` is re-runnable on a repo that already has a baseline ("align.config.ts already
@@ -152,6 +209,15 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   };
 
   if (violations.length === 0) {
+    // ADR 023 amendment: this branch persists `[]` — no fingerprint survives — so EVERY existing
+    // entry is at risk. `refuseIfBaselineWriteAtRisk` runs BEFORE `writeBaseline`/
+    // `recordBaselineReconciled` below, so a refusal leaves `.align/baseline.json` untouched; a
+    // first `init` with no existing baseline (`existingBaseline` is `[]`) is never refused, since
+    // `refuseIfRunIncomplete` treats `atRiskCount === 0` as nothing to refuse. Returned directly,
+    // not routed through `finish()` — matching every other refusal in this command.
+    const atRiskRefusal = refuseIfBaselineWriteAtRisk(run, existingBaseline, new Set<ViolationId>(), options.allowIncomplete ?? false);
+    if (atRiskRefusal !== undefined) return atRiskRefusal;
+
     // `writeBaseline` (a `.align/` artifact writer, `align-dir.ts`) stamps `alignVersion` on its
     // own; `recordBaselineReconciled` is the ADDITIONAL, init/upgrade-only write of
     // `baselineReconciledBy` (ADR 022) — every `init` run re-establishes the baseline from a fresh
@@ -175,6 +241,23 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     );
     return finish(1);
   }
+
+  // ADR 023 amendment: this branch persists only the fingerprints the CURRENT scan observed, so an
+  // existing entry the scan no longer sees (dropped edge, not a genuine fix, on `complete: false`)
+  // would otherwise be silently dropped — the "not previously identified" half of the amendment's
+  // reproduction. Same guard as the zero-violations branch above, and BEFORE the consent prompt
+  // below for the reason `align upgrade`'s `reconcilePrune` (`commands/upgrade.ts:309-335`) states
+  // for its own identical ordering: the guard decides whether to even ask, "so the prompt and the
+  // outcome cannot disagree with each other." Asking "seed the baseline?" and then refusing the
+  // `yes` would be exactly that disagreement. Runs before `writeBaseline`/`recordBaselineReconciled`
+  // either way, so a refusal leaves `.align/baseline.json` untouched.
+  const seedAtRiskRefusal = refuseIfBaselineWriteAtRisk(
+    run,
+    existingBaseline,
+    new Set(violations.map((v) => v.id)),
+    options.allowIncomplete ?? false,
+  );
+  if (seedAtRiskRefusal !== undefined) return seedAtRiskRefusal;
 
   let shouldSeed = options.acceptExisting;
   if (!shouldSeed && isInteractive) {

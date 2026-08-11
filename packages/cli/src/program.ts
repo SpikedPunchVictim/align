@@ -74,12 +74,20 @@ export function buildProgram(): Command {
       false,
     )
     .option('--no-scripts', 'skip offering to add an "align": "align check" script to package.json')
-    .action(async (opts: { acceptExisting: boolean; greenfield: boolean; yes: boolean; scripts: boolean }) => {
+    .option(
+      '--allow-incomplete',
+      'proceed with a baseline write that would drop existing entries even though this scan could not ' +
+        'resolve all dependencies (ADR 023 tier 2) — an absent violation on an incomplete scan may be ' +
+        'unobservable rather than fixed',
+      false,
+    )
+    .action(async (opts: { acceptExisting: boolean; greenfield: boolean; yes: boolean; scripts: boolean; allowIncomplete: boolean }) => {
       const code = await runInit(process.cwd(), {
         acceptExisting: opts.acceptExisting,
         greenfield: opts.greenfield,
         yes: opts.yes,
         noScripts: !opts.scripts,
+        allowIncomplete: opts.allowIncomplete,
       });
       process.exitCode = code;
     });
