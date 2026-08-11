@@ -12,8 +12,11 @@ increment 1's four scenarios) instead of asserting against a snapshot that would
 the moment nest's package layout changes or `detectComponents`'s heuristics change — and it means
 one less artifact to keep in sync with the pinned commit.
 
-This directory is reserved for a future increment that genuinely needs a fixed, hand-curated
-config independent of `align init`'s output — for example, a scenario asserting on a SPECIFIC
-layering ruleset (not just "whatever `align init` would suggest today") to test `align check
---frozen-rules` or `align build` against doc-authored rules (ADR 025 §7's `build`/`export-ir`
-rows, out of scope for increment 1).
+Still empty after increment 2, for the same reason. `build-dry-run-apply-verify-drift.mjs` and
+`export-ir-then-check-untrusted.mjs` (increment 2) exercise `align check --frozen-rules`/
+`align build`/`align export-ir` against doc-authored rules — the case this file used to reserve
+this directory for — but they get there with a named mutation
+(`write-architecture-rules-doc-with-fenced-rule`, `lib/mutations.mjs`) writing a real
+`docs/ARCHITECTURE-RULES.md` into the live `align init` output, same discipline as every other
+scenario. This directory remains reserved for a future increment that genuinely needs a fixed,
+hand-curated `align.config.ts` independent of what `align init` would derive live.

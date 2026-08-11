@@ -135,6 +135,8 @@ function toNormalizedStep(step) {
     ...(step.result !== undefined
       ? { exitCode: step.result.exitCode, stdoutNormalized: step.result.stdoutNormalized, stderrNormalized: step.result.stderrNormalized }
       : {}),
+    ...(step.tool !== undefined ? { tool: step.tool, arguments: step.arguments, expect: step.expect } : {}),
+    ...(step.mcpResult !== undefined ? { isError: step.mcpResult.isError, textNormalized: step.mcpResult.textNormalized } : {}),
     stateAfter: {
       alignFiles,
       alignConfig: step.stateAfter.alignConfig.present ? { present: true, normalized: step.stateAfter.alignConfig.normalized } : { present: false },

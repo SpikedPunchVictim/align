@@ -3,9 +3,10 @@
 // holds) lives in exec.mjs / capture.mjs / assert.mjs; this file just walks the step list.
 import { runAlign } from './exec.mjs';
 import { captureState, normalizeRunResult } from './capture.mjs';
-import { evaluateExpect, evaluateAssert } from './assert.mjs';
+import { evaluateExpect, evaluateAssert, evaluateMcpExpect } from './assert.mjs';
 import { applyMutation } from './mutations.mjs';
 import { installAlignVersion } from './version-install.mjs';
+import { callMcpTool } from './mcp-client.mjs';
 
 /** Resolves a scenario's `install:` value — the literal sentinel `'target'` means "whatever
  * version this invocation is testing" (the mechanism that lets one scenario file express its
@@ -43,15 +44,21 @@ export async function runScenario(scenario, ctx) {
         const { installedVersion } = installAlignVersion(workingDir, version, {
           alignRepoRoot: ctx.alignRepoRoot,
           tarballCacheDir: ctx.tarballCacheDir,
+          alignOnlyInstall: project.alignOnlyInstall === true,
           log,
         });
         record = { index: i, kind: 'install', requested: step.install, resolvedVersion: version, installedVersion, pass: true, failures: [] };
       } else if (step.run !== undefined) {
         log(`[${scenario.id}/${target}] step ${i}: run ${step.run}`);
         const raw = runAlign(workingDir, step.run);
-        const normalized = normalizeRunResult(raw, workingDir);
+        const normalized = normalizeRunResult(raw, workingDir, { keepVersion: step.keepVersion === true });
         const { pass, failures } = evaluateExpect(step.expect, normalized);
         record = { index: i, kind: 'run', command: step.run, expect: step.expect, result: normalized, pass, failures };
+      } else if (step.mcpCall !== undefined) {
+        log(`[${scenario.id}/${target}] step ${i}: mcpCall ${step.mcpCall.tool}`);
+        const mcpResult = await callMcpTool(workingDir, step.mcpCall.tool, step.mcpCall.arguments, { keepVersion: step.keepVersion === true });
+        const { pass, failures } = evaluateMcpExpect(step.expect, mcpResult);
+        record = { index: i, kind: 'mcpCall', tool: step.mcpCall.tool, arguments: step.mcpCall.arguments, expect: step.expect, mcpResult, pass, failures };
       } else if (step.mutate !== undefined) {
         log(`[${scenario.id}/${target}] step ${i}: mutate ${step.mutate}`);
         applyMutation(step.mutate, { workingDir, project });
@@ -64,7 +71,7 @@ export async function runScenario(scenario, ctx) {
         const { pass, failures, before, after } = evaluateAssert(step.assert, snapshots, stateBefore);
         record = { index: i, kind: 'assert', spec: step.assert, pass, failures, before, after };
       } else {
-        throw new Error(`step ${i} of scenario '${scenario.id}' has no recognized action (install/run/mutate/snapshot/assert)`);
+        throw new Error(`step ${i} of scenario '${scenario.id}' has no recognized action (install/run/mutate/snapshot/assert/mcpCall)`);
       }
 
       const stateAfter = captureState(workingDir);

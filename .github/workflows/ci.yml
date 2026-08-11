@@ -5,6 +5,29 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # ADR 025: the cross-version integration harness needs Docker-adjacent tooling and takes
+  # minutes, so it does NOT run on every push/PR — it's manually dispatchable (for a pre-release
+  # check on a branch) and runs automatically when a GitHub Release is published, which is exactly
+  # ADR 025 §6's "required before publish" gate. `targets` defaults to the calibration pair
+  # (`0.1.4,local`) so a manual run exercises both the ordinary gate (against `local`, the code
+  # under review) AND the red/green `expectFailOn` proof (against the real published `0.1.4`) in
+  # one invocation — see integration/README.md's "Enforcing the red/green proof" section.
+  workflow_dispatch:
+    inputs:
+      project:
+        description: 'project id (integration/projects/*.mjs)'
+        default: 'nest'
+        required: false
+      targets:
+        description: 'align versions to test, comma-separated (0.1.0-0.1.4, local)'
+        default: '0.1.4,local'
+        required: false
+      scenarios:
+        description: 'comma-separated scenario ids (default: every scenario for --project)'
+        default: ''
+        required: false
+  release:
+    types: [published]
 
 # Cancel superseded runs on the same ref so PR pushes don't queue stale jobs.
 concurrency:
@@ -53,6 +76,81 @@ jobs:
       # architecture in CI, not a mock or a stub.
       - name: align check (self-dogfood)
         run: pnpm check
+
+  # ADR 025: the cross-version integration harness. NOT part of the `ci` job above — it needs a
+  # real `npm`/git-capable environment per scenario (each one installs a real align version into a
+  # cloned copy of a real OSS project) and takes minutes, which is the wrong cost to pay on every
+  # push. Runs on `workflow_dispatch` (manual pre-release check) and automatically when a GitHub
+  # Release is published (ADR 025 §6: "required before publish").
+  #
+  # Runs directly with `node integration/run.mjs` rather than building/running
+  # `integration/Dockerfile` — this runner already provides the exact pinned pnpm/Node versions the
+  # rest of this workflow uses (see the Setup steps below, identical to the `ci` job's), so a
+  # Docker layer buys reproducibility this environment already has, at the cost of an extra image
+  # build on every dispatch. `integration/README.md`'s own words: "Works identically from a plain
+  # `node integration/run.mjs` ... and from inside the Docker image" — the Dockerfile remains the
+  # right tool for running the harness somewhere that DOESN'T already pin these versions (a local
+  # dev machine, a different CI provider).
+  integration:
+    name: cross-version integration harness (ADR 025)
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.8.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      # 'local' targets pack the working tree (lib/version-install.mjs's `pnpm pack`) — the build
+      # must exist before run.mjs's first 'local' install, same precondition as running it by hand.
+      - name: Build all packages
+        run: pnpm -r build
+
+      # Two projects, both run unconditionally on the default (release/no-override) path: `nest`
+      # covers the large majority of ADR 025 §7's coverage table; `nest-incomplete`
+      # (`integration/projects/nest-incomplete.mjs`) is the dependencies-never-installed variant
+      # that exercises ADR 023 tier 2 specifically. A manual dispatch can narrow to one project (and
+      # optionally one scenario) via the `project`/`scenarios` inputs for a fast, targeted debug run.
+      - name: Run harness — nest
+        if: github.event.inputs.project == '' || github.event.inputs.project == 'nest'
+        run: >
+          node integration/run.mjs --project nest
+          --targets "${{ github.event.inputs.targets || '0.1.4,local' }}"
+          ${{ github.event.inputs.scenarios != '' && format('--scenarios {0}', github.event.inputs.scenarios) || '' }}
+
+      - name: Run harness — nest-incomplete
+        if: github.event.inputs.project == '' || github.event.inputs.project == 'nest-incomplete'
+        run: >
+          node integration/run.mjs --project nest-incomplete
+          --targets "${{ github.event.inputs.targets || '0.1.4,local' }}"
+          ${{ github.event.inputs.scenarios != '' && format('--scenarios {0}', github.event.inputs.scenarios) || '' }}
+
+      # Rich artifacts (ADR 025 §2) — uploaded on every run, not just failure, so a release's gate
+      # result stays inspectable after the fact (steps.json/normalized.json/result.json/
+      # summary.json per (target, scenario) pair, per integration/README.md).
+      - name: Upload harness results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-results
+          # Excludes .cache/ (the cloned-project/node_modules/tarball cache — large, and not a
+          # result artifact) — only the per-run timestamped output directories.
+          path: |
+            integration/results/*/
+            !integration/results/.cache/
+          retention-days: 30
 
 # ---------------------------------------------------------------------------
 # Downstream usage example (documentation only — this repo dogfoods align via

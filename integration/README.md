@@ -21,10 +21,12 @@ integration/
   README.md          — this file
   Dockerfile          — reproducible container build (git, pnpm, node 24)
   run.mjs             — entry point / CLI
-  lib/                — capture, normalize, assert, version-install, project prep, mutations
+  lib/                — capture, normalize, assert, version-install, project prep, mutations, mcp-client
   scenarios/          — one file per scenario, each exporting a plain data object
-  projects/           — project definitions (today: nest)
-  fixtures/           — (increment 2+) hand-authored align.config.ts variants
+  projects/           — project definitions (nest, and nest-incomplete — see "Projects" below)
+  fixtures/           — (still unused as of increment 2 — no scenario has needed a hand-authored
+                         align.config.ts variant yet; every scenario constructs its config state via
+                         `align init` + a named mutation instead)
   results/            — run output — gitignored, safe to delete any time
 ```
 
@@ -140,7 +142,8 @@ in-code version of this table (this section is a human-readable mirror of it):
 | `absolute-path-to-repo-relative` | The working copy's absolute path (and its macOS `/private/...` realpath) in any text | A bug that reads a genuinely different, unrelated tree would still normalize away IF that tree happens to share the working copy's path prefix — doesn't for the common case (paths from a different scenario run, a different project). |
 | `wall-clock-durations` | `123ms`, `1.4s`-shaped tokens in free text | A component/file legitimately named with a trailing "ms"/"s" segment (none exist in align's own output today). |
 | `iso-timestamps` | ISO-8601 timestamps in free text, either Zulu (`...Z`) or an explicit numeric UTC offset (`...+00:00`) | Shape-only — a timestamp that's the right SHAPE but the wrong VALUE (off-by-one-day) is NOT caught by this rule; assertions needing an exact value must read the structured JSON field instead. |
-| `known-align-versions` | The five published version strings (`0.1.0`–`0.1.4`) in free text, unless a capture requests `keepVersion: true`. Boundary-anchored: a match is never preceded/followed by a digit or `.`, so `10.1.4`, `@nestjs/core@10.1.3`, etc. are left alone and distinct versions never collide on one placeholder. | None of increment 1's scenarios assert ON the installed version, so this is safe by default; a future version-skew scenario must opt out. |
+| `volatile-hash-json-keys` (increment 2) | `rules.lock.json`'s `generatedRulesContentHash` — a hash of `generated-rules.json`'s RAW bytes, which embed that file's own `generatedAt: Date.now()`. Found by the harness's own two-run determinism check (2026-08-10): two identical `build --apply`/MCP-apply runs produced a byte-different `rules.lock.json`, differing ONLY in this field. | Only ever masks this named field's own value — never a sibling (`docPath`/`docContentHash`/`sections` on the same entry are compared unnormalized). Deliberately a named key, not a blanket hex-string regex — see the `volatile-json-keys` masks note for why that distinction is load-bearing. |
+| `known-align-versions` | The five published version strings (`0.1.0`–`0.1.4`) in free text, unless a capture requests `keepVersion: true`. Boundary-anchored: a match is never preceded/followed by a digit or `.`, so `10.1.4`, `@nestjs/core@10.1.3`, etc. are left alone and distinct versions never collide on one placeholder. | None of increment 1's scenarios assert ON the installed version, so this was safe by default; increment 2's `upgrade-with-existing-baseline.mjs`/`upgrade-notes-read-only.mjs` DO (the transition line), and opt out per-step via `keepVersion: true` (see "Adding a scenario" above) rather than changing the default. |
 
 Content hashes: none of increment 1's captured artifacts (`.align/baseline.json`, `.align/ruleset-ir.json`
 when present, `align.config.ts`, the CLAUDE.md block) embed a volatile content hash today — the
@@ -194,13 +197,34 @@ array. Each step is exactly one of:
 
 ```js
 { install: 'target' | '0.1.4' | 'local' }
-{ run: '<align subcommand and flags, no "align" prefix>', expect?: { exit, stdoutContains, stdoutNotContains, stderrContains, stdoutMatches } }
+{ run: '<align subcommand and flags, no "align" prefix>', keepVersion?: true,
+  expect?: { exit, stdoutContains, stdoutNotContains, stderrContains, stderrNotContains, stdoutMatches } }
+{ mcpCall: { tool: '<MCP tool name>', arguments: {...} }, keepVersion?: true,
+  expect?: { isError, textContains, textNotContains } }
 { mutate: '<name registered in lib/mutations.mjs>' }
 { snapshot: '<label>' }
 { assert: { kind: 'fileUnchanged' | 'fileChanged', file: '.align/baseline.json' | 'align.config.ts' | 'CLAUDE.md', since: '<snapshot label>' } }
 { assert: { kind: 'jsonArrayLength', file: '...', equals: N } }
 { assert: { kind: 'exists', file: '...', equals: true | false } }
 ```
+
+**`mcpCall` (increment 2, ADR 025 §7 `mcp` row)** calls one MCP tool over a REAL `align mcp` child
+process — genuine stdio JSON-RPC via `@modelcontextprotocol/sdk`, the same SDK
+`@spikedpunch/align-cli` depends on and that is therefore already installed in the working copy's
+own `node_modules` (`lib/mcp-client.mjs` — no new runtime dependency for the harness itself).
+Deliberately NOT the CLI test suite's in-process `InMemoryTransport` — that never exercises the
+actual `align mcp` subcommand or its stdio framing. `isError: true` on a well-formed tool response
+(e.g. ADR 024's gate refusing a write) is a normal, expected outcome for `expect` to check, exactly
+like a non-zero exit code on a `run` step — never an exception. A transport-level failure (the
+child process couldn't be launched, the handshake never completed) throws and the scenario reports
+`errored: true`, mirroring `runAlign`'s launch-failure contract.
+
+**`keepVersion: true` (increment 2)** opts a `run`/`mcpCall` step OUT of the `known-align-versions`
+normalization rule (see "Normalization" below) — needed by any step whose `expect` checks a
+LITERAL version number in captured text (e.g. `align upgrade`'s `"unknown → 0.1.4"` transition
+line), which the default normalization would otherwise scrub to `<normalized-version>` before the
+assertion ever runs. Omit it (the default) for every step that doesn't care about the exact
+version string — which is most of them.
 
 A scenario may also declare a top-level `expectFailOn: ['0.1.4', ...]` — see "Enforcing the
 red/green proof" above.
@@ -225,6 +249,21 @@ guaranteed real violation, a `violation: { fromComponent, toComponent, because }
 directions, before relying on it — see `projects/nest.mjs`'s comment for the exact check run
 against nest).
 
+**`alignOnlyInstall: true` (increment 2)** — the flag `projects/nest-incomplete.mjs` sets: strips
+the project's OWN `dependencies`/`devDependencies` before every `installAlignVersion` call
+(`lib/version-install.mjs`), so the `npm install` that adds align resolves ONLY align's four
+packages, never the project's real dependency tree. Necessary, not cosmetic — verified empirically
+(2026-08-10): a bare `npm install <one-pkg>` against a `package.json` that ALSO lists other,
+uninstalled dependencies installs those too (there is no "install just this package" mode in
+vanilla npm once other deps are declared). Pair it with a genuine no-op `installCmd` (e.g.
+`{ command: 'node', args: ['-e', ''] }`) so `prepareProjectBase` never runs the project's real
+install either — the base checkout is then a cheap shallow clone with no `node_modules` at all,
+letting `align check` report `complete: false` deterministically. Also implies `--ignore-scripts`
+on that same `npm install` (`version-install.mjs`) — a project's own `prepare`/`postinstall`
+lifecycle scripts (nest's root `package.json` runs `husky`) reference tooling this variant
+deliberately never installs, and would otherwise fail the align install itself with an unrelated,
+harness-looking error.
+
 ## Reproducibility details
 
 - **Child-process environment is sanitized**, not inherited wholesale (`lib/exec.mjs`'s
@@ -241,11 +280,34 @@ against nest).
   exit) — `packLocalTarballs` unconditionally deletes and repacks its destination directory on
   every 'local' install, so two concurrent `run.mjs` invocations sharing one directory would race.
 
-## What increment 1 does NOT cover
+## Scenario inventory (increment 1 + 2)
 
-See the main report for the full list (ADR 025 scopes far more than increment 1 attempts —
-`upgrade`, `export-ir`, `explain`, `build`, `mcp`, `skill`, `docs`, `telemetry`, the second
-"dependencies not installed" project variant, and every genuinely cross-version scenario in the
-ADR's table are all out of scope here). The four scenarios here are exactly ADR 025's increment-1
-list: `prune` on an errored run (the red/green proof), `init` on a fresh project, `check`
-green-then-red, and `doctor`'s always-exit-0 contract.
+Increment 1 (four scenarios): `prune` on an errored run (the red/green proof, `expectFailOn:
+['0.1.4']`), `init` on a fresh project, `check` green-then-red, `doctor`'s always-exit-0 contract.
+
+Increment 2 adds:
+
+- **Tier 1 (ADR 025's release-gating priorities)**: `upgrade-with-existing-baseline` (the 0.1.4 →
+  local flagship — ADR 022's core contract, driven for real for the first time since the manual
+  2026-08-08 measurement), `upgrade-notes-read-only`, `prune-incomplete-scan-requires-allow-
+  incomplete` (ADR 023 tier 2, `expectFailOn: ['0.1.4']`, against the new `nest-incomplete`
+  project), `mcp-propose-rules-baseline-gate` (ADR 024, `expectFailOn: ['0.1.4']`, the first
+  scenario to use the `mcpCall` step kind).
+- **Tier 2 (command coverage)**: `export-ir-then-check-untrusted`, `baseline-accept-rule-and-show`,
+  `explain-known-and-unknown-rule`, `build-dry-run-apply-verify-drift`, `skill-install`,
+  `docs-topics`, `telemetry-with-and-without-file`.
+
+## What is still NOT covered after increment 2
+
+Named honestly rather than implied covered — see the increment-2 report for the full writeup:
+
+- **`doctor` beyond increment 1's always-exit-0 contract** — dead tsconfig aliases, unmapped files,
+  workspace-orphaned packages, a stale installed skill snapshot (ADR 021 gap 3) are all still
+  fixture-only, not harness scenarios. Each needs a construction on a real repo that increment 2
+  ran out of scope to build.
+- **Every genuinely cross-version row in ADR 025 §7's table except the four Tier-1 items above** —
+  `--from` on a genuine multi-hop range (there is only one registry entry today, so multi-hop
+  can't be exercised until a second one ships), a version-skewed install (binary ≠ installed core,
+  needs two versions present at once), and `docs`/`skill` output compared across two installed
+  versions.
+- `agent` — out of scope by ADR 025 itself (needs a live model).

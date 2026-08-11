@@ -36,6 +36,23 @@ const PLACEHOLDER_VERSION = '<normalized-version>';
 const VOLATILE_JSON_KEYS = new Set(['acceptedAt', 'exportedAt', 'builtAt', 'generatedAt', 'scannedAt']);
 
 /**
+ * `generatedRulesContentHash` (increment 2, found via the harness's own two-run determinism check,
+ * 2026-08-10): `.align/rules.lock.json`'s stored hash of `.align/generated-rules.json`'s RAW bytes
+ * (`writeBuildArtifacts`, `packages/cli/src/commands/build.ts` — `sha256Hex(rawWritten)`). Those raw
+ * bytes embed `generated-rules.json`'s OWN `generatedAt: Date.now()` field, which IS already in
+ * `VOLATILE_JSON_KEYS` above and gets blanked correctly wherever `generated-rules.json` itself is
+ * captured directly — but `rules.lock.json`'s copy of the hash is computed from the UN-normalized
+ * bytes, before the harness ever sees them, so the hash VALUE differs run to run even though
+ * nothing meaningful changed. Verified empirically: two back-to-back `build-dry-run-apply-verify-
+ * drift.mjs`/`mcp-propose-rules-baseline-gate.mjs` runs produced byte-identical `rules.lock.json`
+ * in every field except this one. A second, INDEPENDENTLY NAMED key (not folded into
+ * `VOLATILE_JSON_KEYS` above) — deliberately, so this comment stays next to the one place that
+ * needed it, per this file's own discipline for `known-align-versions` living apart from
+ * `VOLATILE_JSON_KEYS`.
+ */
+const VOLATILE_HASH_JSON_KEYS = new Set(['generatedRulesContentHash']);
+
+/**
  * Regex normalization applied to free text (stdout/stderr, CLAUDE.md, and any raw non-JSON
  * artifact). Order matters: absolute-path normalization must run before duration normalization,
  * because a path can itself contain digit sequences that a careless duration pattern might eat.
@@ -167,6 +184,10 @@ export function normalizeJson(value, ctx) {
         out[key] = PLACEHOLDER_TIMESTAMP;
         continue;
       }
+      if (VOLATILE_HASH_JSON_KEYS.has(key)) {
+        out[key] = '<normalized-content-hash>';
+        continue;
+      }
       out[key] = normalizeJson(v, ctx);
     }
     return out;
@@ -194,6 +215,21 @@ export const NORMALIZATION_CATALOG = [
       'Only ever masks the named fields\' own values — never a sibling field. A regression that ' +
       'stamps the wrong ENTRY (right shape, wrong target) is not masked, since fingerprint/ruleId/' +
       'file/acceptedBy on that entry are compared unnormalized.',
+  },
+  {
+    name: 'volatile-hash-json-keys',
+    keys: [...VOLATILE_HASH_JSON_KEYS],
+    description:
+      "Structured JSON fields blanked by key name because their VALUE is a content hash computed over bytes that " +
+      "embed a volatile timestamp: today, only rules.lock.json's generatedRulesContentHash (a hash of " +
+      "generated-rules.json's raw bytes, which embed that file's own generatedAt: Date.now()). Found by the " +
+      'harness\'s own two-run determinism check (increment 2, 2026-08-10).',
+    masks:
+      'Only ever masks the named field\'s own value, the same guarantee volatile-json-keys makes — never a ' +
+      "sibling field (docPath/docContentHash/sections/builtAt on the SAME rules.lock.json entry are compared " +
+      'unnormalized). Deliberately a NAMED key, never a blanket hex-string regex — the violation fingerprints ' +
+      "this harness's prune/upgrade scenarios compare byte-for-byte are ALSO 16-hex tokens, and a blanket rule " +
+      'would silently defeat that comparison.',
   },
   ...TEXT_RULES.map((r) => ({ name: r.name, description: r.description, masks: r.masks })),
   {

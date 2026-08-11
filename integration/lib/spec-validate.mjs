@@ -9,15 +9,31 @@
 // even partially — "illegal states unrepresentable" (see CODING_BEST_PRACTICES.md §10) applied to
 // scenario data: a scenario object that parses is a scenario object that is valid, full stop.
 
-const KNOWN_STEP_ACTION_KEYS = ['install', 'run', 'mutate', 'snapshot', 'assert'];
-const KNOWN_RUN_STEP_KEYS = new Set(['run', 'expect']);
-const KNOWN_EXPECT_KEYS = new Set(['exit', 'stdoutContains', 'stderrContains', 'stdoutNotContains', 'stdoutMatches']);
+const KNOWN_STEP_ACTION_KEYS = ['install', 'run', 'mutate', 'snapshot', 'assert', 'mcpCall'];
+// `keepVersion` (increment 2): opts a `run`/`mcpCall` step OUT of the `known-align-versions`
+// normalization rule (lib/normalize.mjs) — needed by any scenario that asserts on a LITERAL
+// version number in captured text (e.g. `align upgrade`'s "0.1.3 → 0.1.4" transition line), which
+// the default normalization would otherwise scrub to a placeholder before the assertion ever sees
+// it. README.md's normalization table already named this as a future requirement ("a future
+// version-skew scenario must opt out") — this is that scenario.
+const KNOWN_RUN_STEP_KEYS = new Set(['run', 'expect', 'keepVersion']);
+const KNOWN_EXPECT_KEYS = new Set(['exit', 'stdoutContains', 'stderrContains', 'stdoutNotContains', 'stderrNotContains', 'stdoutMatches']);
 const KNOWN_ASSERT_KEYS_BY_KIND = {
   fileUnchanged: new Set(['kind', 'file', 'since']),
   fileChanged: new Set(['kind', 'file', 'since']),
   jsonArrayLength: new Set(['kind', 'file', 'equals']),
   exists: new Set(['kind', 'file', 'equals']),
 };
+// increment 2 (ADR 025 §7 `mcp` row / ADR 024): a step that calls one MCP tool over a real `align
+// mcp` child process (lib/mcp-client.mjs) instead of running the CLI directly. Kept as its own step
+// kind rather than overloading `run` — a tool call's inputs (`tool` name + structured `arguments`)
+// and outputs (`isError` + JSON/text content) have no exit code and no stdout/stderr, so reusing
+// `run`'s `expect` vocabulary verbatim would either silently accept meaningless keys (`exit`) or
+// require every mcpCall step to carry dead fields — the exact F1 defect class this file exists to
+// prevent, just moved one level up.
+const KNOWN_MCPCALL_STEP_KEYS = new Set(['mcpCall', 'expect', 'keepVersion']);
+const KNOWN_MCPCALL_SPEC_KEYS = new Set(['tool', 'arguments']);
+const KNOWN_MCP_EXPECT_KEYS = new Set(['isError', 'textContains', 'textNotContains']);
 
 function unknownKeys(obj, known) {
   return Object.keys(obj).filter((k) => !known.has(k));
@@ -43,10 +59,55 @@ export function validateExpect(expect, context) {
   if (Object.keys(expect).length === 0) {
     throw new Error(`${context}: expect is an empty object — it asserts nothing. Remove the 'expect' block or add a real check.`);
   }
-  for (const key of ['stdoutContains', 'stderrContains', 'stdoutNotContains']) {
+  for (const key of ['stdoutContains', 'stderrContains', 'stdoutNotContains', 'stderrNotContains']) {
     if (expect[key] === '') {
       throw new Error(`${context}: expect.${key} is an empty string, which matches/fails-to-match trivially — use a real, non-empty substring.`);
     }
+  }
+}
+
+/** Validates a single `mcpCall` step's `expect` block (increment 2 — see `KNOWN_MCP_EXPECT_KEYS`'s
+ * comment for why this is a separate vocabulary from `run`'s). Same discipline as
+ * `validateExpect`: unknown key throws, empty object throws (asserts nothing), empty-string content
+ * check throws (trivially true/false). */
+export function validateMcpExpect(expect, context) {
+  if (expect === undefined) return;
+  if (typeof expect !== 'object' || expect === null || Array.isArray(expect)) {
+    throw new Error(`${context}: 'expect' must be a plain object, got ${JSON.stringify(expect)}`);
+  }
+  const bad = unknownKeys(expect, KNOWN_MCP_EXPECT_KEYS);
+  if (bad.length > 0) {
+    throw new Error(
+      `${context}: expect has unknown key(s) [${bad.join(', ')}] — known keys for an mcpCall step: ${[...KNOWN_MCP_EXPECT_KEYS].join(', ')}.`,
+    );
+  }
+  if (Object.keys(expect).length === 0) {
+    throw new Error(`${context}: expect is an empty object — it asserts nothing. Remove the 'expect' block or add a real check.`);
+  }
+  for (const key of ['textContains', 'textNotContains']) {
+    if (expect[key] === '') {
+      throw new Error(`${context}: expect.${key} is an empty string, which matches/fails-to-match trivially — use a real, non-empty substring.`);
+    }
+  }
+}
+
+/** Validates a single `mcpCall` step spec: `tool` a non-empty string, `arguments` a plain object
+ * (may be `{}` — some tools take no input — but must be present and object-shaped, not omitted,
+ * so a scenario author cannot accidentally call a tool with `undefined` arguments by forgetting
+ * the field). */
+export function validateMcpCallSpec(spec, context) {
+  if (typeof spec !== 'object' || spec === null || Array.isArray(spec)) {
+    throw new Error(`${context}: 'mcpCall' must be a plain object, got ${JSON.stringify(spec)}`);
+  }
+  const bad = unknownKeys(spec, KNOWN_MCPCALL_SPEC_KEYS);
+  if (bad.length > 0) {
+    throw new Error(`${context}: mcpCall has unknown key(s) [${bad.join(', ')}] — known keys: ${[...KNOWN_MCPCALL_SPEC_KEYS].join(', ')}`);
+  }
+  if (typeof spec.tool !== 'string' || spec.tool.length === 0) {
+    throw new Error(`${context}: mcpCall.tool must be a non-empty string`);
+  }
+  if (typeof spec.arguments !== 'object' || spec.arguments === null || Array.isArray(spec.arguments)) {
+    throw new Error(`${context}: mcpCall.arguments must be a plain object (use {} for a tool that takes no input)`);
   }
 }
 
@@ -102,9 +163,16 @@ export function validateScenario(scenario) {
       const bad = unknownKeys(step, KNOWN_RUN_STEP_KEYS);
       if (bad.length > 0) throw new Error(`${context}: run step has unknown key(s) [${bad.join(', ')}] — known: ${[...KNOWN_RUN_STEP_KEYS].join(', ')}`);
       if (typeof step.run !== 'string' || step.run.length === 0) throw new Error(`${context}: 'run' must be a non-empty string`);
+      if (step.keepVersion !== undefined && typeof step.keepVersion !== 'boolean') throw new Error(`${context}: 'keepVersion' must be a boolean`);
       validateExpect(step.expect, context);
+    } else if (action === 'mcpCall') {
+      const bad = unknownKeys(step, KNOWN_MCPCALL_STEP_KEYS);
+      if (bad.length > 0) throw new Error(`${context}: mcpCall step has unknown key(s) [${bad.join(', ')}] — known: ${[...KNOWN_MCPCALL_STEP_KEYS].join(', ')}`);
+      validateMcpCallSpec(step.mcpCall, context);
+      if (step.keepVersion !== undefined && typeof step.keepVersion !== 'boolean') throw new Error(`${context}: 'keepVersion' must be a boolean`);
+      validateMcpExpect(step.expect, context);
     } else {
-      if (step.expect !== undefined) throw new Error(`${context}: 'expect' is only valid on a 'run' step`);
+      if (step.expect !== undefined) throw new Error(`${context}: 'expect' is only valid on a 'run' or 'mcpCall' step`);
       if (action === 'install') {
         if (typeof step.install !== 'string' || step.install.length === 0) throw new Error(`${context}: 'install' must be a non-empty string`);
       } else if (action === 'mutate') {

@@ -64,16 +64,26 @@ export function packLocalTarballs(alignRepoRoot, destDir, log = () => {}) {
 
 /** Reads `workingDir/package.json`, rewrites its align-related `devDependencies`/`overrides` for
  * `version`, and writes it back — every other field untouched. `version` is either a published
- * version string (`'0.1.4'`) or the literal `'local'`. */
-function writePackageJsonFor(workingDir, version, tarballs) {
+ * version string (`'0.1.4'`) or the literal `'local'`.
+ *
+ * `alignOnlyInstall` (increment 2, ADR 025 §4's "second, deliberately incomplete project variant"
+ * — `projects/nest-incomplete.mjs`): when true, the project's OWN `dependencies`/`devDependencies`
+ * are dropped entirely before writing, so the `npm install` this triggers resolves ONLY align's
+ * four packages (plus their own transitive deps) and never touches the project's real dependency
+ * tree. Verified empirically (2026-08-10, scratch npm project): a plain `npm install <one-pkg>`
+ * against a package.json that ALSO lists other, uninstalled dependencies installs those too — npm
+ * always reconciles the WHOLE tree against package.json, there is no "install just this package"
+ * mode once other deps are declared. Stripping them from the object BEFORE npm ever sees it is the
+ * only reliable way to keep them uninstalled while still installing align itself. */
+function writePackageJsonFor(workingDir, version, tarballs, options = {}) {
   const pkgJsonPath = path.join(workingDir, 'package.json');
   const pkg = readJson(pkgJsonPath);
-  const devDependencies = { ...pkg.devDependencies };
+  const devDependencies = options.alignOnlyInstall ? {} : { ...pkg.devDependencies };
   // Always fully replace (not merge) the align-related overrides on every install, so a scenario
   // that installs two versions in sequence into the SAME working copy (a real cross-version
   // scenario shape, out of scope for increment 1 but the mechanism must not silently leak a stale
   // override from an earlier install) never carries the previous version's pins forward.
-  const overrides = { ...pkg.overrides };
+  const overrides = options.alignOnlyInstall ? {} : { ...pkg.overrides };
   for (const name of Object.values(SCOPED_NAME)) delete overrides[name];
 
   if (version === 'local') {
@@ -87,7 +97,8 @@ function writePackageJsonFor(workingDir, version, tarballs) {
     devDependencies[SCOPED_NAME.core] = version;
   }
 
-  writeJson(pkgJsonPath, { ...pkg, devDependencies, overrides });
+  const rest = options.alignOnlyInstall ? { ...pkg, dependencies: {} } : pkg;
+  writeJson(pkgJsonPath, { ...rest, devDependencies, overrides });
 }
 
 /**
@@ -169,14 +180,24 @@ function verifyLocalInstallAuthenticity(workingDir, alignRepoRoot, log) {
  */
 export function installAlignVersion(workingDir, version, options) {
   const tarballs = version === 'local' ? packLocalTarballs(options.alignRepoRoot, options.tarballCacheDir, options.log) : undefined;
-  writePackageJsonFor(workingDir, version, tarballs);
+  writePackageJsonFor(workingDir, version, tarballs, { alignOnlyInstall: options.alignOnlyInstall === true });
 
   // `--legacy-peer-deps`: must match the flag the base install used (project.mjs's
   // `installCmd`) — nest's own tree has an unresolved ERESOLVE conflict (see projects/nest.mjs),
   // and `npm install` re-resolves peers for the whole tree on every invocation, not just the
   // newly-added align packages, so omitting it here would fail even though the base install
   // already succeeded.
-  const install = run('npm', ['install', '--no-audit', '--no-fund', '--legacy-peer-deps'], { cwd: workingDir, timeoutMs: 5 * 60 * 1000 });
+  //
+  // `--ignore-scripts` for `alignOnlyInstall` only: `writePackageJsonFor` strips the project's own
+  // `dependencies`/`devDependencies` for that variant, so its `prepare`/`postinstall` lifecycle
+  // scripts (nest's root package.json runs `husky` on `prepare`) reference tooling that was
+  // deliberately never installed — verified empirically (2026-08-10): a plain `npm install` here
+  // fails with `sh: husky: command not found` (exit 127), a harness/environment-looking failure
+  // that has nothing to do with align. The normal (non-`alignOnlyInstall`) path never sets this —
+  // running a real project's own lifecycle scripts is part of installing it for real.
+  const installArgs = ['install', '--no-audit', '--no-fund', '--legacy-peer-deps'];
+  if (options.alignOnlyInstall) installArgs.push('--ignore-scripts');
+  const install = run('npm', installArgs, { cwd: workingDir, timeoutMs: 5 * 60 * 1000 });
   if (install.exitCode !== 0) {
     throw new Error(`npm install (align ${version}) failed in ${workingDir} (exit ${install.exitCode}):\n${install.stderr.slice(-4000)}`);
   }

@@ -39,8 +39,31 @@ export function evaluateExpect(expect, normalizedRun) {
   if (expect.stdoutNotContains !== undefined && normalizedRun.stdoutNormalized.includes(expect.stdoutNotContains)) {
     failures.push(`expected stdout NOT to contain ${JSON.stringify(expect.stdoutNotContains)}`);
   }
+  if (expect.stderrNotContains !== undefined && normalizedRun.stderrNormalized.includes(expect.stderrNotContains)) {
+    failures.push(`expected stderr NOT to contain ${JSON.stringify(expect.stderrNotContains)}`);
+  }
   if (expect.stdoutMatches !== undefined && !new RegExp(expect.stdoutMatches).test(normalizedRun.stdoutNormalized)) {
     failures.push(`expected stdout to match /${expect.stdoutMatches}/`);
+  }
+  return { pass: failures.length === 0, failures };
+}
+
+/** Evaluates one `mcpCall` step's declarative `expect` block against the captured MCP tool result
+ * (`lib/mcp-client.mjs`'s `callMcpTool` return shape) — the same exhaustive-not-short-circuited
+ * discipline as `evaluateExpect` above, applied to the smaller `isError`/text vocabulary a tool
+ * call actually has (see `spec-validate.mjs`'s `KNOWN_MCP_EXPECT_KEYS` comment for why this is a
+ * separate function rather than a `run`-step key reused past what it means). */
+export function evaluateMcpExpect(expect, mcpResult) {
+  if (expect === undefined) return { pass: true, failures: [] };
+  const failures = [];
+  if (expect.isError !== undefined && mcpResult.isError !== expect.isError) {
+    failures.push(`expected isError ${expect.isError}, got ${mcpResult.isError}`);
+  }
+  if (expect.textContains !== undefined && !mcpResult.textNormalized.includes(expect.textContains)) {
+    failures.push(`expected mcp result text to contain ${JSON.stringify(expect.textContains)}`);
+  }
+  if (expect.textNotContains !== undefined && mcpResult.textNormalized.includes(expect.textNotContains)) {
+    failures.push(`expected mcp result text NOT to contain ${JSON.stringify(expect.textNotContains)}`);
   }
   return { pass: failures.length === 0, failures };
 }
