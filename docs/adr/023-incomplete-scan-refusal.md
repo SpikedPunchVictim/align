@@ -172,3 +172,106 @@ destroying data.
 - Doctrine precedent: this is the "reports success wrongly" class — a false green destroys trust
   in every other signal the system emits, so it outranks correctness bugs with larger blast
   radius. Related: ADR 006 (baseline consent), ADR 008 (gate model).
+
+## Amendment (2026-08-11): tier 2 extends to `align init` — both write paths, not one
+
+The original Decision applied **tier 1** to `runInit` but **tier 2** only to `baselinePrune`, on the
+reasoning that changing `init`'s contract was out of scope. That left an open question rather than a
+settled one. Re-examining it found the exposure is larger than the single branch that prompted it.
+
+`init` never reads the baseline it overwrites, and `writeBaseline` (`align-dir.ts:206`) is a full
+replace. So **both** of `init`'s write paths destroy accepted entries on a `complete: false` scan.
+Reproduced 2026-08-11 against the `simple-app-violation-incomplete` fixture (a real
+`missing-dependencies` advisory, **no** errored gate — tier 1 does not fire), output verbatim:
+
+**Zero-violations path** (`commands/init.ts:162`) — the branch this amendment was opened on:
+
+```
+baseline BEFORE: 1 entries
+Initial check is green — no baseline seeding needed.
+init exit: 0
+baseline AFTER:  0 entries
+```
+
+**Seed path** (`commands/init.ts:195`, under `--accept-existing`) — **not previously identified**,
+and not covered by any tier. The write persists only the violations the *current* scan observed, so
+an accepted entry the scan can no longer see is silently dropped:
+
+```
+baseline BEFORE: 2 entries [b26ffb86.../manual@1700000000000, deadbeef.../manual@1700000000000]
+Seeded baseline with 1 pre-existing violation(s)
+init exit: 0
+baseline AFTER:  1 entries [b26ffb86.../accept-existing@1786480306952]
+```
+
+Both are the shape this ADR exists to eliminate: silent data loss, reported as success, exit 0.
+
+The realistic trigger is not exotic. Missing dependencies drop *external* edges, so a monorepo whose
+cross-package imports resolve through `node_modules` loses every cross-package edge when the install
+is absent — and with them every `arch.layers`/`arch.no-dependency` violation routed through one. The
+scan then reads green, and a re-run of `init` wipes the baseline. That is a fresh clone plus a
+re-run, on exactly the class of repo that carries a baseline worth protecting.
+
+### Decision
+
+**Tier 2 applies to `align init`'s baseline write, at both paths, through one guard.**
+
+- **At-risk count** = existing on-disk entries whose fingerprint is absent from the entry set the
+  write would persist. The zero-violations path yields every existing entry; the seed path yields
+  the entries the scan no longer observes; a first `init` on a repo with no baseline yields 0 and is
+  never refused. One formula, both paths — the branch is not part of the decision.
+- **One call site.** Exactly one helper inside `commands/init.ts` computes the count and calls
+  `refuseIfRunIncomplete`; both write paths route through it. Guarding each path independently is
+  precisely how this class reached five copies, and this ADR's own Alternatives already rejected it.
+- **`--allow-incomplete` on `align init`**, identical in name, semantics, and refusal text to
+  `align baseline prune` and `align upgrade`. `init` becomes the third tier-2 consumer.
+- **A complete scan behaves exactly as it does today.** Dropping an entry whose violation a complete
+  scan verified as gone is correct prune semantics, not a defect.
+- **`init` must read the baseline before overwriting it**, with the same corrupt-≠-absent discipline
+  every other baseline consumer already applies (`tryReadBaseline`, `commands/baseline.ts:17-24`).
+  A corrupt `.align/baseline.json` is refused rather than silently replaced — the last remaining
+  silent-overwrite path. Recovery stays explicit and available: repair or delete the file, re-run.
+
+### Alternatives considered (this amendment)
+
+**Guard only the zero-violations path** — the question as originally posed. Rejected on the evidence
+above: the seed path destroys entries under the identical condition, and shipping a guard that
+covers one of two identical paths is how the next audit finds copy number six.
+
+**Require an `--accept-existing`-style confirmation for a `complete: false` + zero-violations run.**
+Rejected: it invents a second consent mechanism for a hazard the existing guard already models, and
+it does not reach the seed path at all.
+
+**Refuse any `init` that would overwrite an existing baseline, regardless of completeness.** The
+most principled reading — "initialize" should arguably not mean "reset" — but it breaks the
+re-runnable-`init` flow this codebase documents and tests, and on a complete scan the overwrite is
+correct. Recorded as the stronger invariant available if re-running `init` on an initialized repo is
+ever reconsidered as a whole.
+
+**Merge instead of replace, refusing only the deletion half** — the shape `align upgrade` already
+uses, where adds proceed while deletes refuse (`commands/upgrade.ts:330-335`). This is the better
+end state and it also fixes the provenance loss below, but it changes what `init` *means* on an
+initialized repo rather than adding a completeness guard, so it is deliberately not folded in here.
+
+### Deliberately deferred: the seed path resets provenance
+
+Independent of completeness, the seed path rewrites every surviving entry's `acceptedAt` to now and
+its `acceptedBy` to `init-seed`/`accept-existing` — visible in the reproduction above, where a
+`manual@1700000000000` acceptance came back as `accept-existing@1786480306952`. That erases the
+audit trail of a consent decision ADR 006 treats as the human's, on every re-run, including on a
+complete scan where nothing else is lost.
+
+It is recorded rather than fixed because the fix is the merge semantics rejected above: a change to
+`init`'s contract, not a completeness guard. Naming it here means a future reader finds a deferral
+with reasoning instead of rediscovering it as a bug.
+
+### Consequences (in addition to the original)
+
+- `align init` exits non-zero, changing nothing, on an incomplete scan that would drop accepted
+  entries — where it previously exited 0 having destroyed them. Overridable with
+  `--allow-incomplete`.
+- `align init` gains a flag, and the original Decision's "Applied at both destructive sites"
+  now reads: tier 1 at `baselinePrune` and both `runInit` paths; tier 2 at `baselinePrune`,
+  `align upgrade`'s prune half, and both `runInit` paths.
+- `align init` on a corrupt `.align/baseline.json` now refuses instead of overwriting it.
+- The seed path's provenance reset remains, deliberately, and is the open item above.
