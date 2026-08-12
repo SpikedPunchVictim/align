@@ -99,13 +99,59 @@ drives `runUpgrade` twice (real git subprocesses plus two full scans), 1–3s qu
 run check never completed, and the reproduction environment was contaminated by four concurrent
 agents on one machine. Re-run the suite ~15x on a quiet box and confirm before the release.
 
-### #25 — Should align auto-exclude nested checkouts?
+### #25 — nested checkouts: DECIDED, IMPLEMENTED, REVIEWED, **NOT MERGED**
 
-A git worktree inside the repo gets scanned, and its fixtures surface as real violations. Fixed for
-this repo by excluding `.claude`, but the general case affects any user running `git worktree`
-inside their repo — increasingly common with agent tooling. Excludes are prefix-anchored, so a
-nested checkout adds a prefix no exclude matches. **This session leaned on that `.claude` exclude
-heavily** — every parallel agent worked in `.claude/worktrees/<name>`.
+**The work is uncommitted in a git worktree: `.claude/worktrees/wt-25` (branch `wt-25`, based on
+`b6d38e3`). Do not delete that directory — the changes are working-tree only and are NOT in the
+branch.** First action next session: confirm it is still there (`git worktree list`), and consider
+committing a WIP snapshot onto `wt-25` as a safety net before touching anything.
+
+**Decided design** (user's call): (1) auto-exclude — during the walk, skip any non-root directory
+containing its own `.git` (a *directory* for a clone/submodule, a *file* for a linked worktree);
+(2) never silent — every skip is reported as a `nested-checkout-skipped` advisory on `check` AND
+`doctor`, because a component whose files all live under a silently-skipped path would evaluate
+vacuously green (ADR 008 reference-validity, ADR 003 `empty:` policy); (3) opt-out via an
+`includeNestedCheckouts` export in `align.config.ts`, default off.
+
+**A Fable review verdict: merge with fixes, one blocking.** What it verified as SOUND — do not
+re-review these: the skip logic (both `.git` shapes, once per directory not per file, root
+structurally exempt via `relDir === ''` with a genuine test); the implementer's claim that
+`validateComponents` throws before any graph exists, so that diagnosis must live in the thrown
+message; advisory reachability on every other path (green run, both guard-step error returns,
+`empty: 'allow'`, doctor's direct scan and its scan-error catch, `--untrusted`, MCP); and the
+`ExportedRuleset` addition being compatible via `z.array(z.string()).default([])` in a non-strict
+object — **no `irVersion` bump, which would break old artifacts for nothing.**
+
+**Blocking finding, dispatched to a worker but UNVERIFIED as of this writing:**
+`includeNestedCheckouts` was not threaded through 7 call sites — `mcp/server.ts:45`,
+`baseline.ts:31/112/123`, `upgrade.ts:190/245/250`, `init.ts:210`. Consequence for a user who opts a
+checkout back in: `baseline accept` can never clear a red check, and **`baseline prune` deletes
+their accepted entries and exits 0** — the files are absent from prune's `knownFiles`, so
+`store.prune` deletes them as unmatched orphans while printing success. Neither ADR 023 guard fires:
+the run is green AND complete, so the inconsistency is in scan *scope*, not run status.
+`mcp/server.ts:31-41` carries a comment naming that function as the one that keeps getting missed by
+cross-cutting changes, with two prior instances; this was the third. Also dispatched: the
+`skippedCheckoutsMatchingSelector` probe misses selectors anchored deeper than the checkout root
+(`registry.ts:105-113` — `vendored/repo/src/**` does not match a probe at the checkout root); two
+comments claiming more than the code enforces (`registry.ts:100-103`,
+`plugin-typescript/src/scanner.ts:209-210`); and an ADR 014 amendment for the new artifact field.
+
+**STILL OWED — nobody has started these:**
+
+1. **`prune` must refuse or warn when an orphan's file falls under `graph.skippedNestedCheckouts`
+   (user-decided).** This gap exists INDEPENDENT of the wiring bug and survives fixing it: a user
+   upgrading with accepted entries for files inside a submodule the old align scanned now has those
+   files auto-excluded, so the violations are *unobservable, not fixed* — tier 2's own vocabulary —
+   yet the run is green and complete, so `prune` deletes the entries silently. The data to detect
+   this now exists on the graph. This is the same invariant ADR 023 already establishes.
+2. **An ADR for #25.** It changes default scan scope for every user, adds a field to a persisted
+   portable artifact, and introduces `'nested-checkout-skipped'` as a wire-visible advisory kind
+   other tooling will match on. Consequences must record that `DependencyGraph.skippedNestedCheckouts`
+   is a REQUIRED field, hence compile-breaking for any out-of-tree `Scanner` implementor.
+3. **An integration scenario** — `CLAUDE.md` rule 2, and a default-behaviour change is exactly what
+   the cross-version matrix exists for.
+4. **A migration note in `UPGRADING.md`'s `## 0.2.0` section** for the default scan-scope change,
+   then `pnpm --filter @spikedpunch/align-cli compile-notes`.
 
 ### The last unseamed prompt
 
