@@ -274,16 +274,40 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     return finish(1);
   }
 
+  // ADR 023 amendment, "Resolved (same day): the seed path preserves provenance" (2026-08-11): a
+  // re-run of `init` used to rewrite EVERY surviving entry's `acceptedAt`/`acceptedBy` to
+  // `init-seed`/`accept-existing` at now, even on a complete scan where nothing else was lost —
+  // erasing the audit trail of a consent decision ADR 006 treats as the human's (a `manual` accept
+  // came back stamped `accept-existing` on every subsequent `init`). The fix is a merge, not a
+  // replace: a violation the scan observed that ALSO has an existing baseline entry with the same
+  // fingerprint inherits that entry's `acceptedAt`/`acceptedBy` verbatim; only a genuinely new
+  // violation (no prior entry with that fingerprint) is freshly stamped, exactly as before.
+  //
+  // `ruleId` and `file` are deliberately never taken from `prior` — only the provenance pair is.
+  // Fingerprints are content-snippet hashes, not line numbers or paths (ADR 006), so a violation
+  // whose file MOVED keeps its fingerprint; carrying the prior entry's `file` over verbatim would
+  // persist a stale path, which is the exact drift `store.reconcileMoves` exists to prevent
+  // elsewhere. Always read `ruleId`/`file` off `v` (the current scan), never off `prior`.
+  //
+  // This is a merge of PROVENANCE, not a union of ENTRIES: an existing entry with no matching
+  // fingerprint in `violations` still isn't in this map at all and is dropped, same as before —
+  // that half stays governed by `refuseIfBaselineWriteAtRisk` above, which already refused this
+  // write if dropping it would be unsafe on an incomplete scan.
+  const existingByFingerprint = new Map(existingBaseline.map((entry) => [entry.fingerprint, entry]));
+
   try {
     writeBaseline(
       rootDir,
-      violations.map((v) => ({
-        fingerprint: v.id,
-        ruleId: v.ruleId,
-        file: v.file,
-        acceptedAt: Date.now(),
-        acceptedBy: options.acceptExisting ? ('accept-existing' as const) : ('init-seed' as const),
-      })),
+      violations.map((v) => {
+        const prior = existingByFingerprint.get(v.id);
+        return {
+          fingerprint: v.id,
+          ruleId: v.ruleId,
+          file: v.file,
+          acceptedAt: prior?.acceptedAt ?? Date.now(),
+          acceptedBy: prior?.acceptedBy ?? (options.acceptExisting ? ('accept-existing' as const) : ('init-seed' as const)),
+        };
+      }),
     );
     recordBaselineReconciled(rootDir);
   } catch (err) {

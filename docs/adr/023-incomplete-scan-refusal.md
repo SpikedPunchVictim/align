@@ -250,20 +250,39 @@ ever reconsidered as a whole.
 
 **Merge instead of replace, refusing only the deletion half** — the shape `align upgrade` already
 uses, where adds proceed while deletes refuse (`commands/upgrade.ts:330-335`). This is the better
-end state and it also fixes the provenance loss below, but it changes what `init` *means* on an
-initialized repo rather than adding a completeness guard, so it is deliberately not folded in here.
+end state and it also fixes the provenance loss below. It was initially deferred as a contract change
+rather than a completeness guard; it was then taken up the same day, and the section below records
+what it became.
 
-### Deliberately deferred: the seed path resets provenance
+### Resolved (same day): the seed path preserves provenance
 
-Independent of completeness, the seed path rewrites every surviving entry's `acceptedAt` to now and
+Independent of completeness, the seed path rewrote every surviving entry's `acceptedAt` to now and
 its `acceptedBy` to `init-seed`/`accept-existing` — visible in the reproduction above, where a
-`manual@1700000000000` acceptance came back as `accept-existing@1786480306952`. That erases the
+`manual@1700000000000` acceptance came back as `accept-existing@1786480306952`. That erased the
 audit trail of a consent decision ADR 006 treats as the human's, on every re-run, including on a
-complete scan where nothing else is lost.
+complete scan where nothing else was lost. Losing *who accepted this, and when* is a smaller harm
+than losing the entry, but it is the same kind of harm, and it happened on every re-run rather than
+only on an incomplete scan.
 
-It is recorded rather than fixed because the fix is the merge semantics rejected above: a change to
-`init`'s contract, not a completeness guard. Naming it here means a future reader finds a deferral
-with reasoning instead of rediscovering it as a bug.
+**Decision: the seed path merges rather than replaces.** For each violation the scan observed, an
+existing baseline entry with the same fingerprint contributes its original `acceptedAt` and
+`acceptedBy`; only a genuinely new violation is stamped `init-seed`/`accept-existing` at now.
+
+Two details the merge must get right, both consequences of what a fingerprint is:
+
+- **`ruleId` and `file` come from the current violation, never from the prior entry.** Fingerprints
+  are content-snippet hashes, not line numbers or paths (ADR 006), so a violation whose file MOVED
+  keeps its fingerprint. Carrying the prior entry over verbatim would persist a stale path — the
+  exact drift `store.reconcileMoves` exists to prevent. Only the provenance pair is inherited.
+- **Entries the scan did not observe are still dropped**, exactly as before, and still gated by the
+  tier-2 guard above. Preserving them unconditionally would make `init` unable to ever clear fixed
+  debt, and on a complete scan dropping them is correct prune semantics — the same reasoning that
+  kept complete scans unchanged in the main Decision. So this is a merge of *provenance*, not a
+  union of *entries*: the deletion half remains governed by completeness, the add half no longer
+  destroys history.
+
+`init` therefore stops rewriting consent records it did not author. What it still does on a complete
+scan — drop entries whose violations are genuinely gone — is unchanged and intended.
 
 ### Consequences (in addition to the original)
 
@@ -274,4 +293,7 @@ with reasoning instead of rediscovering it as a bug.
   now reads: tier 1 at `baselinePrune` and both `runInit` paths; tier 2 at `baselinePrune`,
   `align upgrade`'s prune half, and both `runInit` paths.
 - `align init` on a corrupt `.align/baseline.json` now refuses instead of overwriting it.
-- The seed path's provenance reset remains, deliberately, and is the open item above.
+- `align init`'s seed path no longer rewrites `acceptedAt`/`acceptedBy` on entries it did not
+  author; re-running `init` on an initialized repo preserves the consent record's audit trail. New
+  violations are still stamped `init-seed`/`accept-existing`, and entries the scan did not observe
+  are still dropped under the completeness rules above.
