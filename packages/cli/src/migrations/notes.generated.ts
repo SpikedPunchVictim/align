@@ -11,11 +11,11 @@
 // `migration-notes-drift.test.ts` fails if UPGRADING_MD_CONTENT_HASH below no longer matches
 // the doc's current content — that is the drift detector, not a suggestion.
 //
-// Generated at: 2026-08-09T19:32:50.262Z
+// Generated at: 2026-08-12T07:45:50.563Z
 import type { MigrationNote } from './types.js';
 
 /** sha256Hex (16-char) of UPGRADING.md's full text at compile time. */
-export const UPGRADING_MD_CONTENT_HASH = "373de4ff0b9a110d";
+export const UPGRADING_MD_CONTENT_HASH = "65cdd09339b6dc1c";
 
 /** Migration notes compiled from UPGRADING.md, keyed by the exact version heading text
  * ("## <version>") it was compiled from. */
@@ -40,6 +40,12 @@ export const COMPILED_NOTES: Readonly<Record<string, readonly MigrationNote[]>> 
     {
       heading: "Changes that need nothing from you",
       body: "Worth knowing about, but no migration:\n\n- **A corrupt `.align/baseline.json` now fails loudly** instead of being read as empty. Previously\n  a merge-conflicted baseline was silently treated as \"nothing accepted\", and the next\n  `align baseline accept` overwrote the file, destroying every entry. If you hit the new error,\n  the most likely cause is an unresolved merge conflict — resolve it or restore from git.\n- **`align init` and `align build --apply` refuse to rewrite a malformed align block** in\n  `CLAUDE.md` or `align.config.ts` rather than guessing which content is yours. Previously an\n  orphaned start marker could cause the next run to delete everything between it and the block —\n  in `align.config.ts`, that meant your ruleset. If you see the new error, restore exactly one\n  `<!-- align:start -->` … `<!-- align:end -->` pair, or delete both markers and let align\n  re-append.\n- **Config errors print cleanly and exit non-zero** instead of emitting a raw Node stack trace.\n  This covers a syntax error in `align.config.ts`, a missing `default` export, a malformed\n  `excludes`/`compositionRoots`/`knownPublicDeepImports` export, and a corrupt or schema-invalid\n  `.align/generated-rules.json`. Schema-invalid `.align/` artifacts now name the file and list\n  the offending fields instead of dumping a raw validation error.\n- **`align agent run` twice in the same day works.** It used to crash on a branch-name collision;\n  it now resumes onto the existing `align/fixes-<date>` branch, and refuses to continue at all\n  if it cannot land on that branch.\n- **`align doctor` honours your excludes the same way `align check` does.** It previously used a\n  laxer matcher, so you may see fewer advisories.\n- **Baseline move-transfer only fires on a real move.** Previously an orphaned entry was\n  transferred onto any current violation with matching rule id + snippet in a different file —\n  so fixing a violation in one file while adding a textually identical one in another, in the\n  same commit, silently baselined the new one and left CI green. A transfer now requires the\n  orphan's own file to have genuinely disappeared from the scan. Renames still transfer, which\n  is what the mechanism exists for; `align baseline prune` was affected too and is also fixed.\n- **A fix proposal listing the same file twice is rejected** rather than silently applying only\n  one of the two entries' edits.\n\n`align doctor` still always exits 0, including on a config error, which it reports as a\n`config-error` advisory.",
+    },
+  ],
+  "0.2.0": [
+    {
+      heading: "`.align/rules.lock.json`'s generated-rules hash is now reproducible",
+      body: "`rules.lock.json` records a hash of `.align/generated-rules.json`, used to detect whether the\ngenerated file has been hand-edited since the last `align build --apply`. That hash used to cover\nthe file's raw bytes, which include `generatedAt` — a timestamp written for human reference and read\nby no code. Two builds producing byte-identical rules therefore produced different hashes whenever\nthe wall clock had moved, defeating \"rebuild and compare\": there was no way to verify a generated\nruleset was unchanged without also asking whether the exact same millisecond had been used to build\nit.\n\nThe hash is now computed over an explicitly reconstructed `{ irVersion, docPath, rules }`, excluding\n`generatedAt`. `generatedAt` still appears in `.align/generated-rules.json`, unchanged, for humans\nreading the file; it is simply no longer part of what the lockfile verifies. An edit that changes\nenforcement — a different rule, a different selector, a removed rule — is still detected exactly as\nbefore; a rebuild that changes only the timestamp is not, which is the intended scope of the fix.\n\nEvery `rules.lock.json` written before this change carries the old, raw-bytes hash, which will not\nmatch the new scheme even though nothing about the generated rules changed. `align build --apply`\nrecomputes and rewrites the hash using an unmodified doc and code, so re-running it brings the\nlockfile onto the new scheme with no other effect. Until then, `align check --frozen-rules` /\n`align build --verify` recognize a lockfile on the old scheme and report it distinctly from a\ngenuine hand-edit, rather than accusing an untouched repo of tampering.",
     },
   ],
 };

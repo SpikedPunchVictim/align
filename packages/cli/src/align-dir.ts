@@ -210,9 +210,15 @@ export function writeBaseline(rootDir: string, entries: readonly BaselineEntry[]
   stampAlignVersion(rootDir);
 }
 
-/** Raw on-disk bytes of `.align/generated-rules.json`, or `undefined` if absent — used both to
- * `.parse()` the file (below) and to content-hash it verbatim for divergence detection (ADR 011:
- * a hand-edit to this file must be detectable even if the edit still happens to be valid JSON). */
+/** Raw on-disk bytes of `.align/generated-rules.json`, or `undefined` if absent — used to `.parse()`
+ * the file (below). NOT what divergence detection hashes verbatim (a doc comment here asserted that
+ * until the 2026-08-12 ADR 011 amendment; it was false — `sha256Hex(rawWritten)` folded
+ * `generatedAt: Date.now()` into the hash, so two builds of byte-identical rules produced different
+ * hashes, defeating "rebuild and compare." The primary hash (`reproducibleGeneratedRulesHash`,
+ * `commands/build.ts`) reconstructs `{ irVersion, docPath, rules }` from the PARSED file instead.
+ * These raw bytes now serve only `.parse()` above and, temporarily, the legacy raw-bytes fallback
+ * comparison in `checkGeneratedRulesDivergence` (`commands/build.ts`) for lockfiles predating that
+ * change — see its doc comment for the removal condition. */
 export function readGeneratedRulesRaw(rootDir: string): string | undefined {
   const file = generatedRulesPath(rootDir);
   if (!fs.existsSync(file)) return undefined;

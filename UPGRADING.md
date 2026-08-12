@@ -117,3 +117,28 @@ Worth knowing about, but no migration:
 
 `align doctor` still always exits 0, including on a config error, which it reports as a
 `config-error` advisory.
+
+## 0.2.0
+
+### `.align/rules.lock.json`'s generated-rules hash is now reproducible
+
+`rules.lock.json` records a hash of `.align/generated-rules.json`, used to detect whether the
+generated file has been hand-edited since the last `align build --apply`. That hash used to cover
+the file's raw bytes, which include `generatedAt` — a timestamp written for human reference and read
+by no code. Two builds producing byte-identical rules therefore produced different hashes whenever
+the wall clock had moved, defeating "rebuild and compare": there was no way to verify a generated
+ruleset was unchanged without also asking whether the exact same millisecond had been used to build
+it.
+
+The hash is now computed over an explicitly reconstructed `{ irVersion, docPath, rules }`, excluding
+`generatedAt`. `generatedAt` still appears in `.align/generated-rules.json`, unchanged, for humans
+reading the file; it is simply no longer part of what the lockfile verifies. An edit that changes
+enforcement — a different rule, a different selector, a removed rule — is still detected exactly as
+before; a rebuild that changes only the timestamp is not, which is the intended scope of the fix.
+
+Every `rules.lock.json` written before this change carries the old, raw-bytes hash, which will not
+match the new scheme even though nothing about the generated rules changed. `align build --apply`
+recomputes and rewrites the hash using an unmodified doc and code, so re-running it brings the
+lockfile onto the new scheme with no other effect. Until then, `align check --frozen-rules` /
+`align build --verify` recognize a lockfile on the old scheme and report it distinctly from a
+genuine hand-edit, rather than accusing an untouched repo of tampering.
