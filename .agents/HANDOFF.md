@@ -1,9 +1,10 @@
 # Handoff — align 0.2.0 release work
 
-**Written 2026-08-11.** Branch `fix`, **44 commits ahead of `main`**, **no upstream, nothing pushed**,
-working tree clean.
+**Written 2026-08-11, updated 2026-08-12.** Branch `fix`, **58 commits ahead of `main`**, **no
+upstream, nothing pushed**, working tree clean.
 
-Read this, then `docs/adr/021`–`025`. The ADRs are authoritative; this file only tells you where
+Read this, then `CLAUDE.md` (destructive-safety rules — binding on new work), then
+`docs/adr/021`–`026`. The ADRs are authoritative; this file only tells you where
 things stand and what is not obvious from the code.
 
 ---
@@ -16,8 +17,10 @@ node packages/cli/dist/index.js check     # must be green
 node packages/cli/dist/index.js doctor    # must exit 0
 ```
 
-Current, as of this handoff: **1080 passing + 1 skipped** — create-align 46, core 447,
-plugin-typescript 82, agent 53 (+1 skipped), cli 452. `align check` green (29 baselined, 0 red).
+Current, as of 2026-08-12: **1134 passing + 1 skipped** — create-align 46, core 450,
+plugin-typescript 82, agent 53 (+1 skipped), cli 503. `align check` green (29 baselined, 0 red).
+Measured wall-clock: build 5s, typecheck 9s, test 12s — **26s for the whole gate**, so run it
+always. The Docker harness costs ~38s per scenario (~9m for the full local suite); use the tiers.
 
 If these do not reproduce, stop and find out why before doing anything else.
 
@@ -50,46 +53,65 @@ harness has stopped working and nothing it reports can be trusted.** CI runs it 
 
 Ordered by what I would do next. Every item was deliberately deferred with reasoning, not forgotten.
 
-### #21 — Does `align init` need incomplete-scan protection? (decide, then amend ADR 023)
+### Closed on 2026-08-12 (see git log for the commits)
 
-**The most consequential item left.** `runInit`'s zero-violation branch (`commands/init.ts:155`)
-writes `[]` over an existing baseline unconditionally. That is the same destructive-overwrite shape
-ADR 023 targets, and arguably worse than `prune`'s — a full wipe rather than per-entry deletion. On
-a `complete: false` scan the "green" that triggers it may be a false green.
+**#21** — ADR 023 amended: tier 2 now covers BOTH of `init`'s write paths through one guard, with
+`--allow-incomplete`. Reproduction found a second destructive path the original write-up missed —
+the `--accept-existing` seed path silently dropped accepted entries the scan no longer observed.
+`init` also stopped restamping `acceptedAt`/`acceptedBy` on entries it did not author, and now
+refuses on a corrupt `baseline.json` instead of overwriting it.
 
-Tier 1 (errored) already covers `init`. Tier 2 does not. Not implemented because ADR 023's
-Consequences name only `align baseline prune`, and changing `init`'s contract silently was out of
-scope.
+**#27** — `generatedRulesContentHash` now digests an explicit `{ irVersion, docPath, rules }`, so
+it is reproducible. `generatedAt` stays (provenance, read by nothing). `verifyFrozenRules` accepts
+either hash: a legacy raw-bytes match reports "this lockfile predates the reproducible hash", never
+the tampering message. `UPGRADING.md` has its first `## 0.2.0` section; ADR 011 has the amendment.
+**The legacy fallback is temporary — delete it in a later major.**
 
-The open question is not "add the guard" — it is which shape is right:
-(a) same as prune, refuse + `--allow-incomplete`; (b) a `complete: false` + zero-violations run
-always requires `--accept-existing`-style confirmation, since "green" is exactly what cannot be
-trusted on an incomplete scan; (c) `init` on a repo that already has a baseline is arguably wrong
-regardless of completeness. **Needs a decision from the user, then an ADR 023 amendment.**
+**#22** — `areAdvisoriesComplete(advisories)` is now the one place the `missing-dependencies`
+literal is compared; `isRunComplete(run)` delegates, signature unchanged. Verified by repo-wide
+grep, not by trusting this document's claim that doctor's was the last copy.
 
-### #27 — `generatedRulesContentHash` is not reproducible
+**ADR 026 (new) — declared write-sets.** A command may only touch what its scenario declares. The
+harness snapshots the whole tree (it previously captured a named allowlist and literally could not
+see the bytes BUG #10 destroys), write-sets are fail-closed so a new scenario must declare, and
+`align.config.ts`/`CLAUDE.md` carry a marker-region clause. Mirrored as a unit-test helper
+(`packages/cli/test/write-set.ts`) that runs in the 26s gate. `CLAUDE.md` carries the short
+enforceable version — read it before adding a feature that writes.
 
-`rules.lock.json`'s hash digests `generated-rules.json`'s raw bytes, which embed that file's own
-`generatedAt: Date.now()`. Two builds producing byte-identical rules yield different hashes. Not a
-live bug (`--verify` compares stored vs current and both move together), but the artifact is not
-byte-reproducible, so "rebuild and compare" silently does not work. The harness needed a
-`volatile-hash-json-keys` normalization rule to work around it; fixing this lets that rule be
-deleted. Touches ADR 011's lockfile contract, so probably wants an ADR note.
+It found two writes nobody had ever seen: `init` appends telemetry entries to `.gitignore` on every
+run, and `offerAlignScript` adds the npm script to `package.json` on every non-interactive run.
+Both legitimate, both now declared.
 
-### #22 — One inline copy of the completeness predicate remains
+Also closed: `build.ts` split at the verification seam (was 498 of a 500 cap — two lines from red);
+`ensureAlignDir` removed from `runInit` entirely (redundant — `writeBaseline` and
+`recordBaselineReconciled` self-ensure), so every refusal path now writes nothing; and a shared
+`defaultConfirm` + `confirm` test seam across `init`/`upgrade`/`build`, which made the interactive
+consent branches reachable by tests for the first time.
 
-`commands/doctor.ts:194` still has `advisories.some((a) => a.kind === 'missing-dependencies')`
-inline. `isRunComplete` (`core/src/gates/advisories.ts:22`) is the shared predicate and has three
-callers. Doctor's is display-only, so no bug today — but this repo has been bitten repeatedly by a
-missed Nth copy. Unifying needs a signature change (doctor holds an advisories array, not a
-`CheckRun`).
+### The flaky test — fixed on diagnosis, NOT on repeated-run evidence
+
+`upgrade-transform.test.ts`'s "idempotent end to end" was hit by four independent agents, always as
+`Test timed out in 5000ms`, never as a wrong-value assertion — a duration problem, not a race. It
+drives `runUpgrade` twice (real git subprocesses plus two full scans), 1–3s quiet against vitest's
+5s default. Both real-git transform files now carry an explicit 30s budget.
+
+**This is the one change in the batch committed without its own verification.** The 15-consecutive-
+run check never completed, and the reproduction environment was contaminated by four concurrent
+agents on one machine. Re-run the suite ~15x on a quiet box and confirm before the release.
 
 ### #25 — Should align auto-exclude nested checkouts?
 
 A git worktree inside the repo gets scanned, and its fixtures surface as real violations. Fixed for
 this repo by excluding `.claude`, but the general case affects any user running `git worktree`
 inside their repo — increasingly common with agent tooling. Excludes are prefix-anchored, so a
-nested checkout adds a prefix no exclude matches.
+nested checkout adds a prefix no exclude matches. **This session leaned on that `.claude` exclude
+heavily** — every parallel agent worked in `.claude/worktrees/<name>`.
+
+### The last unseamed prompt
+
+`init/npm-script.ts` still owns its own `readline` prompt. Deliberately not unified into
+`defaultConfirm`: it is `[Y/n]`, default YES, a different consent contract that unifying would
+silently flip. It has no `confirm` seam, so its interactive branch is untested.
 
 ### #24 leftovers — harness coverage gaps (acceptable, recorded)
 
@@ -119,6 +141,14 @@ Then #12 push + PR, #13 publish per `RELEASING.md` (five packages, lockstep vers
 to commit** — the managing agent verifies, then commits. The user rewards blunt, evidence-cited
 assessment and pushes back on hand-waving. Present findings and wait for sign-off before starting a
 new stage.
+
+**Parallel agents: provision worktrees yourself.** `isolation: "worktree"` on the Agent tool
+provisioned from a stale base twice out of three on 2026-08-12 — one agent nearly built against a
+51-commit-old tree and caught it only via the test-count baseline. Use
+`git worktree add -b <name> .claude/worktrees/<name> <sha>` and point plain agents at the absolute
+path. Give every agent a test-count baseline to verify BEFORE it starts; that is what caught it.
+Concurrent agents on one machine also contend enough to cause timeout flakes — see the flaky-test
+note above.
 
 **Verify agent reports; do not relay them.** Multiple times this session a subagent's summary was
 directionally right but wrong in a detail that mattered, and twice a subagent reported test counts
