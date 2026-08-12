@@ -4,6 +4,7 @@ import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, writeBaseline } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
+import { describeRetainedEntries, partitionSkippedCheckoutCandidates } from '../nested-checkout-retention.js';
 import { computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
 
 /**
@@ -94,6 +95,18 @@ export async function baselineAccept(rootDir: string, ruleId?: string, telemetry
  * deletion) is never refused by tier 2, and even in a refused run that also had moves pending, nothing
  * is lost by deferring them: `align check`'s `persistMovedBaseline` (`commands/check.ts`)
  * independently transfers the same moves, unconditionally, on every run.
+ *
+ * A THIRD hazard, decided separately from ADR 023's two tiers: task #25's nested-checkout
+ * auto-exclusion drops edges from the scan the same way a missing dependency does, but does NOT
+ * set `complete: false` (`isRunComplete` only fires on a `missing-dependencies` advisory), so tier
+ * 2 alone does not protect an entry whose file lives inside a skipped checkout. Unlike tier 2's
+ * whole-run taint, this hazard names its own paths precisely (`run.skippedNestedCheckouts`) — so
+ * the decided fix is "skip-and-report," not "refuse": every orphan `store.prune` would otherwise
+ * delete is partitioned (`nested-checkout-retention.ts`) into ones whose file is inside a skipped
+ * checkout (RETAINED — re-added to what gets persisted, never deleted) and everything else
+ * (forfeited — pruned exactly as before). Tier 2's `refuseIfRunIncomplete` is evaluated against
+ * the FORFEITED count only, since a retained entry was never actually at risk once retention put it
+ * back.
  */
 export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, telemetryPreConfig?: boolean): Promise<number> {
   // loadConfig can fail six ways, including a corrupt `.align/generated-rules.json` (bug hunt
@@ -125,25 +138,43 @@ export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, 
     return reportCliError('align baseline prune', err);
   }
   const result = store.prune(allViolations, knownFiles);
+  // The third hazard (see this function's doc comment): `store.prune` above already deleted every
+  // unmatched orphan, INCLUDING ones whose file is unobservable this scan only because it's inside
+  // a skipped nested checkout, not because the violation is fixed. `store.prune`'s `PruneResult`
+  // only returns fingerprints, so the original entries (with their irreplaceable acceptedAt/By) are
+  // recovered from `previous.entries` — the pre-prune snapshot — the only place they still exist.
+  const previousByFingerprint = new Map(previous.entries.map((entry) => [entry.fingerprint, entry]));
+  const removedEntries = result.removed
+    .map((fingerprint) => previousByFingerprint.get(fingerprint))
+    .filter((entry): entry is BaselineEntry => entry !== undefined);
+  const { retained, forfeited } = partitionSkippedCheckoutCandidates(removedEntries, run.skippedNestedCheckouts);
   // Tier 2 — see this function's doc comment for why this runs here (after `store.prune`, before
-  // `writeBaseline`) and why deferring on refusal loses nothing.
-  const incompleteRefusal = refuseIfRunIncomplete('align baseline prune', run, result.removed.length, allowIncomplete ?? false);
+  // `writeBaseline`) and why deferring on refusal loses nothing. Evaluated against FORFEITED only:
+  // a retained entry is being put back below, so it was never actually at risk of deletion.
+  const incompleteRefusal = refuseIfRunIncomplete('align baseline prune', run, forfeited.length, allowIncomplete ?? false);
   if (incompleteRefusal !== undefined) return incompleteRefusal;
+  // Retained entries are re-added to what gets persisted — `store.prune` already deleted them from
+  // the store itself, so the store's own snapshot no longer has them; this is the CLI's flat
+  // persistence boundary composing the two sets, not a second core API for "undelete".
+  const finalEntries = retained.length === 0 ? store.snapshot() : [...store.snapshot(), ...retained];
   // Same corrupt-≠-absent throw risk as `baselineAccept` above (`writeBaseline`'s internal
   // `alignVersion` stamp, ADR 022) — caught here rather than left as a raw Node stack trace.
   try {
-    writeBaseline(rootDir, store.snapshot());
+    writeBaseline(rootDir, finalEntries);
   } catch (err) {
     return reportCliError('align baseline prune', err);
   }
   console.log(
-    `Pruned ${result.removed.length} fixed violation(s) from the baseline; ` +
+    `Pruned ${forfeited.length} fixed violation(s) from the baseline; ` +
       `${result.moved.length} ${result.moved.length === 1 ? 'entry' : 'entries'} transferred (file moves).`,
   );
+  if (retained.length > 0) {
+    console.log(describeRetainedEntries(retained, run.skippedNestedCheckouts));
+  }
 
   const recorder = createTelemetryRecorder(rootDir, 'baseline prune', telemetryPreConfig, telemetry);
   recorder.record(
-    { kind: 'baseline', action: 'prune', counts: { removed: result.removed.length, moved: result.moved.length } },
+    { kind: 'baseline', action: 'prune', counts: { removed: forfeited.length, moved: result.moved.length } },
     { rulesetIrHash: computeRulesetIrHash(ruleset) },
   );
   return 0;

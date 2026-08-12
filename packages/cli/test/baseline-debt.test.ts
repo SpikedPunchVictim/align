@@ -12,7 +12,7 @@ function gate(overrides: Partial<GateResult> = {}): GateResult {
 }
 
 function runWith(verdict: CheckRun['verdict'], gates: GateResult[]): CheckRun {
-  return { verdict, gates, advisories: [], scannedAt: 0, ungroundedComponents: [] };
+  return { verdict, gates, advisories: [], scannedAt: 0, ungroundedComponents: [], skippedNestedCheckouts: [] };
 }
 
 describe('computeBaselineDebt — the one guarded computation shared by check/MCP/builder (NEW-1)', () => {

@@ -2,11 +2,29 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { toRepoRelativePath, toRuleId, toViolationId } from '@spikedpunch/align-core';
 import { runCheck } from '../src/commands/check.js';
 import { baselineAccept, baselinePrune } from '../src/commands/baseline.js';
-import { readBaseline } from '../src/align-dir.js';
+import { runInit } from '../src/commands/init.js';
+import { readBaseline, writeBaseline } from '../src/align-dir.js';
 import { connectedClient, textOf } from './mcp-test-helpers.js';
+
+/** Captures every `console.log` call made during `run()` as plain strings, restoring the real
+ * `console.log` afterward even if `run()` throws — used below to assert on `baselinePrune`'s/
+ * `runInit`'s retention report line without polluting the test runner's own output. */
+async function withCapturedLogs<T>(run: () => Promise<T>): Promise<{ readonly result: T; readonly logs: string }> {
+  const lines: string[] = [];
+  const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+    lines.push(args.map(String).join(' '));
+  });
+  try {
+    const result = await run();
+    return { result, logs: lines.join('\n') };
+  } finally {
+    spy.mockRestore();
+  }
+}
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -193,6 +211,119 @@ describe(
         expect(await baselinePrune(tmpDir)).toBe(0);
         const afterPrune = readBaseline(tmpDir);
         expect(afterPrune).toHaveLength(1);
+      },
+    );
+  },
+);
+
+/**
+ * A plain repo with ONE ordinary source file plus a nested git checkout that is NEVER opted back
+ * in (`includeNestedCheckouts` is simply absent) — permanently auto-excluded, every scan, task #25's
+ * default behaviour. Nothing inside the checkout needs to be a real violation, or even parse: the
+ * retention decision (`nested-checkout-retention.ts`) is keyed purely on a baseline entry's `file`
+ * falling under one of `run.skippedNestedCheckouts`, never on the fingerprint being "real" — the
+ * same reason `write-set-baseline.test.ts`/`errored-run-mutations.test.ts` seed opaque fingerprints
+ * like `'stale-1'` directly rather than deriving them from an actual scan.
+ */
+function buildRepoWithSkippedCheckoutAndCleanFile(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-checkout-retention-test-'));
+  fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'src', 'a.ts'), 'export const a = 1;\n', 'utf8');
+
+  // A linked worktree's `.git` is a file (this repo's own `.claude/worktrees/*` shape) — matches
+  // the other fixtures in this file rather than a plain directory `.git`.
+  fs.mkdirSync(path.join(dir, 'vendor', 'submodule'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'vendor', 'submodule', '.git'), 'gitdir: /elsewhere/.git/worktrees/submodule\n', 'utf8');
+
+  fs.writeFileSync(
+    path.join(dir, 'align.config.ts'),
+    `import { defineProject } from '@spikedpunch/align-core/dsl';\n` +
+      `export default defineProject({\n` +
+      `  components: { app: 'src/**' },\n` +
+      `  rules: (c) => [c.arch.noCycles()],\n` +
+      `});\n`,
+    'utf8',
+  );
+  linkAlignCore(dir);
+  return dir;
+}
+
+describe(
+  "align baseline prune retains an entry inside a skipped nested checkout while still pruning an " +
+    'observable orphan in the same run (task #25 review fix — the "skip-and-report, not refuse" decision)',
+  () => {
+    it('exits 0, drops the genuinely-fixed entry, keeps the checkout entry, and reports the retention', async () => {
+      tmpDir = buildRepoWithSkippedCheckoutAndCleanFile();
+      writeBaseline(tmpDir, [
+        // Genuinely fixed: `src/a.ts` is present in every scan and never violates `arch.noCycles`
+        // — an ordinary orphan `store.prune` has always been correct to delete.
+        {
+          fingerprint: toViolationId('stale-observable'),
+          ruleId: toRuleId('arch.no-cycles'),
+          file: toRepoRelativePath('src/a.ts'),
+          acceptedAt: 1,
+          acceptedBy: 'manual',
+        },
+        // Unobservable, not fixed: this file lives inside `vendor/submodule`, which every scan
+        // auto-excludes. Nothing about it changed — it just can't be seen — so it must survive.
+        {
+          fingerprint: toViolationId('stale-in-checkout'),
+          ruleId: toRuleId('arch.no-cycles'),
+          file: toRepoRelativePath('vendor/submodule/service.ts'),
+          acceptedAt: 2,
+          acceptedBy: 'manual',
+        },
+      ]);
+
+      const { result: code, logs } = await withCapturedLogs(() => baselinePrune(tmpDir));
+
+      expect(code).toBe(0);
+      expect(logs).toMatch(/Pruned 1 fixed violation\(s\)/);
+      expect(logs).toMatch(/Retained 1 entry/);
+      expect(logs).toContain('vendor/submodule');
+
+      const after = readBaseline(tmpDir);
+      expect(after).toHaveLength(1);
+      expect(after[0]?.fingerprint).toBe('stale-in-checkout');
+    });
+  },
+);
+
+describe(
+  "align init has the same skipped-checkout exposure as baseline prune, and the same fix (task #25 " +
+    'review "hunt the class" audit, CLAUDE.md rule 6)',
+  () => {
+    it(
+      "the zero-violations reset path (`writeBaseline(rootDir, [])`) retains an existing entry whose file " +
+        "is inside a skipped nested checkout instead of silently dropping it — BUG #18's exact shape, a " +
+        'second instance found by auditing the other destructive baseline-write consumer',
+      async () => {
+        tmpDir = buildRepoWithSkippedCheckoutAndCleanFile();
+        // Simulates a re-run of `init` on a repo that already has an accepted entry for a file the
+        // scan can no longer see (the checkout was opted in when it was accepted, or accepted by an
+        // older align, or seeded directly for the test — any of those are the real-world shape).
+        writeBaseline(tmpDir, [
+          {
+            fingerprint: toViolationId('stale-in-checkout'),
+            ruleId: toRuleId('arch.no-cycles'),
+            file: toRepoRelativePath('vendor/submodule/service.ts'),
+            acceptedAt: 1,
+            acceptedBy: 'manual',
+          },
+        ]);
+
+        const { result: code, logs } = await withCapturedLogs(() =>
+          runInit(tmpDir, { acceptExisting: false, nonInteractive: true, noScripts: true }),
+        );
+
+        expect(code).toBe(0);
+        expect(logs).toMatch(/Initial check is green/);
+        expect(logs).toMatch(/Retained 1 entry/);
+        expect(logs).toContain('vendor/submodule');
+
+        const after = readBaseline(tmpDir);
+        expect(after).toHaveLength(1);
+        expect(after[0]?.fingerprint).toBe('stale-in-checkout');
       },
     );
   },

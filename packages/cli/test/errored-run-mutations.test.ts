@@ -5,10 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { readBaseline, writeBaseline } from '../src/align-dir.js';
 import { baselineAccept, baselinePrune } from '../src/commands/baseline.js';
-import { runCheck } from '../src/commands/check.js';
+import { persistMovedBaseline, runCheck } from '../src/commands/check.js';
 import { runInit } from '../src/commands/init.js';
 import { refuseIfRunIncomplete } from '../src/errored-run.js';
-import { toRuleId, toRepoRelativePath, toViolationId, type CheckRun } from '@spikedpunch/align-core';
+import { InMemoryBaselineStore, toRuleId, toRepoRelativePath, toViolationId, type CheckRun } from '@spikedpunch/align-core';
 
 // Bug hunt 2026-08-08, BUG #18: an errored gate reports `violations: []` WITHOUT having evaluated
 // anything (orchestrator.ts returns an `errorGate` before rule evaluation), so on `verdict: 'error'`
@@ -219,6 +219,60 @@ describe('the other mutating consumers of a run’s violations', () => {
     // The empty violation set makes it a no-op rewrite of the same entries, never a deletion.
     expect(readBaseline(tmpDir)).toEqual(before);
   });
+
+  // ADR 023's own text names this exemption explicitly ("does NOT call refuseIfRunErrored... It is
+  // safe because reconcileMoves transfers and never deletes") but only cites a pinning test for the
+  // add-only sibling above, not this one. CLAUDE.md rule 4: "Add-only and transfer-only consumers
+  // are exempt, but the exemption must be pinned by a test." This is that test — a direct,
+  // function-level pin (no fixture/scan needed: `persistMovedBaseline` only reads `run.advisories`
+  // and `baselineStore.snapshot()`) rather than a proof by nested-checkout/errored-fixture, so a
+  // future edit that adds a guard here — or removes the guarantee this function relies on — fails
+  // this test directly instead of only failing some other command's end-to-end assertion.
+  it(
+    '`persistMovedBaseline` (commands/check.ts) is transfer-only and exempt from ADR 023 — it writes ' +
+      'a move-transfer on an ERRORED run without any refusal, because a transfer can never destroy the ' +
+      'consent record it protects',
+    async () => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-persist-moved-baseline-test-'));
+      const store = new InMemoryBaselineStore([
+        {
+          fingerprint: toViolationId('old-fingerprint'),
+          ruleId: toRuleId('arch.no-cycles'),
+          file: toRepoRelativePath('src/a.ts'),
+          acceptedAt: 1,
+          acceptedBy: 'manual',
+        },
+      ]);
+      const erroredRunWithMove: CheckRun = {
+        verdict: 'error',
+        gates: [
+          {
+            gate: 'architecture',
+            status: 'error',
+            violations: [],
+            baselinedCount: 0,
+            errorMessage: 'boom',
+            durationMs: 1,
+            cacheHits: 0,
+            dependsOn: [],
+          },
+        ],
+        // The shape ADR 023 names: a `baseline-moved` advisory (from the security gate, which runs
+        // before the architecture gate errors) reaching this function on an `error` verdict.
+        advisories: [{ kind: 'baseline-moved', message: '1 entry transferred (file moves).' }],
+        scannedAt: Date.now(),
+        ungroundedComponents: [],
+        skippedNestedCheckouts: [],
+      };
+
+      // No refusal mechanism exists in this function's signature (unlike `baselinePrune`/`runInit`,
+      // there is no exit code to inspect) — the only observable proof it proceeded unconditionally
+      // is that the write actually happened.
+      persistMovedBaseline(tmpDir, erroredRunWithMove, store);
+
+      expect(readBaseline(tmpDir)).toEqual(store.snapshot());
+    },
+  );
 });
 
 describe('`refuseIfRunIncomplete` (ADR 023 tier 2, unit-level)', () => {
@@ -229,6 +283,7 @@ describe('`refuseIfRunIncomplete` (ADR 023 tier 2, unit-level)', () => {
       advisories: complete ? [] : [{ kind: 'missing-dependencies', message: 'deps missing' }],
       scannedAt: Date.now(),
       ungroundedComponents: [],
+      skippedNestedCheckouts: [],
     };
   }
 

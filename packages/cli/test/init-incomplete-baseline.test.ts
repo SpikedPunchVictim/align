@@ -10,7 +10,7 @@ import { runInit } from '../src/commands/init.js';
 import { toRuleId, toRepoRelativePath, toViolationId } from '@spikedpunch/align-core';
 
 // ADR 023's 2026-08-11 amendment: tier 2 extends to `align init`, at BOTH write paths, through the
-// one guard `refuseIfBaselineWriteAtRisk` (`commands/init.ts`). Split out of
+// one guard `partitionAndRefuseIfBaselineWriteAtRisk` (`commands/init.ts`). Split out of
 // `errored-run-mutations.test.ts` (this repo's own `arch.metric` 500-line-per-file rule, which that
 // file was about to exceed) rather than sharing its helpers — every sibling test file in this
 // directory (`baseline-corruption.test.ts`, `errored-run-mutations.test.ts`) already defines its
@@ -136,7 +136,7 @@ async function withCapturedConsole<T>(run: () => Promise<T>): Promise<{ result: 
   }
 }
 
-// The one guard `refuseIfBaselineWriteAtRisk` (`commands/init.ts`) both of `init`'s write paths
+// The one guard `partitionAndRefuseIfBaselineWriteAtRisk` (`commands/init.ts`) both of `init`'s write paths
 // route through. Mirrors `errored-run-mutations.test.ts`'s `align baseline prune` tier-2 describe
 // block exactly — same at-risk/allow-incomplete/boundary shape — for the two write paths the
 // amendment names: the zero-violations reset (the branch that persists `[]`) and the seed path

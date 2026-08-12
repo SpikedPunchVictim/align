@@ -93,6 +93,7 @@ export class GateOrchestrator {
         advisories: movedAdvisories(securityMoves),
         scannedAt,
         ungroundedComponents: [],
+        skippedNestedCheckouts: [],
       };
     }
 
@@ -147,6 +148,7 @@ export class GateOrchestrator {
         ],
         scannedAt,
         ungroundedComponents: [],
+        skippedNestedCheckouts: [],
       };
     }
 
@@ -177,6 +179,7 @@ export class GateOrchestrator {
         ],
         scannedAt,
         ungroundedComponents: [],
+        skippedNestedCheckouts: [],
       };
     }
 
@@ -227,7 +230,7 @@ export class GateOrchestrator {
     // is trustworthy — reuses the same classification set `validateClassifiedComponents` just
     // validated against, no second pass over the graph.
     const ungroundedComponents = findUngroundedComponents(this.ruleset.components, classifiedComponents);
-    return { verdict, gates, advisories, scannedAt, ungroundedComponents };
+    return { verdict, gates, advisories, scannedAt, ungroundedComponents, skippedNestedCheckouts: graph.skippedNestedCheckouts };
   }
 
   /**

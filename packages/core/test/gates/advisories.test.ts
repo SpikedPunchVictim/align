@@ -240,6 +240,7 @@ describe('isRunComplete', () => {
       advisories,
       scannedAt: Date.now(),
       ungroundedComponents: [],
+      skippedNestedCheckouts: [],
     };
   }
 
