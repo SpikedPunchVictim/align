@@ -27,6 +27,24 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.join(here, 'fixtures');
 let tmpDir: string;
 
+// Every test below drives `runUpgrade` end to end: a real `git init`/`add`/`commit` (real
+// `execFile` spawns, `@spikedpunch/align-agent`'s `git.ts`) plus at least one full orchestrator
+// scan and one transform `computePlan` scan (TypeScript parse of the fixture + `align.config.ts`).
+// "idempotent end to end" below does that TWICE (two full `runUpgrade` calls) plus an extra
+// `commit()` in between, so it is not a peer of a single-scan test — it is the heaviest test in
+// this file, at roughly 2x the real subprocess/scan work. Under quiet conditions all of this
+// finishes in 1-3s and vitest's 5000ms default is never in danger. Under genuine concurrent load
+// (several `pnpm test` invocations running at once — routine in this workflow, since agents in
+// sibling worktrees build/test concurrently) real `git`/TypeScript-scan work slows 2-4x from CPU
+// contention, and this test's doubled workload was observed to cross the 5000ms default outright
+// ("Error: Test timed out in 5000ms", reproduced twice under 3 concurrent full-suite runs) while
+// its single-scan siblings in this file and in `migration-glob-rewrite-transform.test.ts` stayed
+// under it (up to ~4.2s observed, still headroom). This is not a race — the outcome never
+// depends on which of two things happens first, only on how long real I/O takes — so a bigger,
+// explicit budget sized to the measured workload is the actual fix, not a mask: every `it` below
+// gets it uniformly since they all pay the same real git+scan cost class.
+const REAL_GIT_TEST_TIMEOUT_MS = 30_000;
+
 function linkAlignCore(dest: string): void {
   const scopeDir = path.join(dest, 'node_modules', '@spikedpunch');
   fs.mkdirSync(scopeDir, { recursive: true });
@@ -104,7 +122,7 @@ describe('align upgrade — glob-double-star-selector-rewrite, consent granted',
     // `runUpgrade`'s baseline-emptiness short-circuit, which used to skip the transform tier
     // entirely for a repo that had never run `baseline accept`).
     expect(readVersionFile(tmpDir)?.baselineReconciledBy).toBe(ALIGN_VERSION);
-  });
+  }, REAL_GIT_TEST_TIMEOUT_MS);
 
   it('idempotent end to end: running upgrade again over the same range finds nothing left to do', async () => {
     tmpDir = await copyCommittedFixture('glob-double-star-drift');
@@ -128,7 +146,7 @@ describe('align upgrade — glob-double-star-selector-rewrite, consent granted',
     expect(logs.join('\n')).toMatch(/No validator findings for this range/);
     expect(logs.join('\n')).not.toContain('glob-double-star-selector-rewrite');
     expect(fs.readFileSync(configPath(tmpDir), 'utf8')).toBe(afterFirst); // unchanged the second time
-  });
+  }, REAL_GIT_TEST_TIMEOUT_MS);
 });
 
 describe('align upgrade — glob-double-star-selector-rewrite, consent refused', () => {
@@ -143,7 +161,7 @@ describe('align upgrade — glob-double-star-selector-rewrite, consent refused',
     expect(fs.readFileSync(configPath(tmpDir), 'utf8')).toBe(before);
     expect(logs.join('\n')).toMatch(/Not fully reconciled/);
     expect(readVersionFile(tmpDir)).toBeUndefined(); // never stamped — nothing was reconciled
-  });
+  }, REAL_GIT_TEST_TIMEOUT_MS);
 
   it('non-interactive without --yes refuses the same way, byte-identical', async () => {
     tmpDir = await copyCommittedFixture('glob-double-star-drift');
@@ -153,7 +171,7 @@ describe('align upgrade — glob-double-star-selector-rewrite, consent refused',
 
     expect(code).toBe(1);
     expect(fs.readFileSync(configPath(tmpDir), 'utf8')).toBe(before);
-  });
+  }, REAL_GIT_TEST_TIMEOUT_MS);
 });
 
 describe('align upgrade — glob-double-star-selector-rewrite refuses on a dirty tree, even with --yes', () => {
@@ -168,7 +186,7 @@ describe('align upgrade — glob-double-star-selector-rewrite refuses on a dirty
     expect(logs.join('\n')).toMatch(/dirty/);
     expect(fs.readFileSync(configPath(tmpDir), 'utf8')).toBe(before);
     expect(readVersionFile(tmpDir)).toBeUndefined();
-  });
+  }, REAL_GIT_TEST_TIMEOUT_MS);
 });
 
 describe('align upgrade — --notes never applies the transform', () => {
@@ -181,5 +199,5 @@ describe('align upgrade — --notes never applies the transform', () => {
     expect(code).toBe(0);
     expect(logs.join('\n')).toContain('app/datamodel.ts');
     expect(fs.readFileSync(configPath(tmpDir), 'utf8')).toBe(before);
-  });
+  }, REAL_GIT_TEST_TIMEOUT_MS);
 });

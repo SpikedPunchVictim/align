@@ -21,6 +21,22 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.join(here, 'fixtures');
 let tmpDir: string;
 
+// Every test below calls `preview`/`apply` at least once, each of which does a real `git status`
+// (`execFile`, `@spikedpunch/align-agent`'s `git.ts`) plus a full TypeScript parse/scan of the
+// fixture (`computePlan`, `glob-double-star-rewrite.ts`) — genuinely slow real I/O, not mocked, by
+// this file's own design (see the doc comment above: real repos on purpose). Under quiet
+// conditions that's 1-2s and vitest's 5000ms default never matters. Under concurrent load (several
+// `pnpm test` invocations running at once — routine here, since sibling worktrees build/test in
+// parallel) real git/TS-scan work was observed to slow 2-4x from CPU contention: this file's own
+// "refuses on a dirty working tree" test reached ~4.2s under 3 concurrent full-suite runs, and
+// `upgrade-transform.test.ts`'s heavier sibling test (two full `runUpgrade` calls, i.e. this same
+// git+scan cost paid twice) crossed the 5000ms default outright under the identical conditions
+// ("Error: Test timed out in 5000ms", reproduced twice). This is not a race — nothing here depends
+// on which of two things happens first, only on how long real I/O takes — so every test in this
+// file gets an explicit budget sized to its measured real-world cost rather than silently sharing
+// a default sized for lighter, non-I/O tests.
+const REAL_GIT_TEST_TIMEOUT_MS = 30_000;
+
 function linkAlignCore(dest: string): void {
   const scopeDir = path.join(dest, 'node_modules', '@spikedpunch');
   fs.mkdirSync(scopeDir, { recursive: true });
@@ -53,7 +69,7 @@ describe('glob-double-star-selector-rewrite — ready path', () => {
     expect(preview.status).toBe('ready');
     expect(preview.description).toContain("component 'app': 'app/**/model.ts' -> 'app/**model.ts'");
     expect(preview.filesAffected).toEqual(['align.config.ts']);
-  });
+  }, REAL_GIT_TEST_TIMEOUT_MS);
 
   it('preview never writes anything, no matter how many times it is called', async () => {
     tmpDir = await copyCommittedFixture('glob-double-star-drift');
@@ -61,7 +77,7 @@ describe('glob-double-star-selector-rewrite — ready path', () => {
     await globDoubleStarSelectorRewriteTransform.preview(tmpDir);
     await globDoubleStarSelectorRewriteTransform.preview(tmpDir);
     expect(fs.readFileSync(configPath(tmpDir), 'utf8')).toBe(before);
-  });
+  }, REAL_GIT_TEST_TIMEOUT_MS);
 
   it('apply rewrites exactly the drifted pattern literal, leaving everything else byte-identical', async () => {
     tmpDir = await copyCommittedFixture('glob-double-star-drift');
@@ -73,7 +89,7 @@ describe('glob-double-star-selector-rewrite — ready path', () => {
     expect(after).not.toBe(before);
     expect(after).toBe(before.replace("'app/**/model.ts'", "'app/**model.ts'"));
     expect(after).toContain("app: 'app/**model.ts'");
-  });
+  }, REAL_GIT_TEST_TIMEOUT_MS);
 
   it('idempotent: applying twice equals applying once', async () => {
     tmpDir = await copyCommittedFixture('glob-double-star-drift');
@@ -86,7 +102,7 @@ describe('glob-double-star-selector-rewrite — ready path', () => {
     await globDoubleStarSelectorRewriteTransform.apply(tmpDir);
     const afterSecond = fs.readFileSync(configPath(tmpDir), 'utf8');
     expect(afterSecond).toBe(afterFirst);
-  });
+  }, REAL_GIT_TEST_TIMEOUT_MS);
 });
 
 describe('glob-double-star-selector-rewrite — nothing to do', () => {
@@ -100,7 +116,7 @@ describe('glob-double-star-selector-rewrite — nothing to do', () => {
 
     await globDoubleStarSelectorRewriteTransform.apply(tmpDir);
     expect(fs.readFileSync(configPath(tmpDir), 'utf8')).toBe(before);
-  });
+  }, REAL_GIT_TEST_TIMEOUT_MS);
 });
 
 describe('glob-double-star-selector-rewrite — refuses rather than guesses', () => {
@@ -115,7 +131,7 @@ describe('glob-double-star-selector-rewrite — refuses rather than guesses', ()
 
     await globDoubleStarSelectorRewriteTransform.apply(tmpDir);
     expect(fs.readFileSync(configPath(tmpDir), 'utf8')).toBe(before); // untouched
-  });
+  }, REAL_GIT_TEST_TIMEOUT_MS);
 
   it('refuses when the pattern literal cannot be located (it is computed, not a plain string)', async () => {
     tmpDir = await copyCommittedFixture('glob-double-star-drift-unlocatable');
@@ -127,7 +143,7 @@ describe('glob-double-star-selector-rewrite — refuses rather than guesses', ()
 
     await globDoubleStarSelectorRewriteTransform.apply(tmpDir);
     expect(fs.readFileSync(configPath(tmpDir), 'utf8')).toBe(before); // untouched
-  });
+  }, REAL_GIT_TEST_TIMEOUT_MS);
 
   it('refuses on a dirty working tree, even when the dirt is in an unrelated file', async () => {
     tmpDir = await copyCommittedFixture('glob-double-star-drift');
@@ -140,7 +156,7 @@ describe('glob-double-star-selector-rewrite — refuses rather than guesses', ()
 
     await globDoubleStarSelectorRewriteTransform.apply(tmpDir);
     expect(fs.readFileSync(configPath(tmpDir), 'utf8')).toBe(before); // config itself untouched
-  });
+  }, REAL_GIT_TEST_TIMEOUT_MS);
 
   it('refuses when the directory is not a git repository at all (no escape hatch to protect)', async () => {
     // Deliberately NOT using copyCommittedFixture — plain copy, no `git init`.
@@ -154,5 +170,5 @@ describe('glob-double-star-selector-rewrite — refuses rather than guesses', ()
 
     await globDoubleStarSelectorRewriteTransform.apply(tmpDir);
     expect(fs.readFileSync(configPath(tmpDir), 'utf8')).toBe(before);
-  });
+  }, REAL_GIT_TEST_TIMEOUT_MS);
 });
