@@ -88,4 +88,38 @@ describe('`align init` write-set (ADR 026 fast path)', () => {
     expectMarkerRegionUnchanged(claudeMdBefore, claudeMdAfter, 'CLAUDE.md', '<!-- align:start -->', '<!-- align:end -->');
     expectMarkerRegionUnchanged(configBefore, configAfter, 'align.config.ts', '// align:generated-rules-note:start', '// align:generated-rules-note:end');
   });
+
+  // Pins the fix directly: `ensureAlignDir` used to run unconditionally at the very top of
+  // `runInit`, before either the marker-block pre-flight or `loadConfig` — so a run that went on
+  // to REFUSE at `loadConfig` still created an empty `.align/` in a repo that never had one. Moved
+  // out of `runInit` entirely (see its doc comment in `commands/init.ts`) once `writeBaseline`/
+  // `recordBaselineReconciled` (`align-dir.ts`) were confirmed to already self-ensure the
+  // directory at the point they write — both are unreachable on this path, so `.align/` must never
+  // appear. A malformed `excludes` export is the cheapest reproduction of a `loadConfig` failure
+  // that doesn't require `.align/` to already exist (unlike `config-load-errors.test.ts`'s corrupt
+  // `.align/generated-rules.json` reproduction, which needs the directory pre-seeded).
+  it('a loadConfig failure (malformed `excludes` export) refuses without ever creating .align/', async () => {
+    tmpDir = makeSinglePackageRepo();
+    fs.writeFileSync(
+      path.join(tmpDir, 'align.config.ts'),
+      `import { defineProject } from '@spikedpunch/align-core/dsl';\n\n` +
+        `export const excludes = 'not-an-array';\n\n` +
+        `export default defineProject({\n` +
+        `  components: { app: 'src/**' },\n` +
+        `  rules: (c) => [c.arch.noCycles()],\n` +
+        `});\n`,
+      'utf8',
+    );
+    expect(fs.existsSync(path.join(tmpDir, '.align'))).toBe(false);
+
+    const code = await runInit(tmpDir, { acceptExisting: false, nonInteractive: true, noScripts: true });
+    expect(code).not.toBe(0);
+
+    // `runInit` still writes the note-block comment into the pre-existing `align.config.ts` and
+    // the CLAUDE.md agent-instructions block before it ever calls `loadConfig` — both purely
+    // additive, self-atomic writes unrelated to this failure (see `commands/init.ts`'s own doc
+    // comment above the `loadConfig` try/catch). What must NOT have happened is `.align/` coming
+    // into existence.
+    expect(fs.existsSync(path.join(tmpDir, '.align'))).toBe(false);
+  });
 });

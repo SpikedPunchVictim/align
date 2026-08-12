@@ -75,14 +75,14 @@ describe('BUG #10 regression: a malformed align.config.ts note block must refuse
     expect(initial.hasDefineProject).toBe(true);
     expect(initial.hasRules).toBe(true);
 
-    // `runInit` calls `ensureAlignDir` unconditionally, before it validates either marker-owned
-    // file (`commands/init.ts:100`) — an empty `.align/` directory is created even on a run that
-    // goes on to refuse. Harmless (mkdir of align's own directory, no content written into it,
-    // fully idempotent) but real, and exactly the kind of undeclared write this helper exists to
-    // surface: it is declared here as part of the write-set rather than silently excluded, so the
-    // assertion documents actual behavior instead of asserting a stronger property the code
-    // doesn't (yet) enforce.
-    const REFUSAL_WRITE_SET = ['.align'];
+    // `ensureAlignDir` no longer runs unconditionally up front (`commands/init.ts` — the call was
+    // moved out entirely once its only real callers, `writeBaseline`/`recordBaselineReconciled`
+    // in `align-dir.ts`, were confirmed to already self-ensure the directory at the point they
+    // write). A run that refuses at the marker-block pre-flight, as this test does, now reaches
+    // neither of those writers, so it writes NOTHING — not even an empty `.align/`. The write-set
+    // is therefore empty: this asserts the stronger property directly, not a weaker one kept only
+    // because the code happened to do more.
+    const REFUSAL_WRITE_SET: readonly string[] = [];
 
     const before1 = snapshotTree(tmpDir);
     const code1 = await runInit(tmpDir, { acceptExisting: false, nonInteractive: true, noScripts: true });
@@ -95,9 +95,9 @@ describe('BUG #10 regression: a malformed align.config.ts note block must refuse
     expect(afterRun1.hasDefineProject).toBe(true);
     expect(afterRun1.hasRules).toBe(true);
     expect(fs.readFileSync(path.join(tmpDir, 'align.config.ts'), 'utf8')).toBe(original);
-    // The write-set invariant: beyond the pre-existing `.align/` mkdir above, a refusal must leave
-    // the rest of the tree untouched — no CLAUDE.md written, no baseline, no partial side effect
-    // of any other kind survives a refused run.
+    // The write-set invariant: a refusal must leave the ENTIRE tree untouched — no `.align/`
+    // created, no CLAUDE.md written, no baseline, no partial side effect of any other kind
+    // survives a refused run.
     expectOnlyWrote(before1, tmpDir, REFUSAL_WRITE_SET);
 
     const before2 = snapshotTree(tmpDir);

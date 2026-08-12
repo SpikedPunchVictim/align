@@ -12,7 +12,7 @@ import { ensureTelemetryGitignored } from '../init/gitignore.js';
 import { offerAlignScript } from '../init/npm-script.js';
 import { createOrchestrator } from '../composition-root.js';
 import { CONFIG_FILENAME, loadConfig } from '../config.js';
-import { writeBaseline, readBaseline, ensureAlignDir, recordBaselineReconciled } from '../align-dir.js';
+import { writeBaseline, readBaseline, recordBaselineReconciled } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
 import { defaultConfirm } from '../prompt.js';
@@ -97,8 +97,20 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   console.log(`Initializing align in ${rootDir}`);
 
   const configPath = path.join(rootDir, CONFIG_FILENAME);
-  ensureAlignDir(rootDir);
 
+  // No explicit `ensureAlignDir` call here (there used to be one, unconditionally, right at the
+  // top) — a run that goes on to REFUSE below (a malformed note-block marker at either
+  // `assertGeneratedRulesNoteWellFormed`/`assertAgentInstructionsWellFormed`, or `loadConfig`
+  // failing) must leave NO `.align/` behind when there wasn't one already, an undeclared write
+  // ADR 026's fail-closed write-set surfaced. Every `.align/` artifact this command actually
+  // writes already self-ensures the directory at the point of writing: `writeBaseline`
+  // (`align-dir.ts:206-211`) and `recordBaselineReconciled` (`align-dir.ts:164-167`, via
+  // `writeVersionFile` at `align-dir.ts:107-110`) both call `ensureAlignDir` themselves. Nothing
+  // in between here and those two calls reads or writes anything under `.align/` that requires
+  // the directory to pre-exist (`readBaseline` below just does `fs.existsSync` and returns `[]`
+  // when absent). So the correct-and-latest placement is: no explicit call at all — the directory
+  // comes into being exactly when, and only when, something is actually about to be written into
+  // it, on the success path, same as before.
   if (!fs.existsSync(configPath)) {
     const detected = detectComponents(rootDir);
     console.log(`Detected ${detected.length} component(s): ${detected.map((c) => c.name).join(', ')}`);
