@@ -47,6 +47,11 @@ Flags:
   (`0.1.0`–`0.1.4`) or the literal `local` (default `local`).
 - `--scenarios <id1,id2,...>` — which scenario files to run (default: every scenario authored for
   `--project`).
+- `--tags <tag1,tag2,...>` — select scenarios by `tags` (ADR 026 item 3), OR semantics: a scenario
+  runs if it carries AT LEAST ONE of the listed tags. Combines (intersects) with `--scenarios` when
+  both are given. An empty match (a typo'd tag) is a hard error at startup, the same "refuse to
+  report a zero-scenario run as passing" discipline `--project`/`--gate-target` already have. See
+  "Tiers" below.
 - `--gate-target <version>` — which target's results decide the process exit code (default:
   `local` if present in `--targets`, else the first target). Other targets' failures are printed
   but never fail the process — this is how a scenario can be RUN against a known-buggy published
@@ -70,17 +75,90 @@ NOT baked into the image — bind-mount it (`-v $(pwd)/integration/results/.cach
 across runs to reuse the cloned-and-installed project base and avoid repeating the (slow) `npm ci`
 step on every container invocation.
 
+## Tiers (ADR 026 item 3)
+
+Two npm scripts at the repo root turn a flag combination into one remembered command:
+
+```sh
+pnpm run integration:dev        # fast/dev tier — node integration/run.mjs --targets local
+pnpm run integration:release    # full cross-version release gate — --targets 0.1.4,local
+```
+
+`integration:dev` is the tier to run while iterating on a change — Docker/network cost but no
+cross-version matrix (see "Timings" below for measured numbers). `integration:release` is the
+release gate CLAUDE.md's "Verifying a change" section and ADR 025 §6 describe: required before
+publish, and where the three `expectFailOn` scenarios' red/green calibration is actually exercised
+(0.1.4 is only installed in this tier).
+
+`--tags` (see "Flags" above) is the finer-grained selector underneath both scripts — e.g.
+`node integration/run.mjs --tags destructive --targets local` runs only the scenarios exercising a
+command capable of deleting or overwriting previously-persisted state (`baseline prune`, `baseline
+accept`, `build --apply`, `upgrade --yes`, `skill --install`, `align init`, and MCP
+`accept_new_into_baseline` — see each scenario file's own write-set comment for why it does or
+doesn't carry the tag). Add more tags to a scenario's `tags: [...]` array as new tiering needs show
+up; `destructive` is the one ADR 026 names explicitly.
+
+**Timings** (measured 2026-08-12, warm cache, this machine): a full `--targets local` run of all 14
+`nest`-project scenarios took ~9m52s before the ADR 026 write-set invariant landed and ~14m0s after
+— but that delta is NOT the invariant's own cost. Measured directly: one whole-tree snapshot walk
+over the cached `nest` base checkout (2147 files outside `.git/`/`node_modules/`) takes ~267ms: two
+walks (before/after) × 14 scenarios ≈ 7.5s total, matching ADR 026's "costs approximately nothing
+at runtime" claim. The larger observed delta is machine-load variance between the two runs (a
+shared dev machine with several other concurrent processes), not something intrinsic to this
+change — re-measure on a quiet machine/CI runner for a cleaner comparison.
+
+## The write-set invariant (ADR 026)
+
+**A command sequence may create, modify, or delete only the paths its scenario declares in
+`writeSet`; every other path in the project tree must be byte-identical afterward.** Full rationale:
+`docs/adr/026-declared-write-sets.md`. Two checks, both applied universally by `lib/scenario-
+runner.mjs` — never opted into per scenario, so a new scenario can't forget them:
+
+1. **Whole-tree delta** (`lib/write-set.mjs`'s `checkWriteSet`) — every path under the project root
+   (content hash + file mode), minus a volatile set (`.git/`, `node_modules/` — see that file for
+   why each is excluded), snapshotted once before the scenario's first step and once after its
+   last. Every added/modified/deleted path must be a member of `writeSet`, an array of EXACT,
+   repo-relative POSIX paths (never globs — `lib/spec-validate.mjs` rejects `*`/`?`, absolute
+   paths, `..`, and `\`). **A scenario with no `writeSet` gets the empty one** — fail closed, so a
+   new scenario fails loudly until its author declares what the command sequence is licensed to
+   touch. On failure, the offending paths are named explicitly, split by added/modified/deleted —
+   never just "tree changed".
+2. **Marker-owned content** (`lib/write-set.mjs`'s `checkMarkerOwnedRegion`) — `align.config.ts`
+   and `CLAUDE.md` each wrap one align-owned region between a START/END marker pair. Declaring
+   either writable in `writeSet` licenses ONLY that region; the surrounding content must stay
+   byte-identical. This is BUG #10 (docs/adr/026-declared-write-sets.md's motivating incident)
+   expressed as a property. Evaluated per `run`/`mcpCall` step (not `mutate` — see the code comment
+   in `lib/scenario-runner.mjs` for why the harness's own fixture mutations are exempt), using each
+   step's own before/after capture, so a LATER command in the same scenario corrupting content an
+   EARLIER command already established is still caught.
+
+### Declaring a write-set for a new scenario
+
+Add a `writeSet: [...]` array (and, for a command that can delete/overwrite existing state, `tags:
+['destructive']`) alongside the scenario's `id`/`project`/`steps`. List every path the scenario's
+own `install`/`run`/`mcpCall`/`mutate` steps actually touch — trace it from `packages/cli/src/
+align-dir.ts` (the one module that performs all `.align/*` I/O) and the command's own file under
+`packages/cli/src/commands/`, the same way every existing scenario's write-set comment does; don't
+guess. **If the harness reports a write-set violation you didn't expect, that is the invariant
+working — investigate why the command wrote there before widening the declaration.** Widening a
+write-set to make a failure go away without understanding the write defeats the entire point of
+this ADR (see CLAUDE.md's "Destructive safety" section: "Do not widen a write-set to make a test
+pass without understanding why the command is writing there").
+
 ## What the artifacts mean
 
 Every run writes, per `(target, scenario)` pair, under `--out`:
 
-- `steps.json` — every step's full captured detail: raw stdout/stderr/exit code, raw and
-  normalized `.align/*` file contents, raw and normalized `align.config.ts` and the CLAUDE.md
-  align block, before and after the step. Enough to diagnose a failure without re-running.
-- `normalized.json` — the same, stripped to only the normalized fields (no raw text, no
-  `durationMs`, no `capturedAt`) — this is the determinism-check artifact: two runs of the same
+- `steps.json` — `{ steps: [...], writeSetCheck }`. `steps` is every step's full captured detail:
+  raw stdout/stderr/exit code, raw and normalized `.align/*` file contents, raw and normalized
+  `align.config.ts` and the CLAUDE.md align block, before and after the step. `writeSetCheck` (ADR
+  026) is the whole-scenario write-set result: `{ pass, failures, added, modified, deleted }`.
+  Enough to diagnose a failure without re-running.
+- `normalized.json` — the same shape, `steps` stripped to only the normalized fields (no raw text,
+  no `durationMs`, no `capturedAt`) — this is the determinism-check artifact: two runs of the same
   scenario against the same version should produce byte-identical `normalized.json` files.
-- `result.json` — the short version: pass/fail, which steps failed and why.
+  `writeSetCheck` is already normalized (path lists and pass/fail only, no raw content).
+- `result.json` — the short version: pass/fail, which steps failed and why, plus `writeSetCheck`.
 
 `summary.json` (one per run, at the top of `--out`) is the whole run's matrix:
 `(target, scenarioId) -> pass/fail/errored`.
@@ -227,7 +305,10 @@ assertion ever runs. Omit it (the default) for every step that doesn't care abou
 version string — which is most of them.
 
 A scenario may also declare a top-level `expectFailOn: ['0.1.4', ...]` — see "Enforcing the
-red/green proof" above.
+red/green proof" above — and a top-level `writeSet: [...]` plus optional `tags: [...]` — see "The
+write-set invariant (ADR 026)" above. **`writeSet` is not optional in practice**: omitting it means
+the empty write-set, and every scenario that writes anything at all (nearly all of them) will fail
+until its author declares what the command sequence is licensed to touch.
 
 `expect`/`assert` are validated at load time (`lib/spec-validate.mjs`): every key above is the
 COMPLETE known set for its block — anything else throws immediately rather than being silently

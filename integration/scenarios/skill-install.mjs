@@ -12,6 +12,21 @@ export default {
   id: 'skill-install',
   project: 'nest',
   description: 'align skill prints the guide; --install writes .claude/skills/align/SKILL.md idempotently.',
+  // ADR 026: `skill --install` is one of ADR 026's own named write commands ("`skill --install`
+  // regenerates a file under `.claude/`", docs/adr/026-declared-write-sets.md:10-11). COMMON set
+  // (see init-fresh-project.mjs's write-set comment) plus the one file `writeSkillFile`
+  // (skill/install.ts) writes.
+  tags: ['destructive'],
+  writeSet: [
+    'package.json',
+    'package-lock.json',
+    'align.config.ts',
+    'CLAUDE.md',
+    '.gitignore',
+    '.align/baseline.json',
+    '.align/version.json',
+    '.claude/skills/align/SKILL.md',
+  ],
   steps: [
     { install: 'target' },
     { run: 'init --accept-existing', expect: { exit: 0, stdoutContains: 'Detected 9 component(s)' } },

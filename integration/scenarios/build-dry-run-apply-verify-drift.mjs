@@ -8,6 +8,28 @@ export default {
   id: 'build-dry-run-apply-verify-drift',
   project: 'nest',
   description: 'align build dry-run writes nothing; --apply writes generated-rules.json + rules.lock.json; --verify goes red after a doc edit.',
+  // ADR 026: `build --apply` is one of ADR 026's own named write commands
+  // (docs/adr/026-declared-write-sets.md:7-8: "`build --apply` rewrites `align.config.ts`'s note
+  // block and three `.align/` artifacts"). Traced against `writeBuildArtifacts`
+  // (commands/build.ts) — same three new `.align/` paths and the same `docs/ARCHITECTURE-RULES.md`
+  // mutation-created doc as mcp-propose-rules-baseline-gate.mjs, since both scenarios exercise the
+  // identical shared write function. `build` (dry-run) and `build --verify` write nothing; the
+  // refused `build --apply` (no `--accept-new-into-baseline`) also writes nothing (ADR 006
+  // consent doctrine — same "refuses before any write" shape as ADR 024's MCP gate).
+  tags: ['destructive'],
+  writeSet: [
+    'package.json',
+    'package-lock.json',
+    'align.config.ts',
+    'CLAUDE.md',
+    '.gitignore',
+    '.align/baseline.json',
+    '.align/version.json',
+    'docs/ARCHITECTURE-RULES.md',
+    '.align/generated-rules.json',
+    '.align/rules.lock.json',
+    '.align/last-build-report.md',
+  ],
   steps: [
     { install: 'target' },
     { run: 'init --accept-existing', expect: { exit: 0, stdoutContains: 'Detected 9 component(s)' } },

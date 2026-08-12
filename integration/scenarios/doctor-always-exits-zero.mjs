@@ -13,6 +13,11 @@ export default {
   id: 'doctor-always-exits-zero',
   project: 'nest',
   description: 'align doctor never fails — exit 0 on a healthy repo AND on a repo with a corrupted align.config.ts.',
+  // ADR 026 write-set. `align doctor`/`align check` never write. `init`'s COMMON set (see
+  // init-fresh-project.mjs's write-set comment) plus `install`'s package-lock.json is the whole
+  // list — `corrupt-config` (a `mutate` step, not an align command) overwrites align.config.ts
+  // wholesale, same declared path, no new one.
+  writeSet: ['package.json', 'package-lock.json', 'align.config.ts', 'CLAUDE.md', '.gitignore', '.align/baseline.json', '.align/version.json'],
   steps: [
     { install: 'target' },
     { run: 'init --accept-existing', expect: { exit: 0 } },

@@ -48,6 +48,16 @@ export default {
   description:
     '0.1.4 → local upgrade with a real pre-existing baseline (ADR 022, ADR 025 Tier-1 #1): transition reported, ' +
     'consent required, --yes (+ --allow-incomplete) reconciles, .align/version.json ends up stamped.',
+  // ADR 026: `align upgrade --yes` is a real reconciliation (internally `baselinePrune` +
+  // `baselineAccept`, commands/upgrade.ts) — the destructive path this scenario exists to drive.
+  // COMMON set (see init-fresh-project.mjs's write-set comment) covers every path touched: the
+  // refused (`upgrade`, no `--yes`) and read-only (`upgrade --notes`) steps write nothing, and the
+  // reconciling step only rewrites `.align/baseline.json`/`.align/version.json`, both already
+  // declared. No selector-rewrite migration fires here — nest's `init`-generated align.config.ts
+  // uses today's pattern syntax, so the glob-double-star transform (the one migration that WOULD
+  // touch align.config.ts's rules/components, outside its marker block) has nothing to rewrite.
+  tags: ['destructive'],
+  writeSet: ['package.json', 'package-lock.json', 'align.config.ts', 'CLAUDE.md', '.gitignore', '.align/baseline.json', '.align/version.json'],
   steps: [
     { install: '0.1.4' },
     { run: 'init --accept-existing', expect: { exit: 0, stdoutContains: 'Detected 9 component(s)' } },

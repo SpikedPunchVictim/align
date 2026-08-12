@@ -15,6 +15,13 @@ export default {
   id: 'baseline-accept-rule-and-show',
   project: 'nest',
   description: 'align baseline accept --rule scopes to one rule id; bare accept sweeps the rest; baseline show lists both scopes.',
+  // ADR 026: `baseline accept` (both `--rule`-scoped and bare) is this scenario's subject —
+  // consequential, persistent baseline mutation, even though ADR 025's own invariant table notes
+  // "accept never deletes". COMMON set (see init-fresh-project.mjs's write-set comment) covers
+  // every path: `add-no-cycles-rule`/`introduce-arch-violation` are `mutate` steps editing
+  // align.config.ts (already declared); `baseline show` is read-only.
+  tags: ['destructive'],
+  writeSet: ['package.json', 'package-lock.json', 'align.config.ts', 'CLAUDE.md', '.gitignore', '.align/baseline.json', '.align/version.json'],
   steps: [
     { install: 'target' },
     { run: 'init --accept-existing', expect: { exit: 0, stdoutContains: 'Detected 9 component(s)' } },

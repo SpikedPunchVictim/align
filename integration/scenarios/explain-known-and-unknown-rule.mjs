@@ -4,6 +4,9 @@ export default {
   id: 'explain-known-and-unknown-rule',
   project: 'nest',
   description: 'align explain prints structured JSON for a known rule id and fails cleanly (no stack trace) for an unknown one.',
+  // ADR 026 write-set. `align explain` never writes. Same COMMON set as check-green-then-red.mjs —
+  // see init-fresh-project.mjs's write-set comment for the per-path trace.
+  writeSet: ['package.json', 'package-lock.json', 'align.config.ts', 'CLAUDE.md', '.gitignore', '.align/baseline.json', '.align/version.json'],
   steps: [
     { install: 'target' },
     { run: 'init --accept-existing', expect: { exit: 0, stdoutContains: 'Detected 9 component(s)' } },

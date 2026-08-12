@@ -14,6 +14,23 @@ export default {
   id: 'telemetry-with-and-without-file',
   project: 'nest',
   description: 'align telemetry reports "0 event(s)" with no telemetry.jsonl (not an error), and a real summary once one exists.',
+  // ADR 026: COMMON set (see init-fresh-project.mjs's write-set comment) plus the two files
+  // `check --telemetry` writes when force-enabled for that one run — `appendTelemetryLine` (the
+  // event log) and `computeAndPersistViolationTransitions` -> `writeTelemetryState` (the
+  // appear/resolve diff state, telemetry/violations.ts), both gated on `recorder.enabled` and both
+  // fire together, never independently (telemetry.ts's own `align telemetry` REPORT command is
+  // read-only and writes neither).
+  writeSet: [
+    'package.json',
+    'package-lock.json',
+    'align.config.ts',
+    'CLAUDE.md',
+    '.gitignore',
+    '.align/baseline.json',
+    '.align/version.json',
+    '.align/telemetry.jsonl',
+    '.align/telemetry-state.json',
+  ],
   steps: [
     { install: 'target' },
     { run: 'init --accept-existing', expect: { exit: 0, stdoutContains: 'Detected 9 component(s)' } },

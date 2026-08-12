@@ -5,12 +5,13 @@
 //
 // Usage:
 //   node integration/run.mjs [--project nest] [--targets local] [--scenarios id1,id2]
-//                             [--gate-target local] [--out <dir>] [--keep-all]
+//                             [--tags tag1,tag2] [--gate-target local] [--out <dir>] [--keep-all]
 //
 // Examples:
 //   node integration/run.mjs                              # all scenarios, against 'local' only
 //   node integration/run.mjs --targets 0.1.4,local         # the red/green proof, side by side
 //   node integration/run.mjs --scenarios prune-errored-run-destroys-baseline --targets 0.1.4,local
+//   node integration/run.mjs --tags destructive --targets local   # ADR 026 item 3: select by tag
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -23,18 +24,20 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const alignRepoRoot = path.join(here, '..');
 
 function parseArgs(argv) {
-  const args = { project: 'nest', targets: ['local'], scenarios: undefined, gateTarget: undefined, out: undefined, keepAll: false };
+  const args = { project: 'nest', targets: ['local'], scenarios: undefined, tags: undefined, gateTarget: undefined, out: undefined, keepAll: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--project') args.project = argv[++i];
     else if (a === '--targets') args.targets = argv[++i].split(',').map((s) => s.trim());
     else if (a === '--scenarios') args.scenarios = argv[++i].split(',').map((s) => s.trim());
+    else if (a === '--tags') args.tags = argv[++i].split(',').map((s) => s.trim());
     else if (a === '--gate-target') args.gateTarget = argv[++i];
     else if (a === '--out') args.out = argv[++i];
     else if (a === '--keep-all') args.keepAll = true;
     else if (a === '--help' || a === '-h') {
       console.log(
-        'Usage: node integration/run.mjs [--project nest] [--targets local] [--scenarios id1,id2] [--gate-target local] [--out dir] [--keep-all]',
+        'Usage: node integration/run.mjs [--project nest] [--targets local] [--scenarios id1,id2] ' +
+          '[--tags tag1,tag2] [--gate-target local] [--out dir] [--keep-all]',
       );
       process.exit(0);
     } else throw new Error(`unrecognized argument '${a}'`);
@@ -62,7 +65,26 @@ async function loadKnownProjectIds() {
   return ids;
 }
 
-async function loadScenarios(filterIds, projectId) {
+/** ADR 026 item 3 (tiering): narrows `pool` to scenarios carrying at least one of `tagFilter`'s
+ * tags (OR semantics — "give me the destructive ones", not "give me the ones tagged both X and Y",
+ * which no caller here has needed). Applied AFTER the existing --scenarios/--project filtering
+ * (`pool` already reflects both), so `--scenarios a,b --tags destructive` intersects rather than
+ * one flag silently overriding the other. Same "empty selection is a hard error" discipline as the
+ * existing F4 checks in this file — a typo'd tag must not silently report a zero-scenario PASS. */
+function filterByTags(pool, tagFilter, projectId) {
+  if (tagFilter === undefined) return pool;
+  const tagged = pool.filter((s) => (s.tags ?? []).some((t) => tagFilter.includes(t)));
+  if (tagged.length === 0) {
+    const known = [...new Set(pool.flatMap((s) => s.tags ?? []))].sort();
+    throw new Error(
+      `no scenarios match --tags ${tagFilter.join(',')} for project '${projectId}' (after any --scenarios filtering) — ` +
+        `refusing to report a zero-scenario run as passing. Known tags in this pool: ${known.join(', ') || '(none)'}`,
+    );
+  }
+  return tagged;
+}
+
+async function loadScenarios(filterIds, projectId, tagFilter) {
   const dir = path.join(here, 'scenarios');
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.mjs')).sort();
   const knownProjectIds = await loadKnownProjectIds();
@@ -105,14 +127,15 @@ async function loadScenarios(filterIds, projectId) {
     if (pool.length === 0) {
       throw new Error(`no scenarios found for project '${projectId}' — refusing to report a zero-scenario run as passing. Known scenarios: ${all.map((s) => `${s.id}(${s.project})`).join(', ') || '(none)'}`);
     }
-    return pool;
+    return filterByTags(pool, tagFilter, projectId);
   }
   const byId = new Map(pool.map((s) => [s.id, s]));
-  return filterIds.map((id) => {
+  const selected = filterIds.map((id) => {
     const s = byId.get(id);
     if (s === undefined) throw new Error(`unknown scenario '${id}' for project '${projectId}' — known: ${[...byId.keys()].join(', ')}`);
     return s;
   });
+  return filterByTags(selected, tagFilter, projectId);
 }
 
 /** The subset of a captured step used for the determinism check — deliberately excludes
@@ -168,11 +191,14 @@ async function main() {
   ensureDir(outDir);
 
   const log = (msg) => console.log(msg);
-  log(`[run] runId=${runId} project=${args.project} targets=${args.targets.join(',')} gateTarget=${gateTarget}`);
+  log(
+    `[run] runId=${runId} project=${args.project} targets=${args.targets.join(',')} gateTarget=${gateTarget}` +
+      (args.tags !== undefined ? ` tags=${args.tags.join(',')}` : ''),
+  );
   log(`[run] output: ${outDir}`);
 
   const project = await loadProject(args.project);
-  const scenarios = await loadScenarios(args.scenarios, args.project);
+  const scenarios = await loadScenarios(args.scenarios, args.project, args.tags);
   log(`[run] scenarios: ${scenarios.map((s) => s.id).join(', ')}`);
 
   const basePath = prepareProjectBase(project, cacheRoot, log);
@@ -191,8 +217,17 @@ async function main() {
 
         const scenarioOutDir = path.join(outDir, target, scenario.id);
         ensureDir(scenarioOutDir);
-        writeJson(path.join(scenarioOutDir, 'steps.json'), result.steps);
-        writeJson(path.join(scenarioOutDir, 'normalized.json'), result.steps.map(toNormalizedStep));
+        // ADR 026: `writeSetCheck` (lib/write-set.mjs, computed once per scenario in
+        // lib/scenario-runner.mjs) rides alongside the per-step array rather than being folded into
+        // it — it isn't keyed to any one scenario.steps[i], and toNormalizedStep's shape assumes a
+        // real step record. Written to every one of the three existing per-scenario artifacts so a
+        // write-set violation is diagnosable the same way a step failure already is (raw detail in
+        // steps.json, the determinism-check-safe view in normalized.json, the summary in result.json).
+        writeJson(path.join(scenarioOutDir, 'steps.json'), { steps: result.steps, writeSetCheck: result.writeSetCheck });
+        writeJson(path.join(scenarioOutDir, 'normalized.json'), {
+          steps: result.steps.map(toNormalizedStep),
+          writeSetCheck: result.writeSetCheck,
+        });
         writeJson(path.join(scenarioOutDir, 'result.json'), {
           scenarioId: result.scenarioId,
           target: result.target,
@@ -200,6 +235,7 @@ async function main() {
           errored: result.errored,
           errorMessage: result.errorMessage,
           stepFailures: result.steps.filter((s) => s.pass === false).map((s) => ({ index: s.index, kind: s.kind, failures: s.failures })),
+          writeSetCheck: result.writeSetCheck,
         });
 
         const status = result.errored ? 'ERROR' : result.pass ? 'PASS' : 'FAIL';
@@ -208,6 +244,9 @@ async function main() {
           if (result.errored) log(`    harness error: ${result.errorMessage}`);
           for (const s of result.steps.filter((s2) => s2.pass === false)) {
             log(`    step ${s.index} (${s.kind}) failed: ${s.failures.join('; ')}`);
+          }
+          if (result.writeSetCheck !== undefined && !result.writeSetCheck.pass) {
+            for (const f of result.writeSetCheck.failures) log(`    ${f}`);
           }
         }
 

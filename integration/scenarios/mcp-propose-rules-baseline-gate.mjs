@@ -21,6 +21,28 @@ export default {
   // all, `accept_new_into_baseline: true` writes the baseline unconditionally. Real, reproducible
   // red on a published version, the same calibration discipline as the other expectFailOn scenarios.
   expectFailOn: ['0.1.4'],
+  // ADR 026: `accept_new_into_baseline` is the exact write ADR 024's gate exists to guard — a
+  // consequential, consent-gated baseline write reachable over MCP. Traced against
+  // `writeBuildArtifacts` (commands/build.ts, shared by `align build --apply` and this MCP tool):
+  // `.align/generated-rules.json`, `.align/rules.lock.json`, `.align/last-build-report.md` are new
+  // this scenario; `align.config.ts`'s note block is re-spliced (COMMON set already covers the
+  // path); `.align/baseline.json`/`.align/version.json` get the accepted violation (COMMON set).
+  // `docs/ARCHITECTURE-RULES.md` is the `write-architecture-rules-doc` mutation's own new file. The
+  // FIRST mcpCall is refused before any artifact write (ADR 024 decision 2) — nothing new from it.
+  tags: ['destructive'],
+  writeSet: [
+    'package.json',
+    'package-lock.json',
+    'align.config.ts',
+    'CLAUDE.md',
+    '.gitignore',
+    '.align/baseline.json',
+    '.align/version.json',
+    'docs/ARCHITECTURE-RULES.md',
+    '.align/generated-rules.json',
+    '.align/rules.lock.json',
+    '.align/last-build-report.md',
+  ],
   steps: [
     { install: 'target' },
     { run: 'init --accept-existing', expect: { exit: 0, stdoutContains: 'Detected 9 component(s)' } },

@@ -10,6 +10,22 @@ export default {
   description:
     'align check --untrusted refuses without a committed IR, works once export-ir writes one, and never executes ' +
     'align.config.ts (ADR 014) even when a moved/custom IR path is used.',
+  // ADR 026 write-set. COMMON set (see init-fresh-project.mjs's comment) plus two `export-ir`
+  // outputs — `writeRulesetIr` (align-dir.ts) stamps `.align/version.json` on every call that
+  // lands inside `.align/` (both do, including the `--out .align/moved-ruleset-ir.json` custom
+  // path), which is why `.align/version.json` is already covered by the COMMON set and no
+  // additional entry is needed for that. `check --untrusted` (with or without `--ir`) never writes.
+  writeSet: [
+    'package.json',
+    'package-lock.json',
+    'align.config.ts',
+    'CLAUDE.md',
+    '.gitignore',
+    '.align/baseline.json',
+    '.align/version.json',
+    '.align/ruleset-ir.json',
+    '.align/moved-ruleset-ir.json',
+  ],
   steps: [
     { install: 'target' },
     { run: 'init --accept-existing', expect: { exit: 0, stdoutContains: 'Detected 9 component(s)' } },

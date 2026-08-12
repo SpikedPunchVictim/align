@@ -16,7 +16,9 @@
     "test": "pnpm -r --filter=./packages/* run test",
     "typecheck": "pnpm -r --filter=./packages/* run typecheck",
     "check": "node packages/cli/dist/index.js check",
-    "release:version": "node scripts/bump-version.mjs"
+    "release:version": "node scripts/bump-version.mjs",
+    "integration:dev": "node integration/run.mjs --targets local",
+    "integration:release": "node integration/run.mjs --targets 0.1.4,local"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

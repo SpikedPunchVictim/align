@@ -39,6 +39,12 @@ export default {
   // `--gate-target`. Without this, a normalization change or an F1-style typo that silently made
   // 0.1.4 go green would leave the run reporting overall success.
   expectFailOn: ['0.1.4'],
+  // ADR 026: `baseline prune` is the command BUG #18 lived in — the exact class this scenario
+  // exists to catch. The refusal path (`exit 1`) writes nothing, so the write-set is only the
+  // COMMON `init`/`install` set (see init-fresh-project.mjs's write-set comment) plus `baseline
+  // accept`, which also only touches paths already in that set.
+  tags: ['destructive'],
+  writeSet: ['package.json', 'package-lock.json', 'align.config.ts', 'CLAUDE.md', '.gitignore', '.align/baseline.json', '.align/version.json'],
   steps: [
     { install: 'target' },
     { run: 'init --accept-existing', expect: { exit: 0 } },

@@ -6,6 +6,12 @@ export default {
   id: 'docs-topics',
   project: 'nest',
   description: 'align docs lists every topic; each one renders; an unknown topic fails cleanly with the known-topic list.',
+  // ADR 026 write-set. `docs` never touches a repo's state — no `init` step in this scenario at
+  // all (unlike almost every other one), so the ONLY writes over the whole scenario are the
+  // preceding `install` step's real `npm install` (lib/version-install.mjs) rewriting these two.
+  // Verified against the harness's own passing 'before' run (2026-08-12): no `.align/*`,
+  // `align.config.ts`, or `CLAUDE.md` ever appears in this project tree for this scenario.
+  writeSet: ['package.json', 'package-lock.json'],
   steps: [
     { install: 'target' },
     {

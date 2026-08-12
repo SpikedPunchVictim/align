@@ -31,6 +31,13 @@ export default {
   // recognized flag. Real, reproducible red on a published version, matching the "the harness must
   // be able to fail" discipline `prune-errored-run-destroys-baseline.mjs` established for tier 1.
   expectFailOn: ['0.1.4'],
+  // ADR 026: `baseline prune` again (ADR 023 tier 2 this time), same reasoning as
+  // prune-errored-run-destroys-baseline.mjs — the refusal path writes nothing, `--allow-incomplete`
+  // writes only `.align/baseline.json`/`.align/version.json`, already in the COMMON set (see
+  // init-fresh-project.mjs's write-set comment). Runs against the `nest-incomplete` project, which
+  // uses the SAME relative paths as `nest` (projects/nest-incomplete.mjs: "the SAME repo state").
+  tags: ['destructive'],
+  writeSet: ['package.json', 'package-lock.json', 'align.config.ts', 'CLAUDE.md', '.gitignore', '.align/baseline.json', '.align/version.json'],
   steps: [
     { install: 'target' },
     { run: 'init --accept-existing', expect: { exit: 0, stdoutContains: 'Detected 9 component(s)' } },

@@ -7,6 +7,11 @@ export default {
   id: 'upgrade-notes-read-only',
   project: 'nest',
   description: 'align upgrade --notes mutates nothing under .align/, including a version.json that already exists.',
+  // ADR 026: `upgrade --notes` is explicitly read-only (this scenario's whole point), so its
+  // write-set is exactly the COMMON `init`/`install`/`baseline accept` set — see
+  // init-fresh-project.mjs's write-set comment — with nothing added for `--notes` itself. Compare
+  // with upgrade-with-existing-baseline.mjs, which DOES exercise the mutating `upgrade --yes` path.
+  writeSet: ['package.json', 'package-lock.json', 'align.config.ts', 'CLAUDE.md', '.gitignore', '.align/baseline.json', '.align/version.json'],
   steps: [
     { install: 'target' },
     { run: 'init --accept-existing', expect: { exit: 0, stdoutContains: 'Detected 9 component(s)' } },

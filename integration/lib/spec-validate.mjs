@@ -8,6 +8,7 @@
 // rather than at evaluation time: a scenario with a bad spec must not be able to run at all, not
 // even partially — "illegal states unrepresentable" (see CODING_BEST_PRACTICES.md §10) applied to
 // scenario data: a scenario object that parses is a scenario object that is valid, full stop.
+import * as path from 'node:path';
 
 const KNOWN_STEP_ACTION_KEYS = ['install', 'run', 'mutate', 'snapshot', 'assert', 'mcpCall'];
 // `keepVersion` (increment 2): opts a `run`/`mcpCall` step OUT of the `known-align-versions`
@@ -134,6 +135,23 @@ export function validateAssertSpec(assertSpec, context) {
  * has exactly one recognized action key, and every `expect`/`assert` payload is well-formed. Also
  * validates the optional `expectFailOn` field (F3 — the red/green calibration guard; see
  * run.mjs's `--expect-fail`/`expectFailOn` handling), if present. */
+/** A `writeSet` entry must be an exact, repo-relative POSIX path — never a glob (ADR 026 Decision:
+ * "each addition to a scenario's write-set" must be independently reviewable/greppable, which a
+ * glob defeats), never absolute, never an upward `..` escape (a scenario declaring a path outside
+ * its own working copy is certainly a typo, never an intended write). `\` is rejected outright
+ * rather than silently accepted-and-ignored: a Windows-style separator would silently fail to match
+ * any real POSIX-relative path `lib/write-set.mjs`'s snapshot produces, degrading the declaration
+ * into a no-op that still LOOKS like a real entry. */
+function validateWriteSetPath(p, context) {
+  if (typeof p !== 'string' || p.length === 0) throw new Error(`${context}: every 'writeSet' entry must be a non-empty string`);
+  if (path.isAbsolute(p) || p.startsWith('/')) throw new Error(`${context}: writeSet entry '${p}' must be repo-relative, not absolute`);
+  if (p.split('/').includes('..')) throw new Error(`${context}: writeSet entry '${p}' must not contain '..'`);
+  if (p.includes('\\')) throw new Error(`${context}: writeSet entry '${p}' must use POSIX '/' separators, not '\\'`);
+  if (p.includes('*') || p.includes('?')) {
+    throw new Error(`${context}: writeSet entry '${p}' looks like a glob — writeSet entries are exact literal paths (ADR 026: every addition is a reviewable event), not patterns`);
+  }
+}
+
 export function validateScenario(scenario) {
   if (scenario === null || typeof scenario !== 'object') throw new Error('scenario module default export must be a plain object');
   if (typeof scenario.id !== 'string' || scenario.id.length === 0) throw new Error(`scenario is missing a non-empty string 'id'`);
@@ -143,6 +161,23 @@ export function validateScenario(scenario) {
   if (scenario.expectFailOn !== undefined) {
     if (!Array.isArray(scenario.expectFailOn) || scenario.expectFailOn.some((t) => typeof t !== 'string' || t.length === 0)) {
       throw new Error(`${label}: 'expectFailOn' must be an array of non-empty target strings`);
+    }
+  }
+  // ADR 026: absent entirely is the fail-closed default (an empty write-set — see
+  // lib/scenario-runner.mjs's `writeSetDeclared = scenario.writeSet ?? []`), so `undefined` is
+  // valid and deliberately NOT required here — requiring the key would just push every scenario
+  // author to write `writeSet: []` by rote instead of it meaning something when present.
+  if (scenario.writeSet !== undefined) {
+    if (!Array.isArray(scenario.writeSet)) throw new Error(`${label}: 'writeSet' must be an array of repo-relative path strings`);
+    scenario.writeSet.forEach((p, i) => validateWriteSetPath(p, `${label} writeSet[${i}]`));
+    const dupes = scenario.writeSet.filter((p, i) => scenario.writeSet.indexOf(p) !== i);
+    if (dupes.length > 0) throw new Error(`${label}: 'writeSet' has duplicate entrie(s): ${[...new Set(dupes)].join(', ')}`);
+  }
+  // ADR 026 item 3 (tiering): `tags` selects scenarios via `--tags` (run.mjs) without a remembered
+  // `--scenarios id1,id2,...` list. Same non-empty-string discipline as `expectFailOn` above.
+  if (scenario.tags !== undefined) {
+    if (!Array.isArray(scenario.tags) || scenario.tags.some((t) => typeof t !== 'string' || t.length === 0)) {
+      throw new Error(`${label}: 'tags' must be an array of non-empty tag strings`);
     }
   }
 
