@@ -215,10 +215,10 @@ export function writeBaseline(rootDir: string, entries: readonly BaselineEntry[]
  * until the 2026-08-12 ADR 011 amendment; it was false — `sha256Hex(rawWritten)` folded
  * `generatedAt: Date.now()` into the hash, so two builds of byte-identical rules produced different
  * hashes, defeating "rebuild and compare." The primary hash (`reproducibleGeneratedRulesHash`,
- * `commands/build.ts`) reconstructs `{ irVersion, docPath, rules }` from the PARSED file instead.
- * These raw bytes now serve only `.parse()` above and, temporarily, the legacy raw-bytes fallback
- * comparison in `checkGeneratedRulesDivergence` (`commands/build.ts`) for lockfiles predating that
- * change — see its doc comment for the removal condition. */
+ * `commands/build-verify.ts`) reconstructs `{ irVersion, docPath, rules }` from the PARSED file
+ * instead. These raw bytes now serve only `.parse()` above and, temporarily, the legacy raw-bytes
+ * fallback comparison in `checkGeneratedRulesDivergence` (`commands/build-verify.ts`) for
+ * lockfiles predating that change — see its doc comment for the removal condition. */
 export function readGeneratedRulesRaw(rootDir: string): string | undefined {
   const file = generatedRulesPath(rootDir);
   if (!fs.existsSync(file)) return undefined;
