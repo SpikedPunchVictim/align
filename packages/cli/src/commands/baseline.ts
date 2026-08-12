@@ -24,11 +24,11 @@ function tryReadBaseline(rootDir: string, command: string): { readonly ok: true;
 }
 
 async function currentViolations(rootDir: string) {
-  const { ruleset, excludes, hostRules, telemetry } = await loadConfig(rootDir);
+  const { ruleset, excludes, includeNestedCheckouts, hostRules, telemetry } = await loadConfig(rootDir);
   // An empty baseline store surfaces every violation as "red" regardless of what's actually
   // baselined on disk — exactly the full current violation set `prune`/`accept` need.
   const { orchestrator } = createOrchestrator(ruleset, [], hostRules);
-  const run = await orchestrator.check({ rootDir, excludes });
+  const run = await orchestrator.check({ rootDir, excludes, includeNestedCheckouts });
   return { violations: run.gates.flatMap((g) => g.violations), ruleset, telemetry };
 }
 
@@ -104,12 +104,12 @@ export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, 
   } catch (err) {
     return reportCliError('align baseline prune', err);
   }
-  const { ruleset, excludes, hostRules, telemetry } = loaded;
+  const { ruleset, excludes, includeNestedCheckouts, hostRules, telemetry } = loaded;
   const previous = tryReadBaseline(rootDir, 'align baseline prune');
   if (!previous.ok) return previous.code;
   const store = new InMemoryBaselineStore(previous.entries);
   const { orchestrator } = createOrchestrator(ruleset, [], hostRules);
-  const run = await orchestrator.check({ rootDir, excludes });
+  const run = await orchestrator.check({ rootDir, excludes, includeNestedCheckouts });
   // Tier 1, BEFORE the store is consulted and before anything is written (see this function's doc
   // comment). No override — an errored scan evaluated no rules at all.
   const refusal = refuseIfRunErrored('align baseline prune', run, 'refusing to prune the baseline');
@@ -120,7 +120,7 @@ export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, 
   // empty stub this used to pass (which `store.prune` used to silently ignore anyway).
   let knownFiles: ReadonlySet<RepoRelativePath>;
   try {
-    knownFiles = await orchestrator.knownFiles({ rootDir, excludes });
+    knownFiles = await orchestrator.knownFiles({ rootDir, excludes, includeNestedCheckouts });
   } catch (err) {
     return reportCliError('align baseline prune', err);
   }

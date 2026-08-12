@@ -189,7 +189,7 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   } catch (err) {
     return reportCliError('align init', err);
   }
-  const { ruleset, excludes, hostRules } = loaded;
+  const { ruleset, excludes, includeNestedCheckouts, hostRules } = loaded;
 
   // ADR 023 amendment (2026-08-11): `init` must read the baseline it is about to overwrite before
   // either write path runs, applying the same corrupt-≠-absent discipline every other baseline
@@ -207,7 +207,7 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   }
 
   const { orchestrator } = createOrchestrator(ruleset, [], hostRules);
-  const run = await orchestrator.check({ rootDir, excludes });
+  const run = await orchestrator.check({ rootDir, excludes, includeNestedCheckouts });
   // `align init` is re-runnable on a repo that already has a baseline ("align.config.ts already
   // exists — leaving it as-is", above), and the zero-violations branch below writes `[]` over it.
   // An errored gate reports `violations: []` without evaluating anything, so that branch used to

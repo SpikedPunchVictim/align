@@ -41,6 +41,7 @@ function buildEffects(
   rootDir: string,
   ruleset: Awaited<ReturnType<typeof loadConfig>>['ruleset'],
   excludes: readonly string[],
+  includeNestedCheckouts: readonly string[],
   hostRules: HostPredicateRegistry,
   options: AgentRunCliOptions,
   fixProvider: MemoizingFixProvider,
@@ -50,9 +51,9 @@ function buildEffects(
     fixProvider,
     runCheck: async () => {
       const { orchestrator } = createOrchestrator(ruleset, readBaseline(rootDir), hostRules);
-      return orchestrator.check({ rootDir, excludes });
+      return orchestrator.check({ rootDir, excludes, includeNestedCheckouts });
     },
-    scanGraph: () => plugin.scanner.scan({ rootDir, components: ruleset.components, excludes }),
+    scanGraph: () => plugin.scanner.scan({ rootDir, components: ruleset.components, excludes, includeNestedCheckouts }),
     readFile: async (p: RepoRelativePath) => fs.readFileSync(path.join(rootDir, p), 'utf8'),
     writeFile: async (p: RepoRelativePath, content: string) => {
       fs.mkdirSync(path.dirname(path.join(rootDir, p)), { recursive: true });
@@ -181,10 +182,10 @@ export async function runAgentCommand(rootDir: string, options: AgentRunCliOptio
   } catch (err) {
     return reportCliError('align agent run', err);
   }
-  const { ruleset, excludes, hostRules, telemetry } = loaded;
+  const { ruleset, excludes, includeNestedCheckouts, hostRules, telemetry } = loaded;
   const anthropicProvider = options.model !== undefined ? new AnthropicFixProvider({ model: options.model }) : new AnthropicFixProvider();
   const memoizingProvider = new MemoizingFixProvider(anthropicProvider);
-  const effects = buildEffects(rootDir, ruleset, excludes, hostRules, options, memoizingProvider);
+  const effects = buildEffects(rootDir, ruleset, excludes, includeNestedCheckouts, hostRules, options, memoizingProvider);
 
   const baseBranch = await effects.git.currentBranch();
   const runOptions: AgentRunOptions = {

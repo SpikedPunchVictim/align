@@ -177,3 +177,45 @@ the identical poisoned directory stays green, because its call graph never reach
 proves the same property via a side effect instead of an error: a config that writes a sentinel file on import
 leaves no sentinel on disk after `--untrusted` runs. `packages/core/test/rules/host-rules.test.ts` covers
 `assertNoCustomHostRules`/`UntrustedCustomHostRuleError` directly.
+
+## Amendment (2026-08-12): a fifth field, `includeNestedCheckouts`
+
+Task #25 (auto-exclude nested git checkouts, visibly) added an opt-out list — repo-relative entries a human
+explicitly re-includes in the scan despite the entry carrying its own `.git` — as a sibling `align.config.ts`
+export, `includeNestedCheckouts`, threaded through `loadConfig` the same deviation-shape way `excludes`
+already is (`config.ts`'s documented `excludes`-is-not-part-of-`RulesetIR` note). Trusted mode reads it
+straight from the live config; `--untrusted` has no config to read, so `align export-ir` had to start
+carrying it too, or a repo whose trusted `align check` re-includes a submodule would silently diverge under
+`--untrusted` — the checkout would resurface as auto-excluded (and its `nested-checkout-skipped` advisory
+would fire) even though the human already said otherwise. `exportedRulesetSchema` (`core/src/build/schema.ts`)
+now reads `{ irVersion, exportedAt, excludes, includeNestedCheckouts, ruleset }` — a fifth field, alongside
+the four this ADR's Decision section names above.
+
+**Why this did not need an `irVersion` bump.** The field is declared `z.array(z.string()).default([])` on a
+schema built with plain `z.object(...)` (not `.strict()`), so parsing is symmetric in both directions a real
+deployment can hit:
+
+- **An old artifact (pre-#25) read by new align**: the key is simply absent from the JSON. Zod's `.default()`
+  supplies `[]` — "no opt-ins" — which is exactly the pre-#25 behavior (auto-exclude, unconditionally, since
+  the opt-out didn't exist yet). No migration, no re-`export-ir` required for an existing pinned artifact to
+  keep working.
+- **A new artifact (post-#25) read by an old align binary**: `z.object(...)`'s default parse mode ignores
+  unrecognized keys rather than rejecting them (`.strict()` would reject; this schema was never marked strict
+  for exactly this forward-compatibility reason) — an old binary simply doesn't see `includeNestedCheckouts`
+  and behaves as it always did, auto-excluding any nested checkout the artifact's ruleset scans over. It loses
+  the opt-out (a checkout the human re-included resurfaces as skipped under the old binary specifically), but
+  it does not crash, refuse, or misparse the other four fields.
+
+Both directions degrade to "acts as if the opt-out list were empty," never to a parse failure or silent
+corruption of the other fields — the same bar ADR 002's zod-boundary discipline already sets for every IR
+consumer. A version bump exists to signal an INCOMPATIBLE shape change; this one is additive and
+default-safe, so bumping `irVersion` would have forced every existing `.align/ruleset-ir.json` to be
+regenerated for no behavioral gain — pure churn against the exact artifact this ADR's Decision section says
+should be a stable, re-usable snapshot ("the artifact is a snapshot, not a live view," `export-ir.ts`'s own
+doc comment, unchanged by this amendment).
+
+`buildExportedRuleset` (`core/src/build/export-ir.ts`) gained the new parameter at the END of its existing
+positional signature, after the pre-existing optional `exportedAt`, specifically so the two call sites already
+passing `exportedAt` positionally in `core/test/build/export-ir.test.ts` did not need to change to keep
+compiling — the same "additive, not breaking" property applied one layer down, at the TypeScript boundary
+rather than the JSON one.

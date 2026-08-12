@@ -114,7 +114,8 @@ export class TypeScriptScanner implements Scanner {
     );
 
     const excludes = [...input.excludes];
-    const files = walkSourceFiles(rootDir, excludes);
+    const includeNestedCheckouts = input.includeNestedCheckouts ?? [];
+    const { files, skippedNestedCheckouts } = walkSourceFiles(rootDir, excludes, includeNestedCheckouts);
 
     const nodes: DependencyGraphNode[] = [];
     const edges: DependencyGraphEdge[] = [];
@@ -154,9 +155,18 @@ export class TypeScriptScanner implements Scanner {
       input.components,
       nodes.map((n) => n.file),
       workspaceIndex,
+      skippedNestedCheckouts,
     );
 
-    return { nodes, edges, externalNodes: [...externalNodesById.values()], externalEdges, uncertain, scannedAt };
+    return {
+      nodes,
+      edges,
+      externalNodes: [...externalNodesById.values()],
+      externalEdges,
+      uncertain,
+      skippedNestedCheckouts,
+      scannedAt,
+    };
   }
 }
 
@@ -169,11 +179,43 @@ function intern(cache: Map<string, string>, value: string): string {
   return value;
 }
 
-function walkSourceFiles(repoRoot: string, excludes: readonly string[]): string[] {
+interface WalkResult {
+  readonly files: string[];
+  readonly skippedNestedCheckouts: RepoRelativePath[];
+}
+
+/**
+ * Task #25: a nested git checkout — a `git worktree`, a submodule, a vendored clone, anything
+ * carrying its own `.git` — is never part of THIS repo's architecture and is auto-excluded during
+ * the walk. A linked worktree's `.git` is a FILE (pointing at the real repo's `.git/worktrees/...`
+ * entry), not a directory, so `fs.existsSync` is used deliberately instead of an `isDirectory()`
+ * check — it's true either way, one cheap existence check per directory as we descend, not a
+ * repo-wide scan.
+ */
+function hasOwnGit(absDir: string): boolean {
+  return fs.existsSync(path.join(absDir, '.git'));
+}
+
+function walkSourceFiles(
+  repoRoot: string,
+  excludes: readonly string[],
+  includeNestedCheckouts: readonly string[],
+): WalkResult {
   const files: string[] = [];
+  const skippedNestedCheckouts: RepoRelativePath[] = [];
   const visit = (absDir: string): void => {
     const relDir = path.relative(repoRoot, absDir).split(path.sep).join('/');
     if (isExcludedPath(relDir, excludes)) return;
+    // `relDir === ''` is the scan root itself (`rootDir`, the caller-supplied scan boundary) —
+    // exempted structurally, by construction, regardless of whether it happens to have a `.git` of
+    // its own. Nothing here assumes it does: align scans a plain non-git directory fine (every
+    // fixture/tmpdir test in this suite proves it), so this is not "the root always has one and we
+    // trust that" — it is "this function's job is to find checkouts NESTED BELOW the root; the
+    // root itself is never a candidate to skip, full stop."
+    if (relDir !== '' && hasOwnGit(absDir) && !isExcludedPath(relDir, includeNestedCheckouts)) {
+      skippedNestedCheckouts.push(toRepoRelativePath(relDir));
+      return;
+    }
 
     let entries: fs.Dirent[];
     try {
@@ -194,7 +236,8 @@ function walkSourceFiles(repoRoot: string, excludes: readonly string[]): string[
   };
   visit(repoRoot);
   files.sort();
-  return files;
+  skippedNestedCheckouts.sort();
+  return { files, skippedNestedCheckouts };
 }
 
 // Exclude patterns use core's glob dialect (`globMatch`) so a component selector and an

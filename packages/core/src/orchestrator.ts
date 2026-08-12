@@ -5,7 +5,12 @@ import type { Violation } from './types/violation.js';
 import { EMPTY_MANIFEST_INVENTORY, type ManifestScanner } from './types/manifest.js';
 import type { BaselineStore } from './baseline/store.js';
 import type { Advisory, CheckRun, GateResult } from './gates/types.js';
-import { buildBaselineGrowthAdvisories, buildUncertaintyAdvisories, buildUngroundedExternalSelectorAdvisories } from './gates/advisories.js';
+import {
+  buildBaselineGrowthAdvisories,
+  buildSkippedNestedCheckoutAdvisories,
+  buildUncertaintyAdvisories,
+  buildUngroundedExternalSelectorAdvisories,
+} from './gates/advisories.js';
 import type { PluginRegistry } from './plugin/registry.js';
 import { evaluateRule } from './rules/evaluators.js';
 import { evaluateManifestRule, type SecurityManifestRule } from './rules/manifest-evaluators.js';
@@ -29,6 +34,10 @@ const NO_MANIFEST_SCANNER: ManifestScanner = { scan: () => EMPTY_MANIFEST_INVENT
 export interface CheckOptions {
   readonly rootDir: string; // absolute filesystem path
   readonly excludes: readonly string[];
+  // Task #25: opt-out paths for a nested git checkout the walk would otherwise auto-exclude —
+  // threaded straight through to `ScanInput.includeNestedCheckouts`. Optional so every pre-existing
+  // caller (tests, anything predating this option) keeps working unchanged.
+  readonly includeNestedCheckouts?: readonly string[];
 }
 
 /**
@@ -131,7 +140,11 @@ export class GateOrchestrator {
       return {
         verdict: deriveVerdict(gates),
         gates,
-        advisories: [...buildUncertaintyAdvisories(graph.uncertain), ...movedAdvisories(securityMoves)],
+        advisories: [
+          ...buildUncertaintyAdvisories(graph.uncertain),
+          ...buildSkippedNestedCheckoutAdvisories(graph.skippedNestedCheckouts),
+          ...movedAdvisories(securityMoves),
+        ],
         scannedAt,
         ungroundedComponents: [],
       };
@@ -157,7 +170,11 @@ export class GateOrchestrator {
       return {
         verdict: deriveVerdict(gates),
         gates,
-        advisories: [...buildUncertaintyAdvisories(graph.uncertain), ...movedAdvisories(securityMoves)],
+        advisories: [
+          ...buildUncertaintyAdvisories(graph.uncertain),
+          ...buildSkippedNestedCheckoutAdvisories(graph.skippedNestedCheckouts),
+          ...movedAdvisories(securityMoves),
+        ],
         scannedAt,
         ungroundedComponents: [],
       };
@@ -191,6 +208,7 @@ export class GateOrchestrator {
 
     const advisories: Advisory[] = [
       ...buildUncertaintyAdvisories(graph.uncertain),
+      ...buildSkippedNestedCheckoutAdvisories(graph.skippedNestedCheckouts),
       ...movedAdvisories(moves.length + securityMoves),
       // ADR 017 Part A: computed after evaluation succeeds (same "trustworthy ruleset" precondition
       // as `ungroundedComponents` below) — an ungrounded external selector is vacuously green, not
@@ -307,6 +325,7 @@ export class GateOrchestrator {
           rootDir: options.rootDir,
           components: this.ruleset.components,
           excludes: options.excludes,
+          ...(options.includeNestedCheckouts === undefined ? {} : { includeNestedCheckouts: options.includeNestedCheckouts }),
         }),
       ),
     );
@@ -320,12 +339,16 @@ export class GateOrchestrator {
     // uses within one scan.
     const externalNodesById = new Map<string, DependencyGraph['externalNodes'][number]>();
     for (const g of graphs) for (const n of g.externalNodes) externalNodesById.set(n.id, n);
+    // Dedup skipped-checkout paths the same way (Stage 5's multi-plugin merge is written
+    // generically; a shared subtree could in principle be walked by more than one plugin).
+    const skippedNestedCheckouts = [...new Set(graphs.flatMap((g) => g.skippedNestedCheckouts))].sort();
     return {
       nodes: graphs.flatMap((g) => g.nodes),
       edges: graphs.flatMap((g) => g.edges),
       externalNodes: [...externalNodesById.values()],
       externalEdges: graphs.flatMap((g) => g.externalEdges),
       uncertain: graphs.flatMap((g) => g.uncertain),
+      skippedNestedCheckouts,
       scannedAt: Math.min(...graphs.map((g) => g.scannedAt)),
     };
   }

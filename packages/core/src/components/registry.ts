@@ -1,6 +1,7 @@
 import type { ComponentName, RepoRelativePath } from '../types/branded.js';
+import { toRepoRelativePath } from '../types/branded.js';
 import type { ComponentDefinitionIR, EmptyPolicy } from '../types/ir.js';
-import { globMatch, lintGlobPattern } from './glob.js';
+import { globMatch, lintGlobPattern, staticPrefixOf } from './glob.js';
 
 /** One-sentence statement of align's supported glob dialect, reused in load-time error messages. */
 const SUPPORTED_GLOB_VOCABULARY =
@@ -86,17 +87,61 @@ export function validateSelectorSyntax(
 }
 
 /**
+ * Cheap diagnostic heuristic, not a real match (no such file exists): asks whether a component's
+ * selector could plausibly reach inside a skipped nested checkout. Two complementary tests, since
+ * either shape is common:
+ *
+ * 1. The selector's scope CONTAINS or EQUALS the checkout (e.g. `vendor/**` reaching
+ *    `vendor/submodule`) — caught by running a synthetic probe path directly under the checkout
+ *    through `matchesSelector`, the SAME glob dialect and package-index lookup the real
+ *    classification uses (BUG #4's lesson from plugin-typescript's scanner.ts: never build a
+ *    second, independently-drifting matcher).
+ * 2. The selector points DEEPER INSIDE the checkout (e.g. `vendor/submodule/src/**`) — the
+ *    likelier real shape for a vendored checkout, and one the probe above structurally cannot
+ *    catch (the probe file lives at the checkout's root, not inside `src/`). Caught instead by
+ *    `staticPrefixOf` (`./glob.js`): does any glob pattern's wildcard-free directory prefix lie at
+ *    or under the checkout directory? A pattern with no literal anchor at all (`**`) has an empty
+ *    prefix and always counts, since it could match anywhere.
+ *
+ * Task #25's empty-component interaction: without this, a component whose selector only ever
+ * matched files inside an auto-excluded checkout throws the same generic "renamed/moved/stale"
+ * message as an ordinary stale selector — actively misleading, since the real cause (a nested
+ * checkout, visible in the scan's `nested-checkout-skipped` advisory) is knowable right here. A
+ * false negative (neither test fires — e.g. a `package:` selector, which carries no literal path
+ * to test) just falls back to the generic message, no worse than today. A false positive only adds
+ * an extra path name to an error message — never a behavior change.
+ */
+function skippedCheckoutsMatchingSelector(
+  def: ComponentDefinitionIR,
+  skippedNestedCheckouts: readonly RepoRelativePath[],
+  workspacePackages: WorkspacePackageIndex,
+): readonly RepoRelativePath[] {
+  const staticPrefixes = def.selector.kind === 'glob' ? def.selector.patterns.map(staticPrefixOf) : [];
+  return skippedNestedCheckouts.filter((dir) => {
+    if (matchesSelector(toRepoRelativePath(`${dir}/__align_probe__.ts`), def, workspacePackages)) return true;
+    return staticPrefixes.some((prefix) => prefix === '' || prefix === dir || prefix.startsWith(`${dir}/`));
+  });
+}
+
+/**
  * Load-time validation (ADR 003): a `package:` selector naming a package absent from the
  * resolved workspace inventory is an error, and a component whose selector resolves to zero
  * files is a load-time error pointing at the component definition — unless its empty policy
  * (`empty: 'allow' | 'until-populated'`, greenfield mode, ADR 003 amendment) opts out. Both
  * checks run against the current scan's file list, since v1 has no separate config-build step;
  * the closest analog to "load time" is "the first scan after config load."
+ *
+ * `skippedNestedCheckouts` (task #25, default `[]` for every pre-existing caller): repo-relative
+ * paths the walk auto-excluded this scan because they carry their own `.git`. When a `fail`-policy
+ * component matches zero files AND its selector could plausibly have reached one of these paths
+ * (`skippedCheckoutsMatchingSelector`), the thrown message names that as the likely cause instead
+ * of the generic "renamed/moved/stale selector" — see this function's doc comment above.
  */
 export function validateComponents(
   components: Readonly<Record<ComponentName, ComponentDefinitionIR>>,
   allFiles: readonly RepoRelativePath[],
   workspacePackages: WorkspacePackageIndex,
+  skippedNestedCheckouts: readonly RepoRelativePath[] = [],
 ): void {
   for (const name of Object.keys(components) as ComponentName[]) {
     const def = components[name];
@@ -117,6 +162,16 @@ export function validateComponents(
     if (def.empty !== 'fail') continue;
     const matched = allFiles.some((file) => matchesSelector(file, def, workspacePackages));
     if (!matched) {
+      const likelyCheckouts = skippedCheckoutsMatchingSelector(def, skippedNestedCheckouts, workspacePackages);
+      if (likelyCheckouts.length > 0) {
+        throw new ComponentValidationError(
+          `Component '${name}' (selector: ${describeSelector(def)}) matches zero files. Likely cause: ` +
+            `its files live only under ${likelyCheckouts.join(', ')} — nested git checkout(s) auto-` +
+            `excluded from this scan, not a stale selector. If this is genuinely part of the project ` +
+            `(e.g. a submodule), add it to align.config.ts's includeNestedCheckouts export.`,
+          name,
+        );
+      }
       throw new ComponentValidationError(
         `Component '${name}' (selector: ${describeSelector(def)}) matches zero files. Likely ` +
           `cause: its directory was renamed/moved or the selector is stale. If this is expected, ` +

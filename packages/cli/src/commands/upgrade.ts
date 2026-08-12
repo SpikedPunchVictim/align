@@ -177,7 +177,7 @@ export async function runUpgrade(rootDir: string, options: UpgradeOptions): Prom
   } catch (err) {
     return reportCliError('align upgrade', err);
   }
-  const { ruleset, excludes, hostRules } = loaded;
+  const { ruleset, excludes, includeNestedCheckouts, hostRules } = loaded;
 
   let previousBaseline: BaselineEntry[];
   try {
@@ -187,7 +187,7 @@ export async function runUpgrade(rootDir: string, options: UpgradeOptions): Prom
   }
 
   const { orchestrator, baselineStore } = createOrchestrator(ruleset, previousBaseline, hostRules);
-  const run: CheckRun = await orchestrator.check({ rootDir, excludes });
+  const run: CheckRun = await orchestrator.check({ rootDir, excludes, includeNestedCheckouts });
   try {
     // Same unconditional move-transfer persistence a plain `align check` performs
     // (`commands/check.ts`) — reused rather than re-derived, and deliberately called BEFORE the
@@ -242,12 +242,12 @@ export async function runUpgrade(rootDir: string, options: UpgradeOptions): Prom
     // the preview agrees exactly with what those commands will actually do when invoked.
     const acceptAtRisk = run.gates.flatMap((g) => g.violations).length;
     const { orchestrator: fullOrchestrator } = createOrchestrator(ruleset, [], hostRules);
-    const fullRun = await fullOrchestrator.check({ rootDir, excludes });
+    const fullRun = await fullOrchestrator.check({ rootDir, excludes, includeNestedCheckouts });
     const allViolations = fullRun.gates.flatMap((g) => g.violations);
 
     let knownFiles: ReadonlySet<RepoRelativePath>;
     try {
-      knownFiles = await orchestrator.knownFiles({ rootDir, excludes });
+      knownFiles = await orchestrator.knownFiles({ rootDir, excludes, includeNestedCheckouts });
     } catch (err) {
       return reportCliError('align upgrade', err);
     }

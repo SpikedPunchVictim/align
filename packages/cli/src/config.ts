@@ -44,6 +44,14 @@ export interface LoadedConfig {
   // portable `RulesetIR`. Read from an optional named `knownPublicDeepImports` export; `[]` when
   // absent (the built-in seed still applies -- this list only ADDS to it, never replaces it).
   readonly knownPublicDeepImports: readonly string[];
+  // Task #25 (auto-exclude nested git checkouts, visibly): same deviation shape as `excludes` — a
+  // scan-time concern, not a rule-evaluation concern, so it doesn't belong in the portable
+  // `RulesetIR`. Entries a human explicitly opts back into the scan despite carrying their own
+  // `.git` (a submodule they consider part of the project) — matched the same way `excludes`
+  // matches (exact path, directory-prefix, or glob pattern), not plain string-prefix comparison;
+  // everything else with its own `.git` is auto-excluded by default. Read from an optional named
+  // `includeNestedCheckouts` export; `[]` when absent.
+  readonly includeNestedCheckouts: readonly string[];
   // ADR 006:40-43 / ADR 024: the single gate over every MCP-reachable write to
   // `.align/baseline.json` — today that's `align_propose_rules`'s `accept_new_into_baseline`
   // (`mcp/server.ts`). Default `false` (an agent cannot grant itself amnesty from a rule it is
@@ -138,6 +146,7 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
     telemetry?: boolean;
     compositionRoots?: readonly string[];
     knownPublicDeepImports?: readonly string[];
+    includeNestedCheckouts?: readonly string[];
     allowBaselineFromMcp?: boolean;
   };
   try {
@@ -160,15 +169,34 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
   const telemetry = mod.telemetry !== undefined ? { telemetry: mod.telemetry } : {};
   const compositionRoots = readStringArrayExport(mod.compositionRoots, 'compositionRoots');
   const knownPublicDeepImports = readStringArrayExport(mod.knownPublicDeepImports, 'knownPublicDeepImports');
+  const includeNestedCheckouts = readStringArrayExport(mod.includeNestedCheckouts, 'includeNestedCheckouts');
   const allowBaselineFromMcp = readBooleanExport(mod.allowBaselineFromMcp, 'allowBaselineFromMcp');
 
   if (!includeGenerated) {
-    return { ruleset: mod.default, excludes, hostRules, compositionRoots, knownPublicDeepImports, allowBaselineFromMcp, ...telemetry };
+    return {
+      ruleset: mod.default,
+      excludes,
+      hostRules,
+      compositionRoots,
+      knownPublicDeepImports,
+      includeNestedCheckouts,
+      allowBaselineFromMcp,
+      ...telemetry,
+    };
   }
 
   const generated = readGeneratedRules(rootDir);
   if (generated === undefined) {
-    return { ruleset: mod.default, excludes, hostRules, compositionRoots, knownPublicDeepImports, allowBaselineFromMcp, ...telemetry };
+    return {
+      ruleset: mod.default,
+      excludes,
+      hostRules,
+      compositionRoots,
+      knownPublicDeepImports,
+      includeNestedCheckouts,
+      allowBaselineFromMcp,
+      ...telemetry,
+    };
   }
 
   const mergedRules = mergeGeneratedRules(mod.default.rules, generated.rules);
@@ -178,6 +206,7 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
     hostRules,
     compositionRoots,
     knownPublicDeepImports,
+    includeNestedCheckouts,
     allowBaselineFromMcp,
     ...telemetry,
   };

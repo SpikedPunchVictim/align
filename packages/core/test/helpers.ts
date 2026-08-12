@@ -1,4 +1,5 @@
 import { toComponentName, toRepoRelativePath } from '../src/types/branded.js';
+import type { RepoRelativePath } from '../src/types/branded.js';
 import type {
   DependencyGraph,
   DependencyGraphEdge,
@@ -77,6 +78,7 @@ export function graph(
     readonly nodes?: ExternalPackageNode[];
     readonly edges?: ExternalDependencyEdge[];
     readonly uncertain?: UncertaintyMarker[];
+    readonly skippedNestedCheckouts?: readonly RepoRelativePath[];
   } = {},
 ): DependencyGraph {
   return {
@@ -85,6 +87,7 @@ export function graph(
     externalNodes: external.nodes ?? [],
     externalEdges: external.edges ?? [],
     uncertain: external.uncertain ?? [],
+    skippedNestedCheckouts: external.skippedNestedCheckouts ?? [],
     scannedAt: Date.now(),
   };
 }

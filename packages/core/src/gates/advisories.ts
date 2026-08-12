@@ -1,5 +1,6 @@
 import type { UncertaintyMarker, UncertaintyReason } from '../types/graph.js';
 import type { ExternalPackageNode } from '../types/graph.js';
+import type { RepoRelativePath } from '../types/branded.js';
 import type { RuleIR } from '../types/ir.js';
 import { findUngroundedExternalSelectors } from '../rules/external-match.js';
 import type { BaselineEntry } from '../baseline/store.js';
@@ -103,6 +104,33 @@ export function buildUncertaintyAdvisories(uncertain: readonly UncertaintyMarker
  * `missing-dependencies` (which would wrongly flag the verdict provisional). */
 function isExternalPackageSpecifier(specifier: string): boolean {
   return !specifier.startsWith('.') && !specifier.startsWith('/') && !specifier.startsWith('#');
+}
+
+/**
+ * Task #25 (auto-exclude nested git checkouts, visibly): one advisory naming every nested checkout
+ * the walk skipped this scan (`graph.skippedNestedCheckouts` — a worktree/submodule/vendored clone,
+ * anything carrying its own `.git`, directory or file). This is the load-bearing half of the
+ * decision: a directory skipped without this advisory would be indistinguishable from one that was
+ * simply empty, which is exactly the false-green shape ADR 008's reference-validity amendment and
+ * ADR 003's `empty:` policy both exist to prevent (a component whose files all lived under a
+ * silently-skipped path would evaluate vacuously green with zero signal). Named paths, not just a
+ * count, so a human/agent can tell at a glance whether an empty component correlates with one of
+ * them — see `components/registry.ts`'s `skippedCheckoutsMatchingSelector` for the sharper,
+ * per-component diagnosis this advisory alone can't give (it fires once per scan, not per
+ * component).
+ */
+export function buildSkippedNestedCheckoutAdvisories(paths: readonly RepoRelativePath[]): Advisory[] {
+  if (paths.length === 0) return [];
+  const sorted = [...paths].sort((a, b) => a.localeCompare(b));
+  return [
+    {
+      kind: 'nested-checkout-skipped',
+      message:
+        `${sorted.length} nested git checkout(s) auto-excluded from the scan (each has its own .git and ` +
+        `is not part of this project's architecture): ${sorted.join(', ')}. If one of these is genuinely ` +
+        "part of the project (e.g. a submodule), add it to align.config.ts's includeNestedCheckouts export.",
+    },
+  ];
 }
 
 /**
