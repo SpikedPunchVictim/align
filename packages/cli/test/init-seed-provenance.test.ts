@@ -122,14 +122,13 @@ describe('`align init` seed path preserves baseline provenance — ADR 023 amend
     expect(entries[0]?.acceptedAt).toBeLessThanOrEqual(after);
 
     // `init-seed` is the interactive-consent-equivalent stamp (used only when `!acceptExisting &&
-    // isInteractive`, via the `readline` prompt). It is not reachable through `InitOptions` in a
-    // non-interactive test: `nonInteractive: false` does not force `isInteractive` true (it only
-    // avoids forcing it false — `runInit`'s own ternary falls through to
-    // `process.stdin.isTTY === true`, which is false under the test runner), and there is no
-    // `readline`-mocking precedent anywhere in this test directory to drive the prompt's answer.
-    // Covering `init-seed` specifically would require introducing that harness, which is out of
-    // scope for this change — the merge logic itself is identical for both stamp values (see
-    // `commands/init.ts`'s `acceptedBy: prior?.acceptedBy ?? (options.acceptExisting ? 'accept-existing' : 'init-seed')`).
+    // isInteractive`, via the seed prompt). This test uses `nonInteractive: true`, which forces
+    // `isInteractive` false, so it exercises `accept-existing`, not `init-seed` — the merge logic
+    // itself is identical for both stamp values (see `commands/init.ts`'s
+    // `acceptedBy: prior?.acceptedBy ?? (options.acceptExisting ? 'accept-existing' : 'init-seed')`).
+    // `init-seed` itself, and the interactive accept/decline branches generally, are covered in
+    // `init-interactive-consent.test.ts`, via `InitOptions.confirm` — the test seam added alongside
+    // `UpgradeOptions.confirm` (`commands/upgrade.ts`) specifically to make this reachable.
   });
 
   it('a mixed baseline (one entry still observed, one new violation) produces exactly one preserved entry and one freshly-stamped entry in a single run', async () => {

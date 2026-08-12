@@ -1,6 +1,5 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as readline from 'node:readline/promises';
 import { defineProject, type ComponentsInput } from '@spikedpunch/align-core/dsl';
 import { toComponentName, type BaselineEntry, type CheckRun, type ViolationId } from '@spikedpunch/align-core';
 import { TypeScriptPlugin } from '@spikedpunch/align-plugin-typescript';
@@ -16,6 +15,7 @@ import { CONFIG_FILENAME, loadConfig } from '../config.js';
 import { writeBaseline, readBaseline, ensureAlignDir, recordBaselineReconciled } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
+import { defaultConfirm } from '../prompt.js';
 
 export interface InitOptions {
   readonly acceptExisting: boolean;
@@ -43,6 +43,16 @@ export interface InitOptions {
    * semantics to `align baseline prune`/`align upgrade`'s flag of the same name — see
    * `refuseIfBaselineWriteAtRisk` below for the one guard both of `init`'s write paths share. */
   readonly allowIncomplete?: boolean;
+  /** Test hook, mirroring `UpgradeOptions.confirm` (`commands/upgrade.ts`) exactly: replaces the
+   * real `readline`-backed interactive seed prompt (`defaultConfirm`, `../prompt.js`) with a
+   * scripted answer function, so the interactive consent branch is exercised deterministically
+   * without faking a TTY/stdin stream (CODING_BEST_PRACTICES.md §15: inject the I/O boundary
+   * rather than reach out to it). Supplying this override IS the statement that there is a way to
+   * prompt — it forces `isInteractive` true independent of `nonInteractive`/stdin, the same as
+   * `upgrade`'s identical seam does, and for the same reason: a test can only script an ANSWER
+   * once the command has already decided to ask. Never set by `program.ts`; production always uses
+   * the real prompt. */
+  readonly confirm?: (question: string) => Promise<boolean>;
 }
 
 /**
@@ -196,7 +206,13 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   if (refusal !== undefined) return refusal;
   const violations = run.gates.flatMap((g) => g.violations);
 
-  const isInteractive = options.nonInteractive === true ? false : (options.nonInteractive ?? process.stdin.isTTY === true);
+  // Mirrors `upgrade.ts`'s exact interactive-vs-CI ternary (`commands/upgrade.ts:224-225`), with the
+  // same one addition: an explicit `confirm` override (test-only — see `InitOptions.confirm`'s doc
+  // comment) always counts as "we have a way to prompt," independent of `nonInteractive`/stdin — the
+  // override IS the interactive channel for a test, in the same way `upgrade`'s tests already use
+  // theirs. No existing caller passes `confirm`, so this branch never changes what any of them see.
+  const isInteractive =
+    options.confirm !== undefined ? true : options.nonInteractive === true ? false : (options.nonInteractive ?? process.stdin.isTTY === true);
 
   // The npm-script offer runs on every exit path (green, baselined, or declined) — it's an
   // independent, purely-additive convenience, not gated on the baseline outcome.
@@ -263,10 +279,9 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   if (!shouldSeed && isInteractive) {
     console.log(`\nalign check found ${violations.length} pre-existing violation(s) — this is normal on a repo align hasn't seen before.`);
     console.log('Seeding the baseline tolerates them as existing debt; run `align baseline show` any time to review what was seeded.');
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const answer = await rl.question('Seed the baseline with these violations now? [y/N] ');
-    rl.close();
-    shouldSeed = /^y(es)?$/i.test(answer.trim());
+    // `defaultConfirm` (`../prompt.js`) appends its own `[y/N] ` suffix — the question string below
+    // must NOT append one itself, or the prompt would read `[y/N] [y/N] `.
+    shouldSeed = await (options.confirm ?? defaultConfirm)('Seed the baseline with these violations now?');
   }
 
   if (!shouldSeed) {

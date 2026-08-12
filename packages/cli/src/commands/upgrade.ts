@@ -1,10 +1,10 @@
-import * as readline from 'node:readline/promises';
 import { InMemoryBaselineStore, type BaselineEntry, type CheckRun, type RepoRelativePath } from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, readVersionFile, recordBaselineReconciled } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
+import { defaultConfirm } from '../prompt.js';
 import { compareVersions } from '../version-skew.js';
 import { ALIGN_VERSION } from '../telemetry/process-context.js';
 import { allValidatorsForEntry, MIGRATION_REGISTRY, selectRange, type SelectRangeFrom, type Validator, type ValidatorFinding } from '../migrations/index.js';
@@ -74,13 +74,6 @@ function printNotesAndFindings(
       }
     }
   }
-}
-
-async function defaultConfirm(question: string): Promise<boolean> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const answer = await rl.question(`${question} [y/N] `);
-  rl.close();
-  return /^y(es)?$/i.test(answer.trim());
 }
 
 /** One consent-gated action's outcome — did anything actually need consenting to, and if so, was
