@@ -1,6 +1,5 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as readline from 'node:readline/promises';
 import {
   computeImpactDelta,
   diffGeneratedRules,
@@ -32,6 +31,7 @@ import { loadConfig, CONFIG_FILENAME } from '../config.js';
 import { assertGeneratedRulesNoteWellFormed, writeGeneratedRulesNote } from '../init/config-comment.js';
 import { printDryRunReport, renderBuildReport } from './build-report.js';
 import { reportCliError } from '../cli-error.js';
+import { defaultConfirm } from '../prompt.js';
 import {
   readBaseline,
   readGeneratedRules,
@@ -53,6 +53,15 @@ export interface BuildOptions {
   readonly verify: boolean;
   readonly acceptNewIntoBaseline: boolean;
   readonly nonInteractive?: boolean; // test hook; defaults to !process.stdin.isTTY, same as `init`
+  /** Test hook, mirroring `InitOptions.confirm`/`UpgradeOptions.confirm` exactly: replaces the real
+   * `readline`-backed interactive prompt (`defaultConfirm`, `../prompt.js`) that asks whether to
+   * seed newly-added violations into the baseline, with a scripted answer function, so the
+   * interactive consent branch is exercised deterministically without faking a TTY/stdin stream
+   * (CODING_BEST_PRACTICES.md §15: inject the I/O boundary rather than reach out to it). Supplying
+   * the override IS the statement that there is a way to prompt — it forces `isInteractive` true
+   * independent of `nonInteractive`/stdin, same as `init`'s and `upgrade`'s identical seams. Never
+   * set by `program.ts`; production always uses the real prompt. */
+  readonly confirm?: (question: string) => Promise<boolean>;
   readonly telemetryPreConfig?: boolean;
 }
 
@@ -422,13 +431,17 @@ export async function runBuild(rootDir: string, options: BuildOptions): Promise<
 
   let acceptNewIntoBaseline = options.acceptNewIntoBaseline;
   if (result.impact.addedNew.length > 0 && !acceptNewIntoBaseline) {
-    const isInteractive = options.nonInteractive === true ? false : (options.nonInteractive ?? process.stdin.isTTY === true);
+    // Mirrors `init.ts`'s/`upgrade.ts`'s exact interactive-vs-CI ternary: an explicit `confirm`
+    // override (test-only — see `BuildOptions.confirm`'s doc comment) always counts as "we have a
+    // way to prompt," independent of `nonInteractive`/stdin. No existing caller passes `confirm`,
+    // so this never changes what any of them see.
+    const isInteractive =
+      options.confirm !== undefined ? true : options.nonInteractive === true ? false : (options.nonInteractive ?? process.stdin.isTTY === true);
     if (isInteractive) {
       console.log(`\nThe proposed ruleset adds ${result.impact.addedNew.length} new violation(s).`);
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      const answer = await rl.question('Seed these into the baseline as tolerated debt and apply? [y/N] ');
-      rl.close();
-      acceptNewIntoBaseline = /^y(es)?$/i.test(answer.trim());
+      // `defaultConfirm` (`../prompt.js`) appends its own `[y/N] ` suffix — the question string
+      // below must NOT append one itself, or the prompt would read `[y/N] [y/N] `.
+      acceptNewIntoBaseline = await (options.confirm ?? defaultConfirm)('Seed these into the baseline as tolerated debt and apply?');
     }
   }
 
