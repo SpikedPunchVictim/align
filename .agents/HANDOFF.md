@@ -122,19 +122,29 @@ message; advisory reachability on every other path (green run, both guard-step e
 `ExportedRuleset` addition being compatible via `z.array(z.string()).default([])` in a non-strict
 object — **no `irVersion` bump, which would break old artifacts for nothing.**
 
-**Blocking finding, dispatched to a worker but UNVERIFIED as of this writing:**
-`includeNestedCheckouts` was not threaded through 7 call sites — `mcp/server.ts:45`,
-`baseline.ts:31/112/123`, `upgrade.ts:190/245/250`, `init.ts:210`. Consequence for a user who opts a
-checkout back in: `baseline accept` can never clear a red check, and **`baseline prune` deletes
-their accepted entries and exits 0** — the files are absent from prune's `knownFiles`, so
-`store.prune` deletes them as unmatched orphans while printing success. Neither ADR 023 guard fires:
-the run is green AND complete, so the inconsistency is in scan *scope*, not run status.
+**Blocking finding — FIXED in the worktree, but I never re-verified it in the main tree.** The
+defect: `includeNestedCheckouts` was not threaded through 7 call sites (`mcp/server.ts:45`,
+`baseline.ts:31/112/123`, `upgrade.ts:190/245/250`, `init.ts:210`). Consequence for a user who opts
+a checkout back in: `baseline accept` could never clear a red check, and **`baseline prune` deleted
+their accepted entries and exited 0** — the files were absent from prune's `knownFiles`, so
+`store.prune` removed them as unmatched orphans while printing success. Neither ADR 023 guard fires,
+because the run is green AND complete: the inconsistency was in scan *scope*, not run status.
 `mcp/server.ts:31-41` carries a comment naming that function as the one that keeps getting missed by
-cross-cutting changes, with two prior instances; this was the third. Also dispatched: the
-`skippedCheckoutsMatchingSelector` probe misses selectors anchored deeper than the checkout root
-(`registry.ts:105-113` — `vendored/repo/src/**` does not match a probe at the checkout root); two
-comments claiming more than the code enforces (`registry.ts:100-103`,
-`plugin-typescript/src/scanner.ts:209-210`); and an ADR 014 amendment for the new artifact field.
+cross-cutting changes, with two prior instances; this was the third.
+
+The worker reports all 7 threaded, a `grep -rn '\.check(\|\.knownFiles(' packages/cli/src` showing
+all 11 call sites now passing the option, and a new end-to-end regression test
+(`packages/cli/test/nested-checkout-scan-scope.test.ts`) covering check → MCP → accept → prune
+against a violation inside an opted-in checkout. It says it confirmed the test actually catches the
+regression by reverting the fix, seeing the failure, and restoring — worth reproducing, since that
+is the only claim that makes the test worth having. Also fixed: the deeper-selector probe miss (new
+`staticPrefixOf` in `components/glob.ts`, OR-ed with the existing probe match), the three inaccurate
+comments, and an ADR 014 amendment for the fifth artifact field.
+
+Reported counts inside the worktree: **1158 passing + 1 skipped** (create-align 46, core 463,
+plugin-typescript 88, agent 53+1, cli 508), check green with 29 baselined, doctor exit 0. **I did
+not independently re-run any of this** — the session ended first. Reproduce it in the worktree
+before trusting it, then merge.
 
 **STILL OWED — nobody has started these:**
 

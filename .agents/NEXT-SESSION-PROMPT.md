@@ -20,7 +20,7 @@ FIRST ACTION — reproduce the baseline before changing anything:
 Expect **1134 passing + 1 skipped** (create-align 46, core 450, plugin-typescript 82, agent 53+1,
 cli 503). If that does not reproduce, stop and find out why first.
 
-STATE: branch `fix`, 60 commits ahead of `main`, no upstream, NOTHING PUSHED, working tree clean.
+STATE: branch `fix`, 61 commits ahead of `main`, no upstream, NOTHING PUSHED, working tree clean.
 Version still 0.1.4 — not yet bumped.
 
 ## Your first job: finish #25 (nested-checkout auto-exclusion)
@@ -31,10 +31,13 @@ that directory. Check `git worktree list` first; if it is gone, the work is lost
 from the design in `.agents/HANDOFF.md`. Consider committing a WIP snapshot onto `wt-25` before you
 touch anything.
 
-A worker was mid-flight applying review fixes when the last session ended. **Verify its state
-yourself — do not assume the fixes landed.** Specifically confirm `includeNestedCheckouts` now
-reaches all seven previously-missed call sites (`mcp/server.ts:45`, `baseline.ts:31/112/123`,
-`upgrade.ts:190/245/250`, `init.ts:210`), and re-run the full gates inside the worktree.
+A worker finished applying the review fixes just as the last session ended, reporting 1158 passing
++ 1 skipped inside the worktree with check green. **Nobody re-ran that — verify it yourself before
+trusting it.** Confirm `includeNestedCheckouts` reaches all eleven `check(`/`knownFiles(` call sites
+in `packages/cli/src`, and reproduce the claim that
+`packages/cli/test/nested-checkout-scan-scope.test.ts` actually catches the regression (revert one
+of the `baseline.ts` fixes, watch it fail, restore) — an end-to-end test that would pass with the
+bug present is worse than none.
 
 Then complete the four items `.agents/HANDOFF.md` lists as STILL OWED under #25 — the `prune`
 refusal (user-decided, and the most important), an ADR, an integration scenario, and an
