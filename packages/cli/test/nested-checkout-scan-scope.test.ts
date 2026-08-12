@@ -100,3 +100,100 @@ describe("scan-scope consistency across every CheckRun-producing surface (task #
     },
   );
 });
+
+/**
+ * A real `arch.no-dependency` violation whose offending file lives inside a nested checkout, EXACTLY
+ * like `buildRepoWithViolationInsideOptedInCheckout` above — except the violating component's
+ * selector (`'**\/api/**'`) also matches a second, innocent file OUTSIDE the checkout
+ * (`src/api/other.ts`, which never imports `ui` and so never violates anything on its own).
+ *
+ * Why this straddling shape is the whole point: `validateComponents` throws when a component
+ * resolves to zero files, and `baselinePrune` returns 1 with a loud diagnostic on that throw. If
+ * the violating component matched files ONLY inside the checkout (as in the fixture above), then a
+ * scan-scope regression that drops the checkout would make the component resolve to zero files,
+ * the throw would fire, and the test would "pass" for the wrong reason — the assertion never
+ * reaches the actual deletion, because the process never gets past the throw. That is a real gap:
+ * `nested-checkout-scan-scope.test.ts`'s first test proves the wiring is present, but it has never
+ * exercised the silent-data-loss path a regression could still take.
+ *
+ * With a straddling selector, dropping the checkout from the scan leaves the component non-empty
+ * (`src/api/other.ts` still resolves), so `validateComponents` has nothing to throw about. The scan
+ * completes, finds zero violations (the only violating file, inside the checkout, is invisible to
+ * it), and the previously-accepted baseline entry looks orphaned by every measure `store.prune`
+ * consults — this is the shape that reproduces BUG #18: `baselinePrune` reports success, exits 0,
+ * and silently deletes the entry that was protecting a still-real violation.
+ */
+function buildRepoWithViolationStraddlingOptedInCheckout(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-scan-scope-straddle-test-'));
+  fs.mkdirSync(path.join(dir, 'src', 'ui'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'src', 'ui', 'component.ts'), 'export const x = 1;\n', 'utf8');
+
+  // Innocent file OUTSIDE the nested checkout, matched by the same `'**/api/**'` selector as the
+  // violating file below. It never imports `ui`, so it never violates anything by itself — its only
+  // job is to keep the `api` component non-empty even if the checkout is dropped from the scan, so
+  // the zero-files throw can never mask the assertion this test makes.
+  fs.mkdirSync(path.join(dir, 'src', 'api'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'src', 'api', 'other.ts'), 'export const outside = 1;\n', 'utf8');
+
+  const checkoutApiDir = path.join(dir, 'vendor', 'submodule', 'api');
+  fs.mkdirSync(checkoutApiDir, { recursive: true });
+  // A linked worktree's `.git` is a file — exercised here so this fixture matches the real shape
+  // (this repo's own `.claude/worktrees/*`), not just the directory case.
+  fs.writeFileSync(path.join(dir, 'vendor', 'submodule', '.git'), 'gitdir: /elsewhere/.git/worktrees/submodule\n', 'utf8');
+  fs.writeFileSync(
+    path.join(checkoutApiDir, 'service.ts'),
+    `import { x } from '../../../src/ui/component.js';\nexport const y = x;\n`,
+    'utf8',
+  );
+
+  fs.writeFileSync(
+    path.join(dir, 'align.config.ts'),
+    `import { defineProject } from '@spikedpunch/align-core/dsl';\n` +
+      `export default defineProject({\n` +
+      // A single glob straddling the checkout boundary: matches both `src/api/other.ts` and
+      // `vendor/submodule/api/service.ts`, so the component is never empty regardless of whether
+      // the checkout is included in the scan.
+      `  components: { api: '**/api/**', ui: 'src/ui/**' },\n` +
+      `  rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],\n` +
+      `});\n` +
+      `export const includeNestedCheckouts = ['vendor/submodule'];\n`,
+    'utf8',
+  );
+  linkAlignCore(dir);
+  return dir;
+}
+
+describe(
+  "baseline prune data loss on a straddling component (task #25 review gap — the zero-files throw " +
+    "must not be able to mask this)",
+  () => {
+    it(
+      "baseline prune's own scan resolving the nested checkout is what keeps an accepted violation's " +
+        'baseline entry alive — asserted as the pair `prune exits 0 AND the entry still exists`, because a ' +
+        "command that destroys data while reporting success is this project's severity-zero class",
+      async () => {
+        tmpDir = buildRepoWithViolationStraddlingOptedInCheckout();
+
+        // Sanity: the violation is real and visible when the checkout is resolved.
+        expect(await runCheck(tmpDir, { json: false })).toBe(1);
+
+        // Accept it, then confirm the tree goes green.
+        expect(await baselineAccept(tmpDir)).toBe(0);
+        expect(await runCheck(tmpDir, { json: false })).toBe(0);
+
+        const beforePrune = readBaseline(tmpDir);
+        expect(beforePrune).toHaveLength(1);
+
+        // The assertion that matters: prune must exit 0 AND the entry must still be there. If
+        // `baselinePrune`'s own `orchestrator.check(...)` scan ever drops `includeNestedCheckouts`,
+        // the violating file becomes invisible to that scan, the entry looks orphaned, and
+        // `store.prune` deletes it — while this call still returns 0, because nothing about that
+        // path is an error. Checking only the exit code would pass right through that regression;
+        // asserting the pair is what catches it.
+        expect(await baselinePrune(tmpDir)).toBe(0);
+        const afterPrune = readBaseline(tmpDir);
+        expect(afterPrune).toHaveLength(1);
+      },
+    );
+  },
+);
