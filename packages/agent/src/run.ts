@@ -105,15 +105,43 @@ async function buildInputForFile(
   };
 }
 
-/** DISCOVER + GROUP + PLAN only — used both for `--dry-run` and internally is NOT reused for the
- * real run (the real run needs the full per-group loop below, not just one proposal). */
+const ZERO_COVERAGE_REASON =
+  'zero test coverage — no scanned test file transitively imports this file (pass --allow-untested to override)';
+
+/** Green≠correct guard (b): zero-coverage refusal, shared by the real per-group loop (`runGroup`)
+ * and the `--dry-run` planning loop (`planOnly`). A file that would be escalated for zero
+ * coverage in a real run must never reach `fixProvider.proposeFix` in a dry run either — sending
+ * its contents to the model is exactly what `--allow-untested`'s "(default: refuse)" promises not
+ * to do. Returns the 'escalated' outcome when the guard fires, `undefined` when the file may
+ * proceed to PLAN+FIX. Only scans the graph when the gate is actually active (`!allowUntested`),
+ * matching the original `runGroup`-only behavior — `--allow-untested` skips the scan entirely. */
+async function coverageGateOutcome(
+  effects: AgentEffects,
+  file: RepoRelativePath,
+  options: Pick<AgentRunOptions, 'allowUntested'>,
+): Promise<GroupOutcome | undefined> {
+  if (options.allowUntested) return undefined;
+  const graph = await effects.scanGraph();
+  if (isFileCovered(file, graph)) return undefined;
+  return { status: 'escalated', file, reason: ZERO_COVERAGE_REASON };
+}
+
+/** DISCOVER + GROUP + PLAN only — used for `--dry-run`. Applies the same zero-coverage guard as
+ * `runGroup` (via `coverageGateOutcome`) before ever calling the FixProvider, then otherwise stops
+ * short of the full per-group APPLY/VERIFY/REPAIR loop below. */
 async function planOnly(
   effects: AgentEffects,
   groupsMap: ReadonlyMap<RepoRelativePath, readonly Violation[]>,
   explanations: ReadonlyMap<RuleId, RuleExplanation>,
+  options: AgentRunOptions,
 ): Promise<readonly GroupOutcome[]> {
   const outcomes: GroupOutcome[] = [];
   for (const [file, violations] of groupsMap) {
+    const coverageEscalation = await coverageGateOutcome(effects, file, options);
+    if (coverageEscalation !== undefined) {
+      outcomes.push(coverageEscalation);
+      continue;
+    }
     const input = await buildInputForFile(effects, file, violations, explanations);
     const proposal = await effects.fixProvider.proposeFix(input);
     outcomes.push({ status: 'dry-run', file, proposal });
@@ -131,16 +159,10 @@ async function runGroup(
   options: AgentRunOptions,
 ): Promise<GroupOutcome> {
   // Green≠correct guard (b): zero-coverage refusal — checked once, before any PLAN+FIX call.
-  if (!options.allowUntested) {
-    const graph = await effects.scanGraph();
-    if (!isFileCovered(file, graph)) {
-      return {
-        status: 'escalated',
-        file,
-        reason: 'zero test coverage — no scanned test file transitively imports this file (pass --allow-untested to override)',
-      };
-    }
-  }
+  // Shared with the `--dry-run` path (`planOnly`) via `coverageGateOutcome` so a second code path
+  // can never forget the guard the way `--dry-run` originally did.
+  const coverageEscalation = await coverageGateOutcome(effects, file, options);
+  if (coverageEscalation !== undefined) return coverageEscalation;
 
   const history: AttemptFingerprint[] = [fingerprintOf(initialViolations)];
   let attemptsSoFar = 0;
@@ -291,7 +313,7 @@ export async function runAgentLoop(effects: AgentEffects, ruleset: RulesetIR, op
   const explanations = ruleExplanationMap(ruleset);
 
   if (options.dryRun) {
-    const groups = await planOnly(effects, groupsMap, explanations);
+    const groups = await planOnly(effects, groupsMap, explanations, options);
     return { verdict: 'dry-run', groups };
   }
 

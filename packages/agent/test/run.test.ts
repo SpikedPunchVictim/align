@@ -271,6 +271,55 @@ describe('runAgentLoop — dry-run', () => {
     expect(handle.fs.get(file)).toBe('bad'); // untouched
     expect(handle.git.commitLog).toHaveLength(0);
   });
+
+  it('honors the zero-coverage guard: escalates instead of calling the FixProvider for an uncovered file', async () => {
+    const file = toRepoRelativePath('src/a.ts');
+    const v1 = violation({ id: 'v1', ruleId: 'arch.no-dependency', file: 'src/a.ts' });
+    const fake = new FakeFixProvider();
+    const handle = createFakeEffects(fake, { 'src/a.ts': 'bad' });
+    handle.setGraph(graph([node('src/a.ts', 'core')], [])); // no test file in the graph at all
+    handle.setCheckRuns([checkRun([v1])]);
+
+    const result = await runAgentLoop(handle.effects, emptyRuleset, opts({ dryRun: true, allowUntested: false }));
+
+    expect(result.verdict).toBe('dry-run');
+    expect(result.groups[0]).toMatchObject({ status: 'escalated', file });
+    expect((result.groups[0] as { reason: string }).reason).toMatch(/zero test coverage/);
+    expect(fake.calls).toHaveLength(0); // the FixProvider must never see this file's contents
+  });
+
+  it('gate active + covered file: dry-run still plans (the guard escalates only when the gate fires, not whenever it is active)', async () => {
+    const file = toRepoRelativePath('src/a.ts');
+    const v1 = violation({ id: 'v1', ruleId: 'arch.no-dependency', file: 'src/a.ts' });
+    const fake = new FakeFixProvider();
+    fake.script(file, [{ files: [{ path: 'src/a.ts', edits: [{ search: 'bad', replace: 'good' }] }], rationale: 'fix' }]);
+    const handle = createFakeEffects(fake, { 'src/a.ts': 'bad', 'src/a.test.ts': 'x' });
+    // A test file transitively imports the target — covered — with the gate ACTIVE (allowUntested: false).
+    handle.setGraph(graph([node('src/a.ts', 'core'), node('src/a.test.ts', 'core')], [edge('src/a.test.ts', 'src/a.ts')]));
+    handle.setCheckRuns([checkRun([v1])]);
+
+    const result = await runAgentLoop(handle.effects, emptyRuleset, opts({ dryRun: true, allowUntested: false }));
+
+    expect(result.verdict).toBe('dry-run');
+    expect(result.groups[0]).toMatchObject({ status: 'dry-run', file });
+    expect(fake.calls).toHaveLength(1); // covered, so the FixProvider was consulted
+  });
+
+  it('--allow-untested still lets dry-run plan for an uncovered file', async () => {
+    const file = toRepoRelativePath('src/a.ts');
+    const v1 = violation({ id: 'v1', ruleId: 'arch.no-dependency', file: 'src/a.ts' });
+    const fake = new FakeFixProvider();
+    fake.script(file, [{ files: [{ path: 'src/a.ts', edits: [{ search: 'bad', replace: 'good' }] }], rationale: 'fix' }]);
+    const handle = createFakeEffects(fake, { 'src/a.ts': 'bad' });
+    handle.setGraph(graph([node('src/a.ts', 'core')], [])); // still no test file — uncovered
+    handle.setCheckRuns([checkRun([v1])]);
+
+    const result = await runAgentLoop(handle.effects, emptyRuleset, opts({ dryRun: true, allowUntested: true }));
+
+    expect(result.verdict).toBe('dry-run');
+    expect(result.groups[0]).toMatchObject({ status: 'dry-run', file });
+    expect(fake.calls).toHaveLength(1);
+  });
 });
 
 describe('runAgentLoop — config/`.align` proposal rejection', () => {
