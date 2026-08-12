@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Command } from 'commander';
 import {
+  areAdvisoriesComplete,
   buildUncertaintyAdvisories,
   computeDeepImportHits,
   computeUngovernedEdgeGaps,
@@ -231,7 +232,10 @@ async function collectDoctorReport(rootDir: string, program: Command | undefined
       // when the repo's own deps aren't installed, unresolved deep-subpath specifiers still
       // surface via the uncertain-source path above, but resolution (and therefore precision) is
       // necessarily partial -- flag it the same way a provisional `align check` verdict does.
-      const deepImportsIncomplete = advisories.some((a) => a.kind === 'missing-dependencies');
+      // `areAdvisoriesComplete` is the shared advisories-level predicate `isRunComplete` also
+      // delegates to (`core/src/gates/advisories.ts`) -- doctor only has a bare advisories array
+      // here, not a full `CheckRun`, so it calls the array-shaped half directly.
+      const deepImportsIncomplete = !areAdvisoriesComplete(advisories);
       for (const hit of computeDeepImportHits(graph, { allowlist: deepImportAllowlist })) {
         const partialNote = deepImportsIncomplete ? ' (results partial — dependencies not fully installed)' : '';
         advisories.push({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildBaselineGrowthAdvisories, buildUncertaintyAdvisories, isRunComplete } from '../../src/gates/advisories.js';
+import { areAdvisoriesComplete, buildBaselineGrowthAdvisories, buildUncertaintyAdvisories, isRunComplete } from '../../src/gates/advisories.js';
 import { computeFingerprint } from '../../src/baseline/fingerprint.js';
 import { toComponentName, toRepoRelativePath, toRuleId } from '../../src/types/branded.js';
 import type { BaselineEntry } from '../../src/baseline/store.js';
@@ -173,6 +173,29 @@ describe('buildBaselineGrowthAdvisories', () => {
 
   it('returns an empty array when there are no violations', () => {
     expect(buildBaselineGrowthAdvisories([], [])).toEqual([]);
+  });
+});
+
+// ADR 023 "second axis: incomplete ≠ errored" — the advisories-level half of the same predicate.
+// `isRunComplete` delegates to this (below); `doctor.ts` calls it directly since it only holds a
+// bare advisories array, not a full `CheckRun`. Pinned here so the `missing-dependencies` literal
+// stays compared in exactly one place.
+describe('areAdvisoriesComplete', () => {
+  it('is true for an empty advisories array', () => {
+    expect(areAdvisoriesComplete([])).toBe(true);
+  });
+
+  it('is false when a missing-dependencies advisory is present', () => {
+    expect(areAdvisoriesComplete([{ kind: 'missing-dependencies', message: 'deps missing' }])).toBe(false);
+  });
+
+  it('is true when other advisory kinds are present but not missing-dependencies', () => {
+    expect(
+      areAdvisoriesComplete([
+        { kind: 'uncertainty', message: 'x' },
+        { kind: 'stale-skill', message: 'y' },
+      ]),
+    ).toBe(true);
   });
 });
 

@@ -7,6 +7,18 @@ import type { Violation } from '../types/violation.js';
 import type { Advisory, CheckRun } from './types.js';
 
 /**
+ * Whether a set of advisories reflects a fully-resolved dependency graph — `false` iff a
+ * `missing-dependencies` advisory is present (built below, when unresolvable external specifiers
+ * are found). This is the ONE place the `missing-dependencies` literal is compared against —
+ * `isRunComplete` (below) delegates to it for the `CheckRun`-shaped callers, and a caller that only
+ * holds a bare advisories array (no full `CheckRun` to build) can call it directly instead of
+ * re-deriving the same fact with its own `.some(...)`.
+ */
+export function areAdvisoriesComplete(advisories: readonly Advisory[]): boolean {
+  return !advisories.some((a) => a.kind === 'missing-dependencies');
+}
+
+/**
  * Whether a `CheckRun` resolved the whole dependency graph — `false` iff a `missing-dependencies`
  * advisory fired (built below, when unresolvable external specifiers are found). This is the ONE
  * shared predicate for that axis (ADR 023's "second axis: incomplete ≠ errored"): it started as an
@@ -20,7 +32,7 @@ import type { Advisory, CheckRun } from './types.js';
  * this function; neither re-derives it from `run.advisories`.
  */
 export function isRunComplete(run: CheckRun): boolean {
-  return !run.advisories.some((a) => a.kind === 'missing-dependencies');
+  return areAdvisoriesComplete(run.advisories);
 }
 
 /**
