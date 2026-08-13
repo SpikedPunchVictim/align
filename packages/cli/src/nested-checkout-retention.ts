@@ -1,4 +1,4 @@
-import type { RepoRelativePath } from '@spikedpunch/align-core';
+import { isUnderSkippedCheckout, type RepoRelativePath } from '@spikedpunch/align-core';
 
 /**
  * Shared "unobservable, not fixed" test for the two destructive baseline-write consumers
@@ -18,6 +18,14 @@ import type { RepoRelativePath } from '@spikedpunch/align-core';
  * taints the WHOLE run's completeness), a skipped nested checkout names its own paths precisely —
  * we know exactly which entries are affected, so only THOSE are retained. Every other orphan in the
  * same run is still safe to prune/drop normally; an all-or-nothing refusal would be needless here.
+ *
+ * The underlying "is this file inside one of these paths" containment test (`isUnderSkippedCheckout`)
+ * lives in `@spikedpunch/align-core` rather than here, because `InMemoryBaselineStore.applyMoves`
+ * (`packages/core/src/baseline/store.ts`) needs the identical test for a second hazard this module
+ * doesn't cover by itself: a checkout-resident orphan being misclassified as "moved" rather than
+ * "removed" (F1, review 2026-08-12) — `applyMoves` bypasses this module's `retained`/`forfeited`
+ * partition entirely, since a "moved" entry never reaches it. One implementation, imported here and
+ * by `store.ts`, keeps the two consumers from drifting into independently-maintained copies.
  */
 export interface CheckoutRetentionSplit<T> {
   /** File lives at or under a path in `skippedNestedCheckouts` — unobservable this scan, not
@@ -25,14 +33,6 @@ export interface CheckoutRetentionSplit<T> {
   readonly retained: readonly T[];
   /** Every other candidate — the destructive write's normal path (delete/omit as before). */
   readonly forfeited: readonly T[];
-}
-
-/** `file` lives at or under `dir` — the same "component-relative directory" containment test used
- * throughout this codebase for a `RepoRelativePath` pair (e.g. `components/registry.ts`'s
- * `skippedCheckoutsMatchingSelector`), spelled out here rather than imported since it's a single
- * string comparison, not shared logic worth a cross-package dependency for. */
-function isUnderDirectory(file: RepoRelativePath, dir: RepoRelativePath): boolean {
-  return file === dir || file.startsWith(`${dir}/`);
 }
 
 /**
@@ -50,7 +50,7 @@ export function partitionSkippedCheckoutCandidates<T extends { readonly file: Re
   const retained: T[] = [];
   const forfeited: T[] = [];
   for (const candidate of candidates) {
-    const retain = skippedNestedCheckouts.some((dir) => isUnderDirectory(candidate.file, dir));
+    const retain = isUnderSkippedCheckout(candidate.file, skippedNestedCheckouts);
     (retain ? retained : forfeited).push(candidate);
   }
   return { retained, forfeited };
@@ -68,7 +68,7 @@ export function describeRetainedEntries<T extends { readonly file: RepoRelativeP
   skippedNestedCheckouts: readonly RepoRelativePath[],
 ): string {
   const relevantDirs = skippedNestedCheckouts
-    .filter((dir) => retained.some((entry) => isUnderDirectory(entry.file, dir)))
+    .filter((dir) => retained.some((entry) => isUnderSkippedCheckout(entry.file, [dir])))
     .sort((a, b) => a.localeCompare(b));
   return (
     `Retained ${retained.length} ${retained.length === 1 ? 'entry' : 'entries'}: ` +

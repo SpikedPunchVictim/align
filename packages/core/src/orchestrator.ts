@@ -190,7 +190,12 @@ export class GateOrchestrator {
     // graph's node files, never derived from `allViolations` (a fixed file has no violations, so
     // deriving from violations would make every fixed file look deleted and defeat the fix).
     const knownFiles = new Set(graph.nodes.map((n) => n.file));
-    const moves = this.baselineStore.reconcileMoves(allViolations, knownFiles);
+    // `graph.skippedNestedCheckouts` (F1, task #25 forged-transfer fix, review 2026-08-12): passed
+    // through so a file this scan auto-excluded is never mistaken for a real rename by
+    // `applyMoves` — see `store.ts`'s `reconcileMoves` doc comment. This is the unguarded path the
+    // review named: unlike `baseline prune`, `align check` runs this on every invocation with no
+    // completeness gate at all, so it's the one place the fix matters even without `--allow-incomplete`.
+    const moves = this.baselineStore.reconcileMoves(allViolations, knownFiles, graph.skippedNestedCheckouts);
 
     const newViolations = allViolations.filter((v) => !this.baselineStore.isBaselined(v.id));
     const baselinedCount = allViolations.length - newViolations.length;

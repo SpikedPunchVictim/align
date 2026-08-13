@@ -252,7 +252,18 @@ export async function runUpgrade(rootDir: string, options: UpgradeOptions): Prom
       return reportCliError('align upgrade', err);
     }
 
-    pruneOutcome = await reconcilePrune(rootDir, run, previousBaseline, allViolations, knownFiles, options, isInteractive, yes, confirmFn);
+    pruneOutcome = await reconcilePrune(
+      rootDir,
+      run,
+      previousBaseline,
+      allViolations,
+      knownFiles,
+      fullRun.skippedNestedCheckouts,
+      options,
+      isInteractive,
+      yes,
+      confirmFn,
+    );
     acceptOutcome = await reconcileAccept(rootDir, acceptAtRisk, options, isInteractive, yes, confirmFn);
   }
 
@@ -311,13 +322,20 @@ async function reconcilePrune(
   previousBaseline: readonly BaselineEntry[],
   allViolations: CheckRun['gates'][number]['violations'],
   knownFiles: ReadonlySet<RepoRelativePath>,
+  skippedNestedCheckouts: readonly RepoRelativePath[],
   options: UpgradeOptions,
   isInteractive: boolean,
   yes: boolean,
   confirmFn: (question: string) => Promise<boolean>,
 ): Promise<ActionOutcome> {
   const previewStore = new InMemoryBaselineStore(previousBaseline);
-  const pruneAtRisk = previewStore.prune(allViolations, knownFiles).removed.length;
+  // `skippedNestedCheckouts` (F1, task #25 forged-transfer fix, review 2026-08-12): this is only a
+  // PREVIEW count for the consent prompt below — the authoritative mutation happens inside
+  // `baselinePrune` itself, which independently applies the same fix (`commands/baseline.ts`). Passed
+  // through here anyway so the number named in the prompt agrees with what `baselinePrune` actually
+  // does, rather than over-counting checkout-resident entries as "at risk" when retention would save
+  // them.
+  const pruneAtRisk = previewStore.prune(allViolations, knownFiles, skippedNestedCheckouts).removed.length;
   if (pruneAtRisk === 0) return { actionable: false, reconciled: true };
 
   const incompleteRefusal = refuseIfRunIncomplete('align upgrade', run, pruneAtRisk, options.allowIncomplete ?? false);

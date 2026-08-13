@@ -228,10 +228,27 @@ describe('the other mutating consumers of a run’s violations', () => {
   // and `baselineStore.snapshot()`) rather than a proof by nested-checkout/errored-fixture, so a
   // future edit that adds a guard here — or removes the guarantee this function relies on — fails
   // this test directly instead of only failing some other command's end-to-end assertion.
+  //
+  // CORRECTED (review 2026-08-12, F1): this test originally justified the exemption with "a transfer
+  // can never destroy the consent record it protects." That claim was false as stated — CLAUDE.md
+  // rule 5's exact shape, a doc comment asserting a guarantee nothing implemented. F1 disproved it:
+  // `InMemoryBaselineStore.applyMoves` (`store.ts`) could misclassify an orphaned entry as "moved"
+  // when its file lived inside a nested checkout the scan auto-excluded (task #25), silently forging
+  // that entry's `acceptedAt`/`acceptedBy` onto a genuinely new, never-reviewed violation elsewhere —
+  // reachable through exactly this function, on exactly an errored run, since `persistMovedBaseline`
+  // just persists whatever the store already decided. `applyMoves` now treats a file under
+  // `skippedNestedCheckouts` as still known (closing that hole — see `store.ts`'s `reconcileMoves`
+  // doc comment and the F1 tests in `test/baseline.test.ts` / `nested-checkout-scan-scope.test.ts`),
+  // but that fix lives in `applyMoves`'s classification, not in this function. What THIS function
+  // actually guarantees — and always did — is narrower: it performs no deletion of its own. It is a
+  // pure write of `baselineStore.snapshot()`, so it cannot itself be the mechanism that loses an
+  // entry; whatever `applyMoves` classified as a move is what gets persisted, correctly or not. That
+  // narrower claim is what ADR 023's exemption actually rests on (a transfer-only consumer is exempt
+  // from delete-focused guards because it doesn't delete), and it is what this test still pins.
   it(
     '`persistMovedBaseline` (commands/check.ts) is transfer-only and exempt from ADR 023 — it writes ' +
-      'a move-transfer on an ERRORED run without any refusal, because a transfer can never destroy the ' +
-      'consent record it protects',
+      'a move-transfer on an ERRORED run without any refusal, because it performs no deletion of its ' +
+      "own: it only persists whatever InMemoryBaselineStore.applyMoves already classified as a move",
     async () => {
       tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-persist-moved-baseline-test-'));
       const store = new InMemoryBaselineStore([

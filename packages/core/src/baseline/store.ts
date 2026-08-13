@@ -1,6 +1,7 @@
 import type { RepoRelativePath, RuleId, ViolationId } from '../types/branded.js';
 import type { Violation } from '../types/violation.js';
 import { computeContentFingerprint } from './fingerprint.js';
+import { isUnderSkippedCheckout } from './skipped-checkouts.js';
 
 export interface BaselineEntry {
   readonly fingerprint: ViolationId; // snippet-hash, not line-based (ADR 006)
@@ -37,8 +38,18 @@ export interface BaselineStore {
    * its graph's node files, the security gate its manifest inventory's files, ADR 013). It gates
    * move-transfer the same way `reconcileMoves` below does — see that doc comment for why. Callers
    * MUST derive it from the scan's own file list, never from `currentViolations` (a fixed file has
-   * no violations, so deriving from violations would make every fixed file look deleted). */
-  prune(currentViolations: readonly Violation[], knownFiles: ReadonlySet<RepoRelativePath>): PruneResult;
+   * no violations, so deriving from violations would make every fixed file look deleted).
+   *
+   * `skippedNestedCheckouts` (task #25 forged-transfer fix, F1): repo-relative paths a scan
+   * auto-excluded because they carry their own `.git`. An entry whose file lives under one of these
+   * is treated as "still known" the same as if it were literally in `knownFiles` — see
+   * `reconcileMoves`'s doc comment below for why. Defaults to `[]` so every pre-existing caller
+   * (tests, the security gate, which has no notion of nested checkouts) keeps working unchanged. */
+  prune(
+    currentViolations: readonly Violation[],
+    knownFiles: ReadonlySet<RepoRelativePath>,
+    skippedNestedCheckouts?: readonly RepoRelativePath[],
+  ): PruneResult;
   /** Move-transfer only (ADR 006): for every baseline entry whose structural fingerprint is no
    * longer present in `currentViolations` AND whose recorded `file` is no longer in `knownFiles`
    * (a real rename/deletion — FRAGILE #7, bug hunt 2026-08-03), look for a current, not-yet-
@@ -52,10 +63,22 @@ export interface BaselineStore {
    *
    * `knownFiles` is the current scan's file set, domain-agnostic (never a `DependencyGraph` — the
    * `security` gate has no graph, only a `ManifestInventory`, ADR 013). Callers MUST derive it from
-   * the scan's own file list, never from `currentViolations` (see `prune`'s doc comment above). */
+   * the scan's own file list, never from `currentViolations` (see `prune`'s doc comment above).
+   *
+   * `skippedNestedCheckouts` (task #25 forged-transfer fix, F1, bug hunt/review 2026-08-12):
+   * task #25's nested-checkout auto-exclusion drops a file from `knownFiles` the same way a real
+   * rename does, but for an unrelated reason — the file didn't move, the scan simply couldn't see
+   * it. Without this, that absence alone satisfied FRAGILE #7's "orphan's own file is gone" test, so
+   * a checkout-resident entry whose `contentFingerprint` happened to collide with a live,
+   * never-accepted violation elsewhere (the expected case for a vendored copy of the same code) was
+   * silently classified as "moved" — forging the entry's `acceptedAt`/`acceptedBy` onto a violation
+   * nobody ever reviewed. Treating a file under one of these paths as "still known" routes it to
+   * `unmatchedOrphans` instead (the exact arm `prune`'s skipped-checkout retention already
+   * protects), never to a content-fingerprint search. Defaults to `[]`. */
   reconcileMoves(
     currentViolations: readonly Violation[],
     knownFiles: ReadonlySet<RepoRelativePath>,
+    skippedNestedCheckouts?: readonly RepoRelativePath[],
   ): readonly { readonly from: ViolationId; readonly to: ViolationId }[];
   show(filter?: { readonly ruleId?: RuleId }): readonly BaselineEntry[];
   /** Not part of docs/core-interfaces.md's contract — the CLI's persistence boundary needs a
@@ -136,12 +159,17 @@ export class InMemoryBaselineStore implements BaselineStore {
   reconcileMoves(
     currentViolations: readonly Violation[],
     knownFiles: ReadonlySet<RepoRelativePath>,
+    skippedNestedCheckouts: readonly RepoRelativePath[] = [],
   ): readonly { readonly from: ViolationId; readonly to: ViolationId }[] {
-    return this.applyMoves(currentViolations, knownFiles).moved;
+    return this.applyMoves(currentViolations, knownFiles, skippedNestedCheckouts).moved;
   }
 
-  prune(currentViolations: readonly Violation[], knownFiles: ReadonlySet<RepoRelativePath>): PruneResult {
-    const { moved, unmatchedOrphans } = this.applyMoves(currentViolations, knownFiles);
+  prune(
+    currentViolations: readonly Violation[],
+    knownFiles: ReadonlySet<RepoRelativePath>,
+    skippedNestedCheckouts: readonly RepoRelativePath[] = [],
+  ): PruneResult {
+    const { moved, unmatchedOrphans } = this.applyMoves(currentViolations, knownFiles, skippedNestedCheckouts);
     for (const fingerprint of unmatchedOrphans) this.entries.delete(fingerprint);
     return { removed: unmatchedOrphans, moved };
   }
@@ -151,7 +179,11 @@ export class InMemoryBaselineStore implements BaselineStore {
    * two callers is what happens to an orphaned entry that finds no match (left alone for
    * `reconcileMoves`, deleted for `prune`), so that decision is made by the caller, not here.
    */
-  private applyMoves(currentViolations: readonly Violation[], knownFiles: ReadonlySet<RepoRelativePath>): MoveResult {
+  private applyMoves(
+    currentViolations: readonly Violation[],
+    knownFiles: ReadonlySet<RepoRelativePath>,
+    skippedNestedCheckouts: readonly RepoRelativePath[] = [],
+  ): MoveResult {
     const currentIds = new Set(currentViolations.map((v) => v.id));
     const orphaned = [...this.entries.values()].filter((e) => !currentIds.has(e.fingerprint));
     if (orphaned.length === 0) return { moved: [], unmatchedOrphans: [] };
@@ -175,7 +207,18 @@ export class InMemoryBaselineStore implements BaselineStore {
       // scan — a real rename/deletion. If it's still known, the violation there was fixed, so an
       // identical-looking violation elsewhere is a genuinely new violation, not a move, even if the
       // content fingerprint collides. This check runs before any content-match lookup.
-      if (knownFiles.has(entry.file)) {
+      //
+      // F1 (task #25 forged-transfer fix, review 2026-08-12): a file under `skippedNestedCheckouts`
+      // is ALSO treated as "still known" here, even though it's absent from `knownFiles` — the scan
+      // didn't observe it because it auto-excluded the checkout, not because the file moved. Without
+      // this, an entry like a vendored submodule's copy of some code — same ruleId, identical
+      // trimmed import line as a live, never-accepted violation elsewhere, the expected case for a
+      // vendored copy — got misclassified as "moved," forging its acceptedAt/acceptedBy onto a
+      // violation nobody reviewed. Folding it into this same branch routes it to `unmatchedOrphans`,
+      // the exact arm `baseline prune`'s skipped-checkout retention (`nested-checkout-retention.ts`)
+      // already protects from deletion — so this fix composes with that retention instead of needing
+      // a second mechanism.
+      if (knownFiles.has(entry.file) || isUnderSkippedCheckout(entry.file, skippedNestedCheckouts)) {
         unmatchedOrphans.push(entry.fingerprint);
         continue;
       }

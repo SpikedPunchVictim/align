@@ -302,6 +302,98 @@ describe('baseline move-transfer (ADR 006)', () => {
       expect(store.show()).toHaveLength(1);
     });
 
+    // F1 (task #25 forged-transfer fix, review 2026-08-12): a file the scan auto-excluded because
+    // it lives inside a nested checkout (`CheckRun.skippedNestedCheckouts`) is absent from
+    // `knownFiles` for a reason that has nothing to do with the file moving. Before this fix,
+    // `applyMoves` read that absence exactly like a real rename/deletion and went looking for a
+    // content-fingerprint match — which a vendored copy of the same code (same ruleId, identical
+    // trimmed import line) reliably provides, forging the orphan's `acceptedAt`/`acceptedBy` onto a
+    // live, never-accepted violation elsewhere.
+    describe('F1 fix: a skipped-checkout-resident orphan is never mistaken for a move', () => {
+      it('reconcileMoves leaves a checkout-resident orphan in place instead of transferring it onto a colliding, never-accepted violation', () => {
+        const store = new InMemoryBaselineStore();
+        const original = makeViolation({
+          id: computeFingerprint(['no-dependency', 'r1', 'vendor/submodule/service.ts', 'target.ts', './target']),
+          file: toRepoRelativePath('vendor/submodule/service.ts'),
+          snippet: `import './target'`,
+        });
+        store.accept([original], 'manual');
+
+        // A live, NEVER-accepted violation with an identical content fingerprint (same ruleId +
+        // snippet) in a different file — the expected shape for a vendored copy of the same import.
+        const liveUnaccepted = makeViolation({
+          id: computeFingerprint(['no-dependency', 'r1', 'lib/service.ts', 'target.ts', './target']),
+          file: toRepoRelativePath('lib/service.ts'),
+          snippet: `import './target'`,
+        });
+
+        // `vendor/submodule/service.ts` is absent from `knownFiles` (the scan auto-excluded the
+        // checkout) but the checkout is named in `skippedNestedCheckouts` — the "still known" signal
+        // this fix adds.
+        const knownFiles = new Set([toRepoRelativePath('lib/service.ts')]);
+        const result = store.reconcileMoves([liveUnaccepted], knownFiles, [toRepoRelativePath('vendor/submodule')]);
+
+        expect(result).toEqual([]); // no forged transfer reported
+        expect(store.isBaselined(liveUnaccepted.id)).toBe(false); // lib/service.ts still shows red
+        expect(store.isBaselined(original.id)).toBe(true); // orphan untouched — same fingerprint, same entry
+        expect(store.show()[0]?.acceptedBy).toBe('manual');
+        expect(store.show()[0]?.file).toBe('vendor/submodule/service.ts'); // provenance never moved
+      });
+
+      it('prune classifies the checkout-resident orphan as removed, not moved — the arm the CLI\'s retention partition protects', () => {
+        const store = new InMemoryBaselineStore();
+        const original = makeViolation({
+          id: computeFingerprint(['no-dependency', 'r1', 'vendor/submodule/service.ts', 'target.ts', './target']),
+          file: toRepoRelativePath('vendor/submodule/service.ts'),
+          snippet: `import './target'`,
+        });
+        store.accept([original], 'manual');
+
+        const liveUnaccepted = makeViolation({
+          id: computeFingerprint(['no-dependency', 'r1', 'lib/service.ts', 'target.ts', './target']),
+          file: toRepoRelativePath('lib/service.ts'),
+          snippet: `import './target'`,
+        });
+
+        const knownFiles = new Set([toRepoRelativePath('lib/service.ts')]);
+        const result = store.prune([liveUnaccepted], knownFiles, [toRepoRelativePath('vendor/submodule')]);
+
+        // Landed in `removed` (the arm `nested-checkout-retention.ts` partitions and re-adds),
+        // never in `moved` — this is the property the CLI's retention logic depends on.
+        expect(result.moved).toEqual([]);
+        expect(result.removed).toEqual([original.id]);
+        expect(store.isBaselined(liveUnaccepted.id)).toBe(false); // never silently pre-accepted
+      });
+
+      it('a genuine rename outside any skipped checkout still transfers (no regression of FRAGILE #7)', () => {
+        const store = new InMemoryBaselineStore();
+        const original = makeViolation({
+          id: computeFingerprint(['no-dependency', 'r1', 'a.ts', 'target.ts', './target']),
+          file: toRepoRelativePath('a.ts'),
+          snippet: `import './target'`,
+        });
+        store.accept([original], 'manual');
+
+        // "a.ts" renamed to "renamed.ts" — absent from knownFiles entirely, and unrelated to any
+        // skipped checkout (an unrelated checkout path is passed to prove the new parameter is
+        // scoped, not a blanket suppression of move detection).
+        const moved = makeViolation({
+          id: computeFingerprint(['no-dependency', 'r1', 'renamed.ts', 'target.ts', './target']),
+          file: toRepoRelativePath('renamed.ts'),
+          snippet: `import './target'`,
+        });
+
+        const result = store.reconcileMoves(
+          [moved],
+          new Set([toRepoRelativePath('renamed.ts')]),
+          [toRepoRelativePath('vendor/unrelated-checkout')],
+        );
+        expect(result).toEqual([{ from: original.id, to: moved.id }]);
+        expect(store.isBaselined(moved.id)).toBe(true);
+        expect(store.isBaselined(original.id)).toBe(false);
+      });
+    });
+
     it('two orphans competing for one content-matching candidate: only one is consumed (existing splice behaviour)', () => {
       const store = new InMemoryBaselineStore();
       const original1 = makeViolation({

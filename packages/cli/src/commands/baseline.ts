@@ -107,6 +107,17 @@ export async function baselineAccept(rootDir: string, ruleId?: string, telemetry
  * (forfeited — pruned exactly as before). Tier 2's `refuseIfRunIncomplete` is evaluated against
  * the FORFEITED count only, since a retained entry was never actually at risk once retention put it
  * back.
+ *
+ * That retention only ever partitioned `result.removed` — it had NO effect on `result.moved` (F1,
+ * review 2026-08-12): `store.prune`'s own `applyMoves` step could misclassify a checkout-resident
+ * orphan as "moved" instead of "removed" whenever its `contentFingerprint` collided with a live,
+ * never-accepted violation elsewhere — the expected case for a vendored copy of the same code, not
+ * an exotic one — silently forging the entry's `acceptedAt`/`acceptedBy` onto that unrelated
+ * violation. A "moved" entry never reaches `result.removed`, so the retention partition below never
+ * even saw it. Fixed at the source: `store.prune` is now passed `run.skippedNestedCheckouts` so
+ * `applyMoves` treats a checkout-resident file as "still known" the same as a file literally present
+ * in `knownFiles` — it is routed to `unmatchedOrphans` (this function's `result.removed`) instead of
+ * being offered up for a content match, landing it in the exact arm retention already protects.
  */
 export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, telemetryPreConfig?: boolean): Promise<number> {
   // loadConfig can fail six ways, including a corrupt `.align/generated-rules.json` (bug hunt
@@ -137,7 +148,13 @@ export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, 
   } catch (err) {
     return reportCliError('align baseline prune', err);
   }
-  const result = store.prune(allViolations, knownFiles);
+  // `run.skippedNestedCheckouts` (F1, task #25 forged-transfer fix, review 2026-08-12): without
+  // this, `store.prune`'s own move-transfer step (`applyMoves`) could misclassify an orphaned entry
+  // whose file lives inside a skipped checkout as "moved" via a colliding content fingerprint,
+  // forging its acceptedAt/acceptedBy onto a genuinely new, never-accepted violation elsewhere —
+  // bypassing the retention partition below entirely, since a "moved" entry never reaches
+  // `result.removed`. See `store.ts`'s `reconcileMoves`/`applyMoves` doc comments.
+  const result = store.prune(allViolations, knownFiles, run.skippedNestedCheckouts);
   // The third hazard (see this function's doc comment): `store.prune` above already deleted every
   // unmatched orphan, INCLUDING ones whose file is unobservable this scan only because it's inside
   // a skipped nested checkout, not because the violation is fixed. `store.prune`'s `PruneResult`

@@ -328,3 +328,141 @@ describe(
     );
   },
 );
+
+/**
+ * A real `arch.no-dependency` violation in `lib/service.ts` — NEVER accepted — whose import line
+ * is what a vendored copy of the same code, checked into a nested submodule, would reproduce
+ * verbatim. Built plainly (no checkout yet); the test itself adds the checkout and seeds the
+ * baseline entry, because the entry's `contentFingerprint` must be derived from THIS repo's real
+ * scan (same ruleId + identical trimmed import line), not invented — that is exactly the
+ * "not exotic" collision the F1 review names: same ruleId + identical trimmed import line is the
+ * expected case for a vendored copy of the same code.
+ */
+function buildRepoWithForgeableTransfer(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-forged-transfer-test-'));
+  fs.mkdirSync(path.join(dir, 'src', 'ui'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'src', 'ui', 'component.ts'), 'export const x = 1;\n', 'utf8');
+  fs.mkdirSync(path.join(dir, 'lib'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'lib', 'service.ts'),
+    `import { x } from '../src/ui/component.js';\nexport const y = x;\n`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(dir, 'align.config.ts'),
+    `import { defineProject } from '@spikedpunch/align-core/dsl';\n` +
+      `export default defineProject({\n` +
+      `  components: { api: 'lib/**', ui: 'src/ui/**' },\n` +
+      `  rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],\n` +
+      `});\n`,
+    'utf8',
+  );
+  linkAlignCore(dir);
+  return dir;
+}
+
+/** Adds a nested git checkout marker, never opted back in via `includeNestedCheckouts` — every
+ * scan auto-excludes it (task #25 default). Matches the other fixtures' `.git`-as-a-file shape. */
+function addSkippedCheckout(dir: string): void {
+  fs.mkdirSync(path.join(dir, 'vendor', 'submodule'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'vendor', 'submodule', '.git'), 'gitdir: /elsewhere/.git/worktrees/submodule\n', 'utf8');
+}
+
+describe(
+  'a checkout-resident baseline entry is never forged onto a live, never-accepted violation via a ' +
+    'colliding content fingerprint (F1, review 2026-08-12 — the reviewer-reproduced defect)',
+  () => {
+    it(
+      "`align baseline prune`: the checkout entry survives with its ORIGINAL acceptedAt/acceptedBy, " +
+        "and lib/service.ts's violation is NOT silently pre-accepted with forged provenance",
+      async () => {
+        tmpDir = buildRepoWithForgeableTransfer();
+
+        // Establish the REAL content fingerprint for `lib/service.ts`'s violation by actually
+        // accepting it once — this is what `store.accept` would compute from the live scan, the
+        // exact recipe `applyMoves`'s content-match step re-derives later.
+        expect(await runCheck(tmpDir, { json: false })).toBe(1);
+        expect(await baselineAccept(tmpDir)).toBe(0);
+        const accepted = readBaseline(tmpDir);
+        expect(accepted).toHaveLength(1);
+        const contentFingerprint = accepted[0]?.contentFingerprint;
+        const ruleId = accepted[0]?.ruleId;
+        expect(contentFingerprint).toBeDefined();
+        expect(ruleId).toBeDefined();
+
+        // Roll `lib/service.ts` back to unaccepted/live by REPLACING the baseline with a single
+        // entry for a DIFFERENT file — `vendor/submodule/service.ts`, a vendored copy inside a
+        // nested checkout — carrying the SAME content fingerprint (same ruleId, identical trimmed
+        // import line) and a distinguishable, irreplaceable `acceptedAt`/`acceptedBy`.
+        addSkippedCheckout(tmpDir);
+        writeBaseline(tmpDir, [
+          {
+            fingerprint: toViolationId('vendored-copy'),
+            ruleId: ruleId!,
+            file: toRepoRelativePath('vendor/submodule/service.ts'),
+            acceptedAt: 1111,
+            acceptedBy: 'manual',
+            contentFingerprint,
+          },
+        ]);
+
+        // `lib/service.ts`'s violation is live and unaccepted again.
+        expect(await runCheck(tmpDir, { json: false })).toBe(1);
+
+        const { result: code, logs } = await withCapturedLogs(() => baselinePrune(tmpDir));
+        expect(code).toBe(0);
+        expect(logs).toMatch(/Pruned 0 fixed violation\(s\)/);
+        expect(logs).toMatch(/0 entries transferred \(file moves\)/); // no bogus move reported
+        expect(logs).toMatch(/Retained 1 entry/);
+
+        const after = readBaseline(tmpDir);
+        expect(after).toHaveLength(1);
+        expect(after[0]?.file).toBe('vendor/submodule/service.ts'); // provenance never moved
+        expect(after[0]?.acceptedAt).toBe(1111); // original consent record intact
+        expect(after[0]?.acceptedBy).toBe('manual');
+
+        // The live violation was never silently pre-accepted with forged provenance.
+        expect(await runCheck(tmpDir, { json: false })).toBe(1);
+      },
+    );
+
+    it(
+      "`align check` (the unguarded reconcileMoves path, commands/check.ts's persistMovedBaseline): " +
+        'a plain check — no `baseline prune` involved at all — must not forge the transfer either',
+      async () => {
+        tmpDir = buildRepoWithForgeableTransfer();
+
+        expect(await runCheck(tmpDir, { json: false })).toBe(1);
+        expect(await baselineAccept(tmpDir)).toBe(0);
+        const accepted = readBaseline(tmpDir);
+        const contentFingerprint = accepted[0]?.contentFingerprint;
+        const ruleId = accepted[0]?.ruleId;
+        expect(contentFingerprint).toBeDefined();
+        expect(ruleId).toBeDefined();
+
+        addSkippedCheckout(tmpDir);
+        writeBaseline(tmpDir, [
+          {
+            fingerprint: toViolationId('vendored-copy'),
+            ruleId: ruleId!,
+            file: toRepoRelativePath('vendor/submodule/service.ts'),
+            acceptedAt: 2222,
+            acceptedBy: 'manual',
+            contentFingerprint,
+          },
+        ]);
+
+        // A plain `align check` runs `orchestrator.check`'s `reconcileMoves` unconditionally
+        // (`persistMovedBaseline`, `commands/check.ts`) — no completeness gate protects this path at
+        // all, unlike `baseline prune`'s ADR 023 tier 2. It must still not forge the transfer.
+        expect(await runCheck(tmpDir, { json: false })).toBe(1); // lib/service.ts still red
+
+        const after = readBaseline(tmpDir);
+        expect(after).toHaveLength(1);
+        expect(after[0]?.file).toBe('vendor/submodule/service.ts');
+        expect(after[0]?.acceptedAt).toBe(2222);
+        expect(after[0]?.acceptedBy).toBe('manual');
+      },
+    );
+  },
+);
