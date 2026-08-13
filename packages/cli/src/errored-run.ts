@@ -68,7 +68,11 @@ export function refuseIfRunErrored(command: string, run: CheckRun, refusal: stri
  * refused even on `complete: false` (a pure move-transfer, or a no-op, proceeds unconditionally).
  *
  * `atRiskCount` is supplied by the caller rather than recomputed here because the two current call
- * sites already have to compute it to do their own work (`store.prune`'s `removed.length`); this
+ * sites (`baselinePrune` and `reconcilePrune`'s preview of it) already have to compute it to do
+ * their own work — and it is NOT simply `store.prune`'s `removed.length`: both derive it as the
+ * `forfeited` half of `partitionSkippedCheckoutCandidates`, since an entry retention writes straight
+ * back was never at risk of deletion (verified 2026-08-13, when the preview still used the raw
+ * `removed.length` and refused over entries the mutation would have retained); this
  * function stays a pure decision (`CheckRun` × count × flag → refuse or not) rather than reaching
  * into a `BaselineStore` itself, keeping it usable from any future destructive site regardless of
  * what kind of store or overwrite it performs.

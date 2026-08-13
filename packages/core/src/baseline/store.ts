@@ -43,12 +43,15 @@ export interface BaselineStore {
    * `skippedNestedCheckouts` (task #25 forged-transfer fix, F1): repo-relative paths a scan
    * auto-excluded because they carry their own `.git`. An entry whose file lives under one of these
    * is treated as "still known" the same as if it were literally in `knownFiles` — see
-   * `reconcileMoves`'s doc comment below for why. Defaults to `[]` so every pre-existing caller
-   * (tests, the security gate, which has no notion of nested checkouts) keeps working unchanged. */
+   * `reconcileMoves`'s doc comment below for why. REQUIRED on this interface (review 2026-08-13): it
+   * was optional, and one of the two production call sites that could omit it did — `runSecurityGate`
+   * (`orchestrator.ts`) called `reconcileMoves` with two arguments, silently reinstating the pre-fix
+   * behaviour with no type error. A caller with genuinely nothing to pass now states that by passing
+   * `[]`, which is a visible, reviewable decision rather than an invisible default. */
   prune(
     currentViolations: readonly Violation[],
     knownFiles: ReadonlySet<RepoRelativePath>,
-    skippedNestedCheckouts?: readonly RepoRelativePath[],
+    skippedNestedCheckouts: readonly RepoRelativePath[],
   ): PruneResult;
   /** Move-transfer only (ADR 006): for every baseline entry whose structural fingerprint is no
    * longer present in `currentViolations` AND whose recorded `file` is no longer in `knownFiles`
@@ -74,11 +77,12 @@ export interface BaselineStore {
    * silently classified as "moved" — forging the entry's `acceptedAt`/`acceptedBy` onto a violation
    * nobody ever reviewed. Treating a file under one of these paths as "still known" routes it to
    * `unmatchedOrphans` instead (the exact arm `prune`'s skipped-checkout retention already
-   * protects), never to a content-fingerprint search. Defaults to `[]`. */
+   * protects), never to a content-fingerprint search. REQUIRED — see `prune`'s note above for why
+   * the optional version was itself the defect-propagation hazard. */
   reconcileMoves(
     currentViolations: readonly Violation[],
     knownFiles: ReadonlySet<RepoRelativePath>,
-    skippedNestedCheckouts?: readonly RepoRelativePath[],
+    skippedNestedCheckouts: readonly RepoRelativePath[],
   ): readonly { readonly from: ViolationId; readonly to: ViolationId }[];
   show(filter?: { readonly ruleId?: RuleId }): readonly BaselineEntry[];
   /** Not part of docs/core-interfaces.md's contract — the CLI's persistence boundary needs a
@@ -156,6 +160,13 @@ export class InMemoryBaselineStore implements BaselineStore {
     );
   }
 
+  // `= []` on the CLASS implementations of `reconcileMoves`/`prune`/`applyMoves` below, while the
+  // INTERFACE declares the parameter required (see its doc comments): a default satisfies a required
+  // interface parameter, which keeps the 11 two-argument calls in `core/test/baseline.test.ts` (which
+  // construct this class directly) compiling. The residual this deliberately leaves: a caller
+  // holding the concrete class rather than `BaselineStore` can still omit it. Verified 2026-08-13 —
+  // no production code does; the only two `.prune(...)` call sites (`commands/baseline.ts`,
+  // `commands/upgrade.ts`) are class-typed and both pass the paths explicitly.
   reconcileMoves(
     currentViolations: readonly Violation[],
     knownFiles: ReadonlySet<RepoRelativePath>,

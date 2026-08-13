@@ -237,9 +237,11 @@ describe('the other mutating consumers of a run’s violations', () => {
   // that entry's `acceptedAt`/`acceptedBy` onto a genuinely new, never-reviewed violation elsewhere —
   // reachable through exactly this function, on exactly an errored run, since `persistMovedBaseline`
   // just persists whatever the store already decided. `applyMoves` now treats a file under
-  // `skippedNestedCheckouts` as still known (closing that hole — see `store.ts`'s `reconcileMoves`
-  // doc comment and the F1 tests in `test/baseline.test.ts` / `nested-checkout-scan-scope.test.ts`),
-  // but that fix lives in `applyMoves`'s classification, not in this function. What THIS function
+  // `skippedNestedCheckouts` as still known, and `BaselineStore` makes passing those paths mandatory
+  // (review 2026-08-13), so no caller can silently fall back to the pre-fix behaviour; the security
+  // gate passes `[]` because its manifest domain performs no nested-checkout auto-exclusion at all
+  // (pinned by `plugin-typescript/test/manifest.test.ts`). That fix lives in `applyMoves`'s
+  // classification and its callers, not in this function. What THIS function
   // actually guarantees — and always did — is narrower: it performs no deletion of its own. It is a
   // pure write of `baselineStore.snapshot()`, so it cannot itself be the mechanism that loses an
   // entry; whatever `applyMoves` classified as a move is what gets persisted, correctly or not. That

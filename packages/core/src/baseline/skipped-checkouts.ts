@@ -24,6 +24,14 @@ function isUnderDirectory(file: RepoRelativePath, dir: RepoRelativePath): boolea
  * `acceptedAt`/`acceptedBy` onto a genuinely new, never-reviewed violation elsewhere (the exact
  * hazard `partitionSkippedCheckoutCandidates`'s retention was built to stop, but only protects the
  * `removed` arm — this closes the `moved` arm it didn't cover).
+ *
+ * Input-shape assumption, recorded because this is exported from core's public index: both arguments
+ * are normalized repo-relative paths — forward slashes, NO trailing slash. A trailing-slash directory
+ * (`'vendor/sub/'`) would match nothing. The producer guarantees the shape rather than this function
+ * checking it: `walkSourceFiles` (`plugin-typescript/src/scanner.ts`), the sole source of
+ * `CheckRun.skippedNestedCheckouts`, builds each path as
+ * `path.relative(repoRoot, absDir).split(path.sep).join('/')`, which never yields a trailing slash —
+ * so a runtime guard here would be unreachable code.
  */
 export function isUnderSkippedCheckout(file: RepoRelativePath, skippedNestedCheckouts: readonly RepoRelativePath[]): boolean {
   return skippedNestedCheckouts.some((dir) => isUnderDirectory(file, dir));

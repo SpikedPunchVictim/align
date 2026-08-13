@@ -299,7 +299,19 @@ export class GateOrchestrator {
     // manifest inventory's files, a deliberately disjoint scan domain from the graph above
     // (ADR 013) — never derived from `allViolations` (see the architecture gate's comment above).
     const knownFiles = new Set(inventory.manifests.map((m) => m.file));
-    const moves = this.baselineStore.reconcileMoves(allViolations, knownFiles);
+    // `[]`, stated explicitly because `BaselineStore.reconcileMoves` requires it (review 2026-08-13:
+    // it was optional, and this exact call site omitted it, silently reinstating the pre-F1
+    // behaviour with no type error). The fact this rests on, verified by reading the manifest domain
+    // end to end: `ManifestScanOptions` carries only `rootDir` and `excludes`, `ManifestInventory`
+    // has no `skippedNestedCheckouts` field, and the concrete scanner (`plugin-typescript`'s
+    // `scanManifests`) enumerates the root `package.json` plus `pnpm-workspace.yaml` glob members
+    // with no `.git` test anywhere — so this domain performs no nested-checkout auto-exclusion, and
+    // no manifest is ever absent from `knownFiles` for that reason. A manifest that leaves this
+    // inventory left for a genuine reason (dropped from the workspace globs, deleted, malformed) —
+    // precisely the case FRAGILE #7's move-rescue exists to handle, so passing the architecture
+    // gate's skipped paths here would suppress a legitimate rescue. Pinned by an executable test
+    // (`plugin-typescript/test/manifest.test.ts`), not left as an assertion in this comment.
+    const moves = this.baselineStore.reconcileMoves(allViolations, knownFiles, []);
     const newViolations = allViolations.filter((v) => !this.baselineStore.isBaselined(v.id));
     const baselinedCount = allViolations.length - newViolations.length;
     const rulesWithNoViolations = securityRules.filter(
