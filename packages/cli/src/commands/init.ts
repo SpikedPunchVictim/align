@@ -15,6 +15,7 @@ import { CONFIG_FILENAME, loadConfig } from '../config.js';
 import { writeBaseline, readBaseline, recordBaselineReconciled } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
+import { describeRetainedEntries, partitionSkippedCheckoutCandidates } from '../nested-checkout-retention.js';
 import { defaultConfirm } from '../prompt.js';
 
 export interface InitOptions {
@@ -41,7 +42,8 @@ export interface InitOptions {
    * refuses both the zero-violations reset and the seed-path overwrite rather than silently
    * dropping an entry whose violation merely became unobservable, not fixed. Identical in name and
    * semantics to `align baseline prune`/`align upgrade`'s flag of the same name — see
-   * `refuseIfBaselineWriteAtRisk` below for the one guard both of `init`'s write paths share. */
+   * `partitionAndRefuseIfBaselineWriteAtRisk` below for the one guard both of `init`'s write paths
+   * share. */
   readonly allowIncomplete?: boolean;
   /** Test hook, mirroring `UpgradeOptions.confirm` (`commands/upgrade.ts`) exactly: replaces the
    * real `readline`-backed interactive seed prompt (`defaultConfirm`, `../prompt.js`) with a
@@ -77,15 +79,28 @@ export interface InitOptions {
  * Delegates the actual errored-vs-incomplete decision to `refuseIfRunIncomplete` (`errored-run.ts`)
  * rather than re-deciding it here, the same "one shared function, never a copy re-inlined" pattern
  * `stampAlignVersion`/`refuseIfRunErrored` already establish.
+ *
+ * A SECOND hazard, found auditing this command for the same class (CLAUDE.md rule 6 — "hunt the
+ * class, not the instance") that `align baseline prune`'s review fix targets: task #25's
+ * nested-checkout auto-exclusion drops edges from the scan the same way a missing dependency does,
+ * but does NOT set `complete: false` (`isRunComplete` only fires on `missing-dependencies`), so
+ * `refuseIfRunIncomplete` alone does not protect an existing entry whose file lives inside a
+ * skipped checkout — both of `init`'s write paths would silently drop it, the exact BUG #18 shape.
+ * The decided fix mirrors `baseline prune`'s: "skip-and-report," not "refuse" — every dropped entry
+ * is partitioned (`nested-checkout-retention.ts`) into RETAINED (file inside a skipped checkout —
+ * carried into the write unchanged) and forfeited (everything else, dropped exactly as before).
+ * `refuseIfRunIncomplete` is evaluated against the forfeited count only, since a retained entry was
+ * never actually at risk once retention puts it back into what gets written.
  */
-function refuseIfBaselineWriteAtRisk(
+function partitionAndRefuseIfBaselineWriteAtRisk(
   run: CheckRun,
   existing: readonly BaselineEntry[],
   persistedFingerprints: ReadonlySet<ViolationId>,
   allowIncomplete: boolean,
-): number | undefined {
-  const atRiskCount = existing.filter((entry) => !persistedFingerprints.has(entry.fingerprint)).length;
-  return refuseIfRunIncomplete('align init', run, atRiskCount, allowIncomplete);
+): { readonly refusal: number | undefined; readonly retained: readonly BaselineEntry[] } {
+  const dropped = existing.filter((entry) => !persistedFingerprints.has(entry.fingerprint));
+  const { retained, forfeited } = partitionSkippedCheckoutCandidates(dropped, run.skippedNestedCheckouts);
+  return { refusal: refuseIfRunIncomplete('align init', run, forfeited.length, allowIncomplete), retained };
 }
 
 export async function runInit(rootDir: string, options: InitOptions): Promise<number> {
@@ -237,14 +252,16 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   };
 
   if (violations.length === 0) {
-    // ADR 023 amendment: this branch persists `[]` — no fingerprint survives — so EVERY existing
-    // entry is at risk. `refuseIfBaselineWriteAtRisk` runs BEFORE `writeBaseline`/
-    // `recordBaselineReconciled` below, so a refusal leaves `.align/baseline.json` untouched; a
-    // first `init` with no existing baseline (`existingBaseline` is `[]`) is never refused, since
-    // `refuseIfRunIncomplete` treats `atRiskCount === 0` as nothing to refuse. Returned directly,
-    // not routed through `finish()` — matching every other refusal in this command.
-    const atRiskRefusal = refuseIfBaselineWriteAtRisk(run, existingBaseline, new Set<ViolationId>(), options.allowIncomplete ?? false);
-    if (atRiskRefusal !== undefined) return atRiskRefusal;
+    // ADR 023 amendment: this branch would otherwise persist `[]` — no fingerprint survives — so
+    // EVERY existing entry is dropped by default. `partitionAndRefuseIfBaselineWriteAtRisk` runs
+    // BEFORE `writeBaseline`/`recordBaselineReconciled` below, so a refusal leaves
+    // `.align/baseline.json` untouched; a first `init` with no existing baseline (`existingBaseline`
+    // is `[]`) is never refused, since `refuseIfRunIncomplete` treats a zero forfeited count as
+    // nothing to refuse. Returned directly, not routed through `finish()` — matching every other
+    // refusal in this command. `retained` (see that function's doc comment) is what actually gets
+    // persisted below instead of a bare `[]`.
+    const atRisk = partitionAndRefuseIfBaselineWriteAtRisk(run, existingBaseline, new Set<ViolationId>(), options.allowIncomplete ?? false);
+    if (atRisk.refusal !== undefined) return atRisk.refusal;
 
     // `writeBaseline` (a `.align/` artifact writer, `align-dir.ts`) stamps `alignVersion` on its
     // own; `recordBaselineReconciled` is the ADDITIONAL, init/upgrade-only write of
@@ -253,12 +270,13 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     // corrupted `.align/version.json` (same corrupt-≠-absent discipline as every other artifact
     // reader), caught here the same way every other refusal in this command is.
     try {
-      writeBaseline(rootDir, []);
+      writeBaseline(rootDir, atRisk.retained);
       recordBaselineReconciled(rootDir);
     } catch (err) {
       return reportCliError('align init', err);
     }
     console.log('Initial check is green — no baseline seeding needed.');
+    if (atRisk.retained.length > 0) console.log(describeRetainedEntries(atRisk.retained, run.skippedNestedCheckouts));
     return finish(0);
   }
 
@@ -279,13 +297,13 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   // outcome cannot disagree with each other." Asking "seed the baseline?" and then refusing the
   // `yes` would be exactly that disagreement. Runs before `writeBaseline`/`recordBaselineReconciled`
   // either way, so a refusal leaves `.align/baseline.json` untouched.
-  const seedAtRiskRefusal = refuseIfBaselineWriteAtRisk(
+  const seedAtRisk = partitionAndRefuseIfBaselineWriteAtRisk(
     run,
     existingBaseline,
     new Set(violations.map((v) => v.id)),
     options.allowIncomplete ?? false,
   );
-  if (seedAtRiskRefusal !== undefined) return seedAtRiskRefusal;
+  if (seedAtRisk.refusal !== undefined) return seedAtRisk.refusal;
 
   let shouldSeed = options.acceptExisting;
   if (!shouldSeed && isInteractive) {
@@ -318,28 +336,34 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   //
   // This is a merge of PROVENANCE, not a union of ENTRIES: an existing entry with no matching
   // fingerprint in `violations` still isn't in this map at all and is dropped, same as before —
-  // that half stays governed by `refuseIfBaselineWriteAtRisk` above, which already refused this
-  // write if dropping it would be unsafe on an incomplete scan.
+  // that half stays governed by `partitionAndRefuseIfBaselineWriteAtRisk` above, which already
+  // refused this write if dropping any of it would be unsafe on an incomplete scan, and which
+  // supplies `seedAtRisk.retained` below — entries dropped from `violations` only because their
+  // file is inside a skipped nested checkout, carried into the write unchanged rather than lost.
   const existingByFingerprint = new Map(existingBaseline.map((entry) => [entry.fingerprint, entry]));
 
   try {
     writeBaseline(
       rootDir,
-      violations.map((v) => {
-        const prior = existingByFingerprint.get(v.id);
-        return {
-          fingerprint: v.id,
-          ruleId: v.ruleId,
-          file: v.file,
-          acceptedAt: prior?.acceptedAt ?? Date.now(),
-          acceptedBy: prior?.acceptedBy ?? (options.acceptExisting ? ('accept-existing' as const) : ('init-seed' as const)),
-        };
-      }),
+      [
+        ...violations.map((v) => {
+          const prior = existingByFingerprint.get(v.id);
+          return {
+            fingerprint: v.id,
+            ruleId: v.ruleId,
+            file: v.file,
+            acceptedAt: prior?.acceptedAt ?? Date.now(),
+            acceptedBy: prior?.acceptedBy ?? (options.acceptExisting ? ('accept-existing' as const) : ('init-seed' as const)),
+          };
+        }),
+        ...seedAtRisk.retained,
+      ],
     );
     recordBaselineReconciled(rootDir);
   } catch (err) {
     return reportCliError('align init', err);
   }
   console.log(`Seeded baseline with ${violations.length} pre-existing violation(s) — run \`align baseline show\` to review.`);
+  if (seedAtRisk.retained.length > 0) console.log(describeRetainedEntries(seedAtRisk.retained, run.skippedNestedCheckouts));
   return finish(0);
 }

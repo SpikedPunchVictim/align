@@ -61,6 +61,7 @@ export function checkRun(violations: readonly Violation[], overrides: Partial<Ch
     advisories: [],
     scannedAt: 0,
     ungroundedComponents: [],
+    skippedNestedCheckouts: [],
     ...overrides,
   };
 }
@@ -76,5 +77,5 @@ export function errorCheckRun(): CheckRun {
     cacheHits: 0,
     dependsOn: [],
   };
-  return { verdict: 'error', gates: [gate], advisories: [], scannedAt: 0, ungroundedComponents: [] };
+  return { verdict: 'error', gates: [gate], advisories: [], scannedAt: 0, ungroundedComponents: [], skippedNestedCheckouts: [] };
 }

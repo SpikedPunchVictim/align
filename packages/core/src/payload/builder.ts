@@ -40,6 +40,12 @@ export interface McpCheckPayload {
    * `green` (an empty greenfield component is not a failure); this field is what makes that green
    * distinguishable from a fully-grounded one. */
   readonly ungroundedComponents: readonly UngroundedComponent[];
+  /** Task #25's baseline-prune review fix: repo-relative paths of directories this scan skipped
+   * because they carry their own `.git`, straight off `CheckRun.skippedNestedCheckouts` — wire-
+   * visible so an MCP/`--json` consumer can tell "this orphan's file is unobservable, not fixed"
+   * without parsing the `nested-checkout-skipped` advisory's message string. `[]` on a run whose
+   * architecture gate didn't fully evaluate, same as the source field. */
+  readonly skippedNestedCheckouts: readonly RepoRelativePath[];
   /** Change in baselined debt since the last persisted baseline: `47 → 45 (−2)`
    * (docs/proposals/reconciled-build-order.md #2). Structured so agents can read the ratchet
    * without parsing prose. */
@@ -96,6 +102,7 @@ export function buildMcpCheckPayload(run: CheckRun, options: BuildCheckPayloadOp
     ...(capped.length > pageSize ? { pagination: { cursor: String(offset + pageSize), hasMore } } : {}),
     advisories: run.advisories,
     ungroundedComponents: run.ungroundedComponents,
+    skippedNestedCheckouts: run.skippedNestedCheckouts,
     baselineDebt,
   };
 }
