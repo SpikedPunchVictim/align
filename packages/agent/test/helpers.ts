@@ -21,7 +21,7 @@ export function edge(
 }
 
 export function graph(nodes: DependencyGraphNode[], edges: DependencyGraphEdge[]): DependencyGraph {
-  return { nodes, edges, externalNodes: [], externalEdges: [], uncertain: [], scannedAt: Date.now() };
+  return { nodes, edges, externalNodes: [], externalEdges: [], uncertain: [], skippedNestedCheckouts: [], scannedAt: Date.now() };
 }
 
 export function violation(overrides: Partial<Violation> & { id: string; ruleId: string; file: string }): Violation {
@@ -61,6 +61,7 @@ export function checkRun(violations: readonly Violation[], overrides: Partial<Ch
     advisories: [],
     scannedAt: 0,
     ungroundedComponents: [],
+    skippedNestedCheckouts: [],
     ...overrides,
   };
 }
@@ -76,5 +77,5 @@ export function errorCheckRun(): CheckRun {
     cacheHits: 0,
     dependsOn: [],
   };
-  return { verdict: 'error', gates: [gate], advisories: [], scannedAt: 0, ungroundedComponents: [] };
+  return { verdict: 'error', gates: [gate], advisories: [], scannedAt: 0, ungroundedComponents: [], skippedNestedCheckouts: [] };
 }

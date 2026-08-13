@@ -88,7 +88,7 @@ async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<
   } catch (err) {
     return reportCliError('align check', err);
   }
-  const { ruleset, excludes, hostRules, telemetry } = loaded;
+  const { ruleset, excludes, hostRules, telemetry, includeNestedCheckouts } = loaded;
   let previousBaseline: BaselineEntry[];
   try {
     previousBaseline = readBaseline(rootDir);
@@ -104,7 +104,7 @@ async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<
   const rulesetIrHash = computeRulesetIrHash(ruleset);
 
   const wallStart = performance.now();
-  const run = await orchestrator.check({ rootDir, excludes });
+  const run = await orchestrator.check({ rootDir, excludes, includeNestedCheckouts });
   const wallMs = performance.now() - wallStart;
   try {
     // Writes `.align/baseline.json` on a move-transfer, which stamps `alignVersion` (ADR 022's
@@ -247,7 +247,7 @@ async function runUntrustedCheck(rootDir: string, options: CheckOptions): Promis
   }
   const { orchestrator, baselineStore } = createOrchestrator(exported.ruleset, previousBaseline, new Map());
   const wallStart = performance.now();
-  const run = await orchestrator.check({ rootDir, excludes: exported.excludes });
+  const run = await orchestrator.check({ rootDir, excludes: exported.excludes, includeNestedCheckouts: exported.includeNestedCheckouts });
   const wallMs = performance.now() - wallStart;
   try {
     // Same corrupt-≠-absent risk (a move-transfer write stamps `alignVersion`, ADR 022) as

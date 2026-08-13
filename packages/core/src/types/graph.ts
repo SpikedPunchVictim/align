@@ -97,5 +97,12 @@ export interface DependencyGraph {
   readonly externalNodes: readonly ExternalPackageNode[];
   readonly externalEdges: readonly ExternalDependencyEdge[];
   readonly uncertain: readonly UncertaintyMarker[];
+  // Task #25 (auto-exclude nested git checkouts): repo-relative paths of directories the walk
+  // skipped because they contain their own `.git` (a worktree/submodule/vendored clone) and are
+  // not the scan root itself. A SEPARATE array from `uncertain` (not another `UncertaintyReason`)
+  // because these are whole skipped subtrees, not per-specifier markers — deliberately visible
+  // (never silent) so a component whose files all lived under one of these paths doesn't read as
+  // an ordinary empty component; see `gates/advisories.ts`'s `buildSkippedNestedCheckoutAdvisories`.
+  readonly skippedNestedCheckouts: readonly RepoRelativePath[];
   readonly scannedAt: number; // epoch ms — the freshness proof underlying ADR 005
 }

@@ -148,6 +148,12 @@ export const exportedRulesetSchema = z.object({
   irVersion: z.literal('1'),
   exportedAt: z.number(),
   excludes: z.array(z.string()),
+  // Task #25: same deviation shape as `excludes` above — round-tripped through the untrusted-mode
+  // artifact so `align check --untrusted` re-includes the same nested checkouts a trusted
+  // `align.config.ts` opted back in, instead of silently diverging from trusted-mode behavior.
+  // Defaulted so an artifact written by a pre-#25 `align export-ir` (no such field on disk) parses
+  // as "no opt-outs" rather than a hard schema-validation failure.
+  includeNestedCheckouts: z.array(z.string()).default([]),
   ruleset: rulesetIRSchema,
 });
 

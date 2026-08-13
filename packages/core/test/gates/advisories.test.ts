@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { areAdvisoriesComplete, buildBaselineGrowthAdvisories, buildUncertaintyAdvisories, isRunComplete } from '../../src/gates/advisories.js';
+import {
+  areAdvisoriesComplete,
+  buildBaselineGrowthAdvisories,
+  buildSkippedNestedCheckoutAdvisories,
+  buildUncertaintyAdvisories,
+  isRunComplete,
+} from '../../src/gates/advisories.js';
 import { computeFingerprint } from '../../src/baseline/fingerprint.js';
 import { toComponentName, toRepoRelativePath, toRuleId } from '../../src/types/branded.js';
 import type { BaselineEntry } from '../../src/baseline/store.js';
@@ -199,6 +205,29 @@ describe('areAdvisoriesComplete', () => {
   });
 });
 
+// Task #25: the load-bearing "never silent" half of auto-excluding nested git checkouts — every
+// skipped checkout must be named, not just counted, so a human/agent can correlate it with an
+// empty component instead of the skip reading as an ordinary, unremarkable empty directory.
+describe('buildSkippedNestedCheckoutAdvisories', () => {
+  it('returns no advisory when nothing was skipped', () => {
+    expect(buildSkippedNestedCheckoutAdvisories([])).toEqual([]);
+  });
+
+  it('names every skipped path, sorted, in one advisory', () => {
+    const advisories = buildSkippedNestedCheckoutAdvisories([
+      toRepoRelativePath('vendor/b-checkout'),
+      toRepoRelativePath('vendor/a-checkout'),
+    ]);
+    expect(advisories).toHaveLength(1);
+    expect(advisories[0]?.kind).toBe('nested-checkout-skipped');
+    expect(advisories[0]?.message).toContain('vendor/a-checkout');
+    expect(advisories[0]?.message).toContain('vendor/b-checkout');
+    // Sorted, not insertion order — so the message is deterministic across scans.
+    expect(advisories[0]?.message.indexOf('vendor/a-checkout')).toBeLessThan(advisories[0]?.message.indexOf('vendor/b-checkout') ?? -1);
+    expect(advisories[0]?.message).toContain('includeNestedCheckouts');
+  });
+});
+
 // ADR 023 "second axis: incomplete ≠ errored" — the single shared predicate consumed by both
 // `payload/builder.ts`'s `complete` field and the CLI's tier-2 `refuseIfRunIncomplete` guard
 // (`packages/cli/src/errored-run.ts`). Pinned here directly so a future edit to either consumer
@@ -211,6 +240,7 @@ describe('isRunComplete', () => {
       advisories,
       scannedAt: Date.now(),
       ungroundedComponents: [],
+      skippedNestedCheckouts: [],
     };
   }
 

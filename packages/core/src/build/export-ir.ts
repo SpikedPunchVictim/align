@@ -12,6 +12,7 @@ export function buildExportedRuleset(
   ruleset: RulesetIR,
   excludes: readonly string[],
   exportedAt: number = Date.now(),
+  includeNestedCheckouts: readonly string[] = [],
 ): ExportedRuleset {
-  return { irVersion: '1', exportedAt, excludes: [...excludes], ruleset };
+  return { irVersion: '1', exportedAt, excludes: [...excludes], includeNestedCheckouts: [...includeNestedCheckouts], ruleset };
 }

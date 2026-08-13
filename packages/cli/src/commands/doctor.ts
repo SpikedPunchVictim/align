@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import type { Command } from 'commander';
 import {
   areAdvisoriesComplete,
+  buildSkippedNestedCheckoutAdvisories,
   buildUncertaintyAdvisories,
   computeDeepImportHits,
   computeUngovernedEdgeGaps,
@@ -163,16 +164,19 @@ async function collectDoctorReport(rootDir: string, program: Command | undefined
   const excludes = loaded?.excludes ?? [];
 
   if (loaded !== undefined) {
-    const { ruleset, excludes: loadedExcludes } = loaded;
+    const { ruleset, excludes: loadedExcludes, includeNestedCheckouts } = loaded;
     const plugin = new TypeScriptPlugin();
-    const graph = await plugin.scanner.scan({ rootDir, components: ruleset.components, excludes: loadedExcludes }).catch((err: unknown) => {
-      advisories.push({ kind: 'scan-error', message: err instanceof Error ? err.message : String(err) });
-      return undefined;
-    });
+    const graph = await plugin.scanner
+      .scan({ rootDir, components: ruleset.components, excludes: loadedExcludes, includeNestedCheckouts })
+      .catch((err: unknown) => {
+        advisories.push({ kind: 'scan-error', message: err instanceof Error ? err.message : String(err) });
+        return undefined;
+      });
 
     if (graph !== undefined) {
       uncertain = graph.uncertain;
       advisories.push(...buildUncertaintyAdvisories(graph.uncertain));
+      advisories.push(...buildSkippedNestedCheckoutAdvisories(graph.skippedNestedCheckouts));
 
       const unmapped = graph.nodes.filter((n) => n.component === UNMAPPED_COMPONENT);
       if (unmapped.length > 0) {

@@ -130,3 +130,29 @@ export function globMatch(pattern: string, filePath: string): boolean {
     return re.test(filePath);
   });
 }
+
+/**
+ * The longest literal (wildcard-free) DIRECTORY prefix of a glob pattern — the portion before the
+ * first `*`, `?`, or `{`, trimmed back to the end of the last COMPLETE path segment so a partial
+ * segment is never reported as a real directory (`vendor/subm*` -> `vendor`, not `vendor/subm`).
+ * `''` means the pattern has no literal anchor at all (`**`, `*.ts`) and could match anywhere.
+ *
+ * For MATCHING itself, `globMatch` remains the only implementation (BUG #4's lesson: one glob
+ * dialect, never two independently-drifting ones). This is a narrower, cheaper question —
+ * "could this pattern's scope possibly reach under directory D" — used only for diagnostics
+ * (`components/registry.ts`'s nested-checkout-skipped likely-cause heuristic) where an exact
+ * `globMatch` against a real file can't help because no such file exists to test against.
+ */
+export function staticPrefixOf(pattern: string): string {
+  let metaIndex = -1;
+  for (let i = 0; i < pattern.length; i += 1) {
+    const c = pattern[i];
+    if (c === '*' || c === '?' || c === '{') {
+      metaIndex = i;
+      break;
+    }
+  }
+  const literal = metaIndex === -1 ? pattern : pattern.slice(0, metaIndex);
+  const lastSlash = literal.lastIndexOf('/');
+  return lastSlash === -1 ? '' : literal.slice(0, lastSlash);
+}

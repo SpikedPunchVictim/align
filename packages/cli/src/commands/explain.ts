@@ -29,12 +29,12 @@ export async function runExplain(rootDir: string, ruleId: string): Promise<numbe
 }
 
 export async function buildExplainPayload(rootDir: string, ruleId: string): Promise<McpExplainRulePayload | undefined> {
-  const { ruleset, excludes, hostRules } = await loadConfig(rootDir);
+  const { ruleset, excludes, hostRules, includeNestedCheckouts } = await loadConfig(rootDir);
   const rule = ruleset.rules.find((r) => r.id === ruleId);
   if (rule === undefined) return undefined;
 
   const plugin = new TypeScriptPlugin();
-  const graph = await plugin.scanner.scan({ rootDir, components: ruleset.components, excludes });
+  const graph = await plugin.scanner.scan({ rootDir, components: ruleset.components, excludes, includeNestedCheckouts });
 
   const filesByComponent = new Map<string, RepoRelativePath[]>();
   for (const node of graph.nodes) {

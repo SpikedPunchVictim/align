@@ -484,6 +484,38 @@ describe('GateOrchestrator', () => {
     expect(run.advisories.find((a) => a.kind === 'baseline-moved')).toBeUndefined();
   });
 
+  describe('nested-checkout-skipped advisory (task #25)', () => {
+    it('surfaces the advisory, naming the skipped path, on an ordinary green run', async () => {
+      const ruleset = defineProject({
+        components: { api: 'application/api/**' },
+        rules: (c) => [c.arch.noCycles()],
+      });
+      const registry = new StaticPluginRegistry([
+        fakePlugin(() =>
+          graph([node('application/api/a.ts', 'api')], [], {
+            skippedNestedCheckouts: [toRepoRelativePath('vendor/submodule')],
+          }),
+        ),
+      ]);
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+      const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      expect(run.verdict).toBe('green'); // a skip is advisory, never a failure
+      const advisory = run.advisories.find((a) => a.kind === 'nested-checkout-skipped');
+      expect(advisory?.message).toContain('vendor/submodule');
+    });
+
+    it('does not surface the advisory when nothing was skipped', async () => {
+      const ruleset = defineProject({
+        components: { api: 'application/api/**' },
+        rules: (c) => [c.arch.noCycles()],
+      });
+      const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+      const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+      expect(run.advisories.find((a) => a.kind === 'nested-checkout-skipped')).toBeUndefined();
+    });
+  });
+
   describe('baseline-growth advisory (FRAGILE #8, bug hunt 2026-08-03)', () => {
     it('surfaces a baseline-growth advisory, naming both numbers, without flipping verdict red or touching the fingerprint', async () => {
       const ruleset = defineProject({

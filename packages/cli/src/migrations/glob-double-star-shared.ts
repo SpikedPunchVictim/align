@@ -99,7 +99,12 @@ export async function findAffectedGlobDoubleStarSelectors(rootDir: string): Prom
 
   const plugin = new TypeScriptPlugin();
   const graph = await plugin.scanner
-    .scan({ rootDir, components: loaded.ruleset.components, excludes: loaded.excludes })
+    .scan({
+      rootDir,
+      components: loaded.ruleset.components,
+      excludes: loaded.excludes,
+      includeNestedCheckouts: loaded.includeNestedCheckouts,
+    })
     .catch(() => undefined);
   if (graph === undefined) return [];
 

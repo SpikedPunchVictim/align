@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { expandBraces, globMatch, lintGlobPattern } from '../src/components/glob.js';
+import { expandBraces, globMatch, lintGlobPattern, staticPrefixOf } from '../src/components/glob.js';
 
 describe('globMatch', () => {
   it('matches ** as zero or more path segments', () => {
@@ -72,5 +72,33 @@ describe('lintGlobPattern', () => {
     expect(lintGlobPattern('src/{a,{b,c}}/**')).toMatch(/nested/);
     expect(lintGlobPattern('src/{a,b/**')).toMatch(/unmatched/);
     expect(lintGlobPattern('src/{a..z}/**')).toMatch(/range/);
+  });
+});
+
+// Task #25's registry.ts review fix: `components/registry.ts`'s nested-checkout diagnosis needs
+// "what's the literal directory this pattern is anchored under" without a second glob matcher
+// (BUG #4's lesson) — this is that narrower question, not a matching function.
+describe('staticPrefixOf', () => {
+  it('returns the directory before the first wildcard segment', () => {
+    expect(staticPrefixOf('vendor/submodule/**')).toBe('vendor/submodule');
+    expect(staticPrefixOf('vendored/repo/src/**')).toBe('vendored/repo/src');
+    expect(staticPrefixOf('packages/*/src/**')).toBe('packages');
+  });
+
+  it('trims back to the last COMPLETE segment — a partial segment is never reported as a real directory', () => {
+    expect(staticPrefixOf('vendor/subm*/index.ts')).toBe('vendor');
+  });
+
+  it('returns a literal file pattern\'s containing directory', () => {
+    expect(staticPrefixOf('vendor/submodule/index.ts')).toBe('vendor/submodule');
+  });
+
+  it("returns '' for a pattern with no literal anchor at all (matches everywhere)", () => {
+    expect(staticPrefixOf('**')).toBe('');
+    expect(staticPrefixOf('*.ts')).toBe('');
+  });
+
+  it('stops at a brace group, treating it as a wildcard boundary (conservative, never over-claims a literal)', () => {
+    expect(staticPrefixOf('src/llm-{anthropic,ollama}/**')).toBe('src');
   });
 });

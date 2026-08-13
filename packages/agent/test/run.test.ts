@@ -13,6 +13,7 @@ function opts(overrides: Partial<AgentRunOptions> = {}): AgentRunOptions {
     mode: 'pr',
     allowUntested: true,
     allowSymbolRemovals: true,
+    allowIncomplete: false,
     dryRun: false,
     workBranchName: 'align/fixes-test',
     baseBranch: 'main',
@@ -271,6 +272,55 @@ describe('runAgentLoop — dry-run', () => {
     expect(handle.fs.get(file)).toBe('bad'); // untouched
     expect(handle.git.commitLog).toHaveLength(0);
   });
+
+  it('honors the zero-coverage guard: escalates instead of calling the FixProvider for an uncovered file', async () => {
+    const file = toRepoRelativePath('src/a.ts');
+    const v1 = violation({ id: 'v1', ruleId: 'arch.no-dependency', file: 'src/a.ts' });
+    const fake = new FakeFixProvider();
+    const handle = createFakeEffects(fake, { 'src/a.ts': 'bad' });
+    handle.setGraph(graph([node('src/a.ts', 'core')], [])); // no test file in the graph at all
+    handle.setCheckRuns([checkRun([v1])]);
+
+    const result = await runAgentLoop(handle.effects, emptyRuleset, opts({ dryRun: true, allowUntested: false }));
+
+    expect(result.verdict).toBe('dry-run');
+    expect(result.groups[0]).toMatchObject({ status: 'escalated', file });
+    expect((result.groups[0] as { reason: string }).reason).toMatch(/zero test coverage/);
+    expect(fake.calls).toHaveLength(0); // the FixProvider must never see this file's contents
+  });
+
+  it('gate active + covered file: dry-run still plans (the guard escalates only when the gate fires, not whenever it is active)', async () => {
+    const file = toRepoRelativePath('src/a.ts');
+    const v1 = violation({ id: 'v1', ruleId: 'arch.no-dependency', file: 'src/a.ts' });
+    const fake = new FakeFixProvider();
+    fake.script(file, [{ files: [{ path: 'src/a.ts', edits: [{ search: 'bad', replace: 'good' }] }], rationale: 'fix' }]);
+    const handle = createFakeEffects(fake, { 'src/a.ts': 'bad', 'src/a.test.ts': 'x' });
+    // A test file transitively imports the target — covered — with the gate ACTIVE (allowUntested: false).
+    handle.setGraph(graph([node('src/a.ts', 'core'), node('src/a.test.ts', 'core')], [edge('src/a.test.ts', 'src/a.ts')]));
+    handle.setCheckRuns([checkRun([v1])]);
+
+    const result = await runAgentLoop(handle.effects, emptyRuleset, opts({ dryRun: true, allowUntested: false }));
+
+    expect(result.verdict).toBe('dry-run');
+    expect(result.groups[0]).toMatchObject({ status: 'dry-run', file });
+    expect(fake.calls).toHaveLength(1); // covered, so the FixProvider was consulted
+  });
+
+  it('--allow-untested still lets dry-run plan for an uncovered file', async () => {
+    const file = toRepoRelativePath('src/a.ts');
+    const v1 = violation({ id: 'v1', ruleId: 'arch.no-dependency', file: 'src/a.ts' });
+    const fake = new FakeFixProvider();
+    fake.script(file, [{ files: [{ path: 'src/a.ts', edits: [{ search: 'bad', replace: 'good' }] }], rationale: 'fix' }]);
+    const handle = createFakeEffects(fake, { 'src/a.ts': 'bad' });
+    handle.setGraph(graph([node('src/a.ts', 'core')], [])); // still no test file — uncovered
+    handle.setCheckRuns([checkRun([v1])]);
+
+    const result = await runAgentLoop(handle.effects, emptyRuleset, opts({ dryRun: true, allowUntested: true }));
+
+    expect(result.verdict).toBe('dry-run');
+    expect(result.groups[0]).toMatchObject({ status: 'dry-run', file });
+    expect(fake.calls).toHaveLength(1);
+  });
 });
 
 describe('runAgentLoop — config/`.align` proposal rejection', () => {
@@ -306,6 +356,84 @@ describe('runAgentLoop — config/`.align` proposal rejection', () => {
     const result = await runAgentLoop(handle.effects, emptyRuleset, opts());
     expect(result.groups[0]).toMatchObject({ status: 'escalated' });
     expect((result.groups[0] as { reason: string }).reason).toMatch(/no suppressible rule categories/);
+  });
+});
+
+describe('runAgentLoop — ADR 023 tier 2: green-but-incomplete is never evidence a fix worked', () => {
+  function incompleteCheckRun() {
+    return checkRun([], { advisories: [{ kind: 'missing-dependencies', message: '1 external specifier(s) could not be resolved' }] });
+  }
+
+  it('escalates a group whose VERIFY is green but incomplete instead of reporting DONE, and never merges', async () => {
+    const file = toRepoRelativePath('src/a.ts');
+    const v1 = violation({ id: 'v1', ruleId: 'arch.no-dependency', file: 'src/a.ts' });
+    const fake = new FakeFixProvider();
+    fake.script(file, [{ files: [{ path: 'src/a.ts', edits: [{ search: 'bad', replace: 'good' }] }], rationale: 'fix' }]);
+    const handle = createFakeEffects(fake, { 'src/a.ts': 'bad' });
+    handle.setCheckRuns([checkRun([v1]), incompleteCheckRun()]);
+
+    const result = await runAgentLoop(handle.effects, emptyRuleset, opts({ mode: 'auto-merge' }));
+
+    expect(result.verdict).toBe('partial-escalated');
+    expect(result.groups[0]).toMatchObject({ status: 'escalated', file });
+    expect((result.groups[0] as { reason: string }).reason).toMatch(/missing-dependencies|could not resolve/);
+    // The commit is left in place (consistent with the sibling gate-error escalation above it): an
+    // incomplete VERIFY cannot prove the fix wrong, only unproven, so there is nothing to revert to.
+    expect(handle.git.commitLog).toHaveLength(1);
+    // Nothing reached DONE, so the terminal merge never runs — no merge, no deleted branch.
+    expect(result.terminalMerge).toEqual({ status: 'no-commits' });
+    expect(handle.git.ffMerged).toBe(false);
+  });
+
+  it('--allow-incomplete restores the old behaviour: the group reaches DONE and auto-merge proceeds', async () => {
+    const file = toRepoRelativePath('src/a.ts');
+    const v1 = violation({ id: 'v1', ruleId: 'arch.no-dependency', file: 'src/a.ts' });
+    const fake = new FakeFixProvider();
+    fake.script(file, [{ files: [{ path: 'src/a.ts', edits: [{ search: 'bad', replace: 'good' }] }], rationale: 'fix' }]);
+    const handle = createFakeEffects(fake, { 'src/a.ts': 'bad' });
+    // The same incomplete-but-green run is consumed twice: once as this group's VERIFY, once as
+    // the terminal-merge's rebased-tip finalCheck (`setCheckRuns`'s "last one repeats").
+    handle.setCheckRuns([checkRun([v1]), incompleteCheckRun()]);
+
+    const result = await runAgentLoop(handle.effects, emptyRuleset, opts({ mode: 'auto-merge', allowIncomplete: true }));
+
+    expect(result.verdict).toBe('done');
+    expect(result.groups[0]).toMatchObject({ status: 'done', file });
+    expect(result.terminalMerge).toEqual({ status: 'auto-merged' });
+    expect(handle.git.ffMerged).toBe(true);
+  });
+
+  it('refuses the terminal merge when the rebased-tip check is green but incomplete, even though every group VERIFY was complete', async () => {
+    const file = toRepoRelativePath('src/a.ts');
+    const v1 = violation({ id: 'v1', ruleId: 'arch.no-dependency', file: 'src/a.ts' });
+    const fake = new FakeFixProvider();
+    fake.script(file, [{ files: [{ path: 'src/a.ts', edits: [{ search: 'bad', replace: 'good' }] }], rationale: 'fix' }]);
+    const handle = createFakeEffects(fake, { 'src/a.ts': 'bad' });
+    // initial DISCOVER -> [v1]; this group's own VERIFY -> complete green ([]); the rebased-tip
+    // terminal-merge finalCheck -> green but incomplete. Only the LAST check matters here.
+    handle.setCheckRuns([checkRun([v1]), checkRun([]), incompleteCheckRun()]);
+
+    const result = await runAgentLoop(handle.effects, emptyRuleset, opts({ mode: 'auto-merge' }));
+
+    expect(result.verdict).toBe('done'); // the group itself genuinely reached DONE
+    expect(result.groups[0]).toMatchObject({ status: 'done', file });
+    expect(result.terminalMerge).toMatchObject({ status: 'final-check-incomplete' });
+    expect(handle.git.ffMerged).toBe(false);
+    expect(handle.git.deletedBranch).toBeUndefined();
+  });
+
+  it('--allow-incomplete also restores the terminal-merge check specifically', async () => {
+    const file = toRepoRelativePath('src/a.ts');
+    const v1 = violation({ id: 'v1', ruleId: 'arch.no-dependency', file: 'src/a.ts' });
+    const fake = new FakeFixProvider();
+    fake.script(file, [{ files: [{ path: 'src/a.ts', edits: [{ search: 'bad', replace: 'good' }] }], rationale: 'fix' }]);
+    const handle = createFakeEffects(fake, { 'src/a.ts': 'bad' });
+    handle.setCheckRuns([checkRun([v1]), checkRun([]), incompleteCheckRun()]);
+
+    const result = await runAgentLoop(handle.effects, emptyRuleset, opts({ mode: 'auto-merge', allowIncomplete: true }));
+
+    expect(result.terminalMerge).toEqual({ status: 'auto-merged' });
+    expect(handle.git.ffMerged).toBe(true);
   });
 });
 

@@ -148,6 +148,65 @@ describe('validateComponents (selector-based, TypeScript scanner-facing)', () =>
     };
     expect(() => validateComponents(components, [toRepoRelativePath('a.ts')], new Map())).toThrow(ComponentValidationError);
   });
+
+  // Task #25's empty-component interaction: a component matching zero files because its files all
+  // live under an auto-excluded nested checkout must NOT read as an ordinary stale-selector error —
+  // this is the ONE path such information can reach the user at all when `empty: 'fail'` (default),
+  // since the thrown error aborts the check as a `parse`-gate `error` before the sibling
+  // `nested-checkout-skipped` advisory (built from the same scan) ever gets attached (orchestrator's
+  // `scanAll` catch has no graph to build an advisory from).
+  it('names a skipped nested checkout as the likely cause instead of the generic "renamed/moved/stale" message', () => {
+    const components = { [toComponentName('vendor')]: glob(['vendor/submodule/**']) };
+    try {
+      validateComponents(components, [toRepoRelativePath('a.ts')], new Map(), [toRepoRelativePath('vendor/submodule')]);
+      expect.fail('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ComponentValidationError);
+      const message = (err as ComponentValidationError).message;
+      expect(message).toContain('vendor/submodule');
+      expect(message).toContain('auto-excluded from this scan');
+      expect(message).toContain('includeNestedCheckouts');
+      expect(message).not.toContain('renamed/moved');
+    }
+  });
+
+  it('names the checkout even when the selector points DEEPER inside it than the checkout root (the likelier real shape for a vendored checkout)', () => {
+    // The probe-file test alone (`${dir}/__align_probe__.ts`) cannot catch this: the selector's
+    // literal prefix ('vendored/repo/src') is a full path segment past the checkout root
+    // ('vendored/repo'), so a probe placed directly at the checkout root never matches. The
+    // static-prefix-containment test is what catches it instead.
+    const components = { [toComponentName('vendored')]: glob(['vendored/repo/src/**']) };
+    try {
+      validateComponents(components, [toRepoRelativePath('a.ts')], new Map(), [toRepoRelativePath('vendored/repo')]);
+      expect.fail('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ComponentValidationError);
+      const message = (err as ComponentValidationError).message;
+      expect(message).toContain('vendored/repo');
+      expect(message).toContain('auto-excluded from this scan');
+      expect(message).not.toContain('renamed/moved');
+    }
+  });
+
+  it('falls back to the generic message when a skipped checkout exists but does not overlap the selector', () => {
+    const components = { [toComponentName('empty')]: glob(['nowhere/**']) };
+    try {
+      validateComponents(components, [toRepoRelativePath('a.ts')], new Map(), [toRepoRelativePath('unrelated/checkout')]);
+      expect.fail('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ComponentValidationError);
+      const message = (err as ComponentValidationError).message;
+      expect(message).toContain('renamed/moved');
+      expect(message).not.toContain('unrelated/checkout');
+    }
+  });
+
+  it("'allow'/'until-populated' components are unaffected by skipped checkouts — they never throw regardless", () => {
+    const components = { [toComponentName('vendor')]: glob(['vendor/submodule/**'], 'allow') };
+    expect(() =>
+      validateComponents(components, [toRepoRelativePath('a.ts')], new Map(), [toRepoRelativePath('vendor/submodule')]),
+    ).not.toThrow();
+  });
 });
 
 describe('validateClassifiedComponents (classification-based, orchestrator-facing)', () => {

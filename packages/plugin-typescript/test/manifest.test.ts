@@ -1,6 +1,8 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { NodeManifestScanner, scanManifests } from '../src/manifest.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -53,5 +55,43 @@ describe('NodeManifestScanner (ManifestScanner injection seam, ADR 013)', () => 
     const scanner = new NodeManifestScanner();
     const inventory = await scanner.scan({ rootDir: path.join(fixturesDir, 'manifest-security'), excludes: [] });
     expect(inventory.manifests.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Pins the exemption `GateOrchestrator.runSecurityGate` (`core/src/orchestrator.ts`) relies on when
+ * it passes `[]` for `BaselineStore.reconcileMoves`'s now-REQUIRED `skippedNestedCheckouts`
+ * (review 2026-08-13). That `[]` is only correct if the manifest domain performs no nested-checkout
+ * auto-exclusion of its own — i.e. a manifest can never go missing from `knownFiles` the way task
+ * #25's `TypeScriptScanner` drops a source file (`plugin-typescript/test/nested-checkout.test.ts`
+ * asserts that scanner DOES skip these). CLAUDE.md rule 4's discipline: an exemption is pinned by an
+ * executable test, never asserted in a comment. So this is deliberately the exact inverse of the
+ * scanner test's `expect(...).not.toContain(...)`.
+ */
+describe('the manifest scan domain does NOT auto-exclude nested checkouts (pins runSecurityGate\'s `[]`)', () => {
+  let dir: string;
+
+  afterEach(() => {
+    if (dir !== undefined) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a workspace member whose directory carries its own `.git` is still scanned into the inventory', () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-manifest-nested-checkout-test-'));
+    // The scan root has its own `.git`, as every real repo does — same reasoning as
+    // `nested-checkout.test.ts`'s setup, so "the root is never skipped" is a real assertion.
+    fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'package.json'), `${JSON.stringify({ name: 'root', dependencies: { zod: '^3.23.8' } }, null, 2)}\n`, 'utf8');
+    fs.writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), "packages:\n  - 'vendor/*'\n", 'utf8');
+
+    const memberDir = path.join(dir, 'vendor', 'submodule');
+    fs.mkdirSync(memberDir, { recursive: true });
+    // A linked worktree's `.git` is a FILE, not a directory — the shape `hasOwnGit` catches in the
+    // source-scanning domain, used here so this fixture is not weaker than the scanner's.
+    fs.writeFileSync(path.join(memberDir, '.git'), 'gitdir: /elsewhere/.git/worktrees/submodule\n', 'utf8');
+    fs.writeFileSync(path.join(memberDir, 'package.json'), `${JSON.stringify({ name: 'submodule', dependencies: { 'left-pad': '^1.3.0' } }, null, 2)}\n`, 'utf8');
+
+    const inventory = scanManifests(dir);
+
+    expect(inventory.manifests.map((m) => m.file).sort()).toEqual(['package.json', 'vendor/submodule/package.json']);
   });
 });

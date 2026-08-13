@@ -5,7 +5,12 @@ import type { Violation } from './types/violation.js';
 import { EMPTY_MANIFEST_INVENTORY, type ManifestScanner } from './types/manifest.js';
 import type { BaselineStore } from './baseline/store.js';
 import type { Advisory, CheckRun, GateResult } from './gates/types.js';
-import { buildBaselineGrowthAdvisories, buildUncertaintyAdvisories, buildUngroundedExternalSelectorAdvisories } from './gates/advisories.js';
+import {
+  buildBaselineGrowthAdvisories,
+  buildSkippedNestedCheckoutAdvisories,
+  buildUncertaintyAdvisories,
+  buildUngroundedExternalSelectorAdvisories,
+} from './gates/advisories.js';
 import type { PluginRegistry } from './plugin/registry.js';
 import { evaluateRule } from './rules/evaluators.js';
 import { evaluateManifestRule, type SecurityManifestRule } from './rules/manifest-evaluators.js';
@@ -29,6 +34,10 @@ const NO_MANIFEST_SCANNER: ManifestScanner = { scan: () => EMPTY_MANIFEST_INVENT
 export interface CheckOptions {
   readonly rootDir: string; // absolute filesystem path
   readonly excludes: readonly string[];
+  // Task #25: opt-out paths for a nested git checkout the walk would otherwise auto-exclude —
+  // threaded straight through to `ScanInput.includeNestedCheckouts`. Optional so every pre-existing
+  // caller (tests, anything predating this option) keeps working unchanged.
+  readonly includeNestedCheckouts?: readonly string[];
 }
 
 /**
@@ -84,6 +93,7 @@ export class GateOrchestrator {
         advisories: movedAdvisories(securityMoves),
         scannedAt,
         ungroundedComponents: [],
+        skippedNestedCheckouts: [],
       };
     }
 
@@ -131,9 +141,14 @@ export class GateOrchestrator {
       return {
         verdict: deriveVerdict(gates),
         gates,
-        advisories: [...buildUncertaintyAdvisories(graph.uncertain), ...movedAdvisories(securityMoves)],
+        advisories: [
+          ...buildUncertaintyAdvisories(graph.uncertain),
+          ...buildSkippedNestedCheckoutAdvisories(graph.skippedNestedCheckouts),
+          ...movedAdvisories(securityMoves),
+        ],
         scannedAt,
         ungroundedComponents: [],
+        skippedNestedCheckouts: [],
       };
     }
 
@@ -157,9 +172,14 @@ export class GateOrchestrator {
       return {
         verdict: deriveVerdict(gates),
         gates,
-        advisories: [...buildUncertaintyAdvisories(graph.uncertain), ...movedAdvisories(securityMoves)],
+        advisories: [
+          ...buildUncertaintyAdvisories(graph.uncertain),
+          ...buildSkippedNestedCheckoutAdvisories(graph.skippedNestedCheckouts),
+          ...movedAdvisories(securityMoves),
+        ],
         scannedAt,
         ungroundedComponents: [],
+        skippedNestedCheckouts: [],
       };
     }
 
@@ -170,7 +190,12 @@ export class GateOrchestrator {
     // graph's node files, never derived from `allViolations` (a fixed file has no violations, so
     // deriving from violations would make every fixed file look deleted and defeat the fix).
     const knownFiles = new Set(graph.nodes.map((n) => n.file));
-    const moves = this.baselineStore.reconcileMoves(allViolations, knownFiles);
+    // `graph.skippedNestedCheckouts` (F1, task #25 forged-transfer fix, review 2026-08-12): passed
+    // through so a file this scan auto-excluded is never mistaken for a real rename by
+    // `applyMoves` — see `store.ts`'s `reconcileMoves` doc comment. This is the unguarded path the
+    // review named: unlike `baseline prune`, `align check` runs this on every invocation with no
+    // completeness gate at all, so it's the one place the fix matters even without `--allow-incomplete`.
+    const moves = this.baselineStore.reconcileMoves(allViolations, knownFiles, graph.skippedNestedCheckouts);
 
     const newViolations = allViolations.filter((v) => !this.baselineStore.isBaselined(v.id));
     const baselinedCount = allViolations.length - newViolations.length;
@@ -191,6 +216,7 @@ export class GateOrchestrator {
 
     const advisories: Advisory[] = [
       ...buildUncertaintyAdvisories(graph.uncertain),
+      ...buildSkippedNestedCheckoutAdvisories(graph.skippedNestedCheckouts),
       ...movedAdvisories(moves.length + securityMoves),
       // ADR 017 Part A: computed after evaluation succeeds (same "trustworthy ruleset" precondition
       // as `ungroundedComponents` below) — an ungrounded external selector is vacuously green, not
@@ -209,7 +235,7 @@ export class GateOrchestrator {
     // is trustworthy — reuses the same classification set `validateClassifiedComponents` just
     // validated against, no second pass over the graph.
     const ungroundedComponents = findUngroundedComponents(this.ruleset.components, classifiedComponents);
-    return { verdict, gates, advisories, scannedAt, ungroundedComponents };
+    return { verdict, gates, advisories, scannedAt, ungroundedComponents, skippedNestedCheckouts: graph.skippedNestedCheckouts };
   }
 
   /**
@@ -273,7 +299,19 @@ export class GateOrchestrator {
     // manifest inventory's files, a deliberately disjoint scan domain from the graph above
     // (ADR 013) — never derived from `allViolations` (see the architecture gate's comment above).
     const knownFiles = new Set(inventory.manifests.map((m) => m.file));
-    const moves = this.baselineStore.reconcileMoves(allViolations, knownFiles);
+    // `[]`, stated explicitly because `BaselineStore.reconcileMoves` requires it (review 2026-08-13:
+    // it was optional, and this exact call site omitted it, silently reinstating the pre-F1
+    // behaviour with no type error). The fact this rests on, verified by reading the manifest domain
+    // end to end: `ManifestScanOptions` carries only `rootDir` and `excludes`, `ManifestInventory`
+    // has no `skippedNestedCheckouts` field, and the concrete scanner (`plugin-typescript`'s
+    // `scanManifests`) enumerates the root `package.json` plus `pnpm-workspace.yaml` glob members
+    // with no `.git` test anywhere — so this domain performs no nested-checkout auto-exclusion, and
+    // no manifest is ever absent from `knownFiles` for that reason. A manifest that leaves this
+    // inventory left for a genuine reason (dropped from the workspace globs, deleted, malformed) —
+    // precisely the case FRAGILE #7's move-rescue exists to handle, so passing the architecture
+    // gate's skipped paths here would suppress a legitimate rescue. Pinned by an executable test
+    // (`plugin-typescript/test/manifest.test.ts`), not left as an assertion in this comment.
+    const moves = this.baselineStore.reconcileMoves(allViolations, knownFiles, []);
     const newViolations = allViolations.filter((v) => !this.baselineStore.isBaselined(v.id));
     const baselinedCount = allViolations.length - newViolations.length;
     const rulesWithNoViolations = securityRules.filter(
@@ -307,6 +345,7 @@ export class GateOrchestrator {
           rootDir: options.rootDir,
           components: this.ruleset.components,
           excludes: options.excludes,
+          ...(options.includeNestedCheckouts === undefined ? {} : { includeNestedCheckouts: options.includeNestedCheckouts }),
         }),
       ),
     );
@@ -320,12 +359,16 @@ export class GateOrchestrator {
     // uses within one scan.
     const externalNodesById = new Map<string, DependencyGraph['externalNodes'][number]>();
     for (const g of graphs) for (const n of g.externalNodes) externalNodesById.set(n.id, n);
+    // Dedup skipped-checkout paths the same way (Stage 5's multi-plugin merge is written
+    // generically; a shared subtree could in principle be walked by more than one plugin).
+    const skippedNestedCheckouts = [...new Set(graphs.flatMap((g) => g.skippedNestedCheckouts))].sort();
     return {
       nodes: graphs.flatMap((g) => g.nodes),
       edges: graphs.flatMap((g) => g.edges),
       externalNodes: [...externalNodesById.values()],
       externalEdges: graphs.flatMap((g) => g.externalEdges),
       uncertain: graphs.flatMap((g) => g.uncertain),
+      skippedNestedCheckouts,
       scannedAt: Math.min(...graphs.map((g) => g.scannedAt)),
     };
   }

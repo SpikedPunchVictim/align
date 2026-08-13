@@ -128,6 +128,7 @@ describe('BUG #14 — a corrupt .align/generated-rules.json is a clean non-zero 
       autoMerge: false,
       allowUntested: false,
       allowSymbolRemovals: false,
+      allowIncomplete: false,
       dryRun: true,
     };
     const { result: code, errors } = await withCapturedConsole(() => runAgentCommand(tmpDir, options));

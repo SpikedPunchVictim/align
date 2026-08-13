@@ -32,6 +32,9 @@ export interface AgentRunCliOptions {
   readonly autoMerge: boolean;
   readonly allowUntested: boolean;
   readonly allowSymbolRemovals: boolean;
+  /** ADR 023 tier 2, threaded straight through to `AgentRunOptions.allowIncomplete` — see that
+   * field's doc comment (`@spikedpunch/align-agent`'s `run.ts`) for the invariant it overrides. */
+  readonly allowIncomplete: boolean;
   readonly model?: string;
   readonly dryRun: boolean;
   readonly telemetryPreConfig?: boolean;
@@ -41,6 +44,7 @@ function buildEffects(
   rootDir: string,
   ruleset: Awaited<ReturnType<typeof loadConfig>>['ruleset'],
   excludes: readonly string[],
+  includeNestedCheckouts: readonly string[],
   hostRules: HostPredicateRegistry,
   options: AgentRunCliOptions,
   fixProvider: MemoizingFixProvider,
@@ -50,9 +54,9 @@ function buildEffects(
     fixProvider,
     runCheck: async () => {
       const { orchestrator } = createOrchestrator(ruleset, readBaseline(rootDir), hostRules);
-      return orchestrator.check({ rootDir, excludes });
+      return orchestrator.check({ rootDir, excludes, includeNestedCheckouts });
     },
-    scanGraph: () => plugin.scanner.scan({ rootDir, components: ruleset.components, excludes }),
+    scanGraph: () => plugin.scanner.scan({ rootDir, components: ruleset.components, excludes, includeNestedCheckouts }),
     readFile: async (p: RepoRelativePath) => fs.readFileSync(path.join(rootDir, p), 'utf8'),
     writeFile: async (p: RepoRelativePath, content: string) => {
       fs.mkdirSync(path.dirname(path.join(rootDir, p)), { recursive: true });
@@ -153,6 +157,13 @@ function printResult(result: AgentRunResult): void {
       case 'final-check-red':
         console.log('  TERMINAL MERGE escalated: the FULL check is red on the rebased tip — investigate before merging.');
         break;
+      case 'final-check-incomplete':
+        console.log(
+          '  TERMINAL MERGE escalated: the FULL check on the rebased tip is green but could not resolve all ' +
+            'dependencies (missing-dependencies advisory) — an absent violation may be unobservable rather ' +
+            'than fixed. Re-run with dependencies installed, or pass --allow-incomplete.',
+        );
+        break;
       case 'no-commits':
         console.log('  No group reached DONE — nothing to merge.');
         break;
@@ -164,7 +175,7 @@ function exitCodeFor(result: AgentRunResult): number {
   if (result.verdict === 'refused' || result.verdict === 'partial-escalated') return 1;
   if (result.verdict === 'done') {
     const tm = result.terminalMerge;
-    if (tm?.status === 'rebase-conflict' || tm?.status === 'final-check-red') return 1;
+    if (tm?.status === 'rebase-conflict' || tm?.status === 'final-check-red' || tm?.status === 'final-check-incomplete') return 1;
     return 0;
   }
   return 0; // nothing-to-fix / dry-run
@@ -181,10 +192,10 @@ export async function runAgentCommand(rootDir: string, options: AgentRunCliOptio
   } catch (err) {
     return reportCliError('align agent run', err);
   }
-  const { ruleset, excludes, hostRules, telemetry } = loaded;
+  const { ruleset, excludes, includeNestedCheckouts, hostRules, telemetry } = loaded;
   const anthropicProvider = options.model !== undefined ? new AnthropicFixProvider({ model: options.model }) : new AnthropicFixProvider();
   const memoizingProvider = new MemoizingFixProvider(anthropicProvider);
-  const effects = buildEffects(rootDir, ruleset, excludes, hostRules, options, memoizingProvider);
+  const effects = buildEffects(rootDir, ruleset, excludes, includeNestedCheckouts, hostRules, options, memoizingProvider);
 
   const baseBranch = await effects.git.currentBranch();
   const runOptions: AgentRunOptions = {
@@ -192,6 +203,7 @@ export async function runAgentCommand(rootDir: string, options: AgentRunCliOptio
     mode: options.autoMerge ? 'auto-merge' : 'pr',
     allowUntested: options.allowUntested,
     allowSymbolRemovals: options.allowSymbolRemovals,
+    allowIncomplete: options.allowIncomplete,
     dryRun: options.dryRun,
     workBranchName: defaultWorkBranchName(),
     baseBranch,

@@ -43,6 +43,7 @@ function runWith(violations: Violation[], overrides: Partial<CheckRun> = {}): Ch
     advisories: [],
     scannedAt: Date.now(),
     ungroundedComponents: [],
+    skippedNestedCheckouts: [],
     ...overrides,
   };
 }

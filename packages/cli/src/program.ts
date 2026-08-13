@@ -290,6 +290,12 @@ export function buildProgram(): Command {
       .option('--auto-merge', 'fast-forward merge into the base branch and delete the work branch instead of opening a PR', false)
       .option('--allow-untested', 'allow PLAN+FIX on files with zero detected test coverage (default: refuse)', false)
       .option('--allow-symbol-removals', 'allow a fix that deletes an exported symbol to commit (default: escalate)', false)
+      .option(
+        '--allow-incomplete',
+        'trust a VERIFY or terminal-merge check that is green but could not resolve all dependencies (ADR 023 ' +
+          'tier 2) — an absent violation on an incomplete scan may be unobservable rather than fixed',
+        false,
+      )
       .option('--model <id>', 'override the FixProvider model id (default: config/env ALIGN_AGENT_MODEL, else claude-sonnet-5)')
       .option('--dry-run', 'DISCOVER+GROUP+PLAN only — print proposed edits without applying or committing', false),
   ).action(
@@ -299,6 +305,7 @@ export function buildProgram(): Command {
       autoMerge: boolean;
       allowUntested: boolean;
       allowSymbolRemovals: boolean;
+      allowIncomplete: boolean;
       model?: string;
       dryRun: boolean;
       telemetry?: boolean;
@@ -312,6 +319,7 @@ export function buildProgram(): Command {
         autoMerge: opts.autoMerge,
         allowUntested: opts.allowUntested,
         allowSymbolRemovals: opts.allowSymbolRemovals,
+        allowIncomplete: opts.allowIncomplete,
         ...(opts.model !== undefined ? { model: opts.model } : {}),
         dryRun: opts.dryRun,
         ...(telemetryPreConfig !== undefined ? { telemetryPreConfig } : {}),
