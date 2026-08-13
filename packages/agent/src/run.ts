@@ -8,6 +8,7 @@
  */
 import {
   applyFixProposalFiles,
+  isRunComplete,
   toRepoRelativePath,
   toRuleId,
   type CheckRun,
@@ -32,6 +33,13 @@ export interface AgentRunOptions {
   readonly mode: 'pr' | 'auto-merge';
   readonly allowUntested: boolean;
   readonly allowSymbolRemovals: boolean;
+  /** ADR 023 tier 2, mirrored from `init`/`prune`/`upgrade`'s `--allow-incomplete`: by default, a
+   * green-but-incomplete (`missing-dependencies` advisory) VERIFY or terminal-merge check must NOT
+   * be trusted as evidence a fix worked — an absent violation on such a run may be unobservable
+   * rather than fixed (ADR 023's "second axis"). Passing this restores the old behaviour of trusting
+   * any green run regardless of completeness. See `isRunComplete` (`@spikedpunch/align-core`,
+   * `gates/advisories.ts`) — the one shared predicate this option gates, never re-derived here. */
+  readonly allowIncomplete: boolean;
   readonly dryRun: boolean;
   readonly workBranchName: string;
   readonly baseBranch: string;
@@ -47,6 +55,7 @@ export type TerminalMergeOutcome =
   | { readonly status: 'no-commits' }
   | { readonly status: 'rebase-conflict' }
   | { readonly status: 'final-check-red'; readonly finalCheck: CheckRun }
+  | { readonly status: 'final-check-incomplete'; readonly finalCheck: CheckRun }
   | { readonly status: 'auto-merged' }
   | { readonly status: 'pr-created'; readonly url: string; readonly summary: string }
   | { readonly status: 'no-remote-or-no-gh'; readonly summary: string; readonly branch: string };
@@ -107,6 +116,16 @@ async function buildInputForFile(
 
 const ZERO_COVERAGE_REASON =
   'zero test coverage — no scanned test file transitively imports this file (pass --allow-untested to override)';
+
+/** Green≠correct guard (c), ADR 023 tier 2: a VERIFY (or terminal-merge) run whose gates are all
+ * green but which could not resolve the whole dependency graph (`missing-dependencies` advisory,
+ * `isRunComplete`) must not be trusted as proof a fix worked — a violation routed through a dropped
+ * edge is unobservable, not fixed. Overridable with `--allow-incomplete`, worded and named to match
+ * the same flag on `init`/`prune`/`upgrade`. */
+const INCOMPLETE_VERIFY_REASON =
+  'VERIFY produced a green run that could not resolve all dependencies (missing-dependencies advisory) — an ' +
+  'absent violation may be unobservable rather than fixed, so this cannot be trusted as evidence the fix ' +
+  'worked (pass --allow-incomplete to override)';
 
 /** Green≠correct guard (b): zero-coverage refusal, shared by the real per-group loop (`runGroup`)
  * and the `--dry-run` planning loop (`planOnly`). A file that would be escalated for zero
@@ -225,6 +244,14 @@ async function runGroup(
 
     const remaining = checkRun.gates.flatMap((g) => g.violations).filter((v) => touchedPaths.includes(v.file));
     if (remaining.length === 0) {
+      // Green≠correct guard (c): a green VERIFY that could not resolve the whole dependency graph
+      // is not evidence this group's violation is actually gone (ADR 023 tier 2) — escalate rather
+      // than report DONE. The commit stays in place (consistent with the gate-error escalation
+      // above): this cannot be proven wrong, only unproven, so reverting a plausibly-correct fix
+      // would be no more justified than keeping it.
+      if (!isRunComplete(checkRun) && !options.allowIncomplete) {
+        return { status: 'escalated', file, reason: INCOMPLETE_VERIFY_REASON };
+      }
       return { status: 'done', file, commitSha: sha, rationale: proposal.rationale };
     }
 
@@ -258,6 +285,15 @@ async function performTerminalMerge(
 
   const finalCheck = await effects.runCheck();
   if (finalCheck.verdict !== 'green') return { status: 'final-check-red', finalCheck };
+
+  // Green≠correct guard (c), ADR 023 tier 2: the rebased-tip check is the last line of defense
+  // before merging/opening a PR — a green verdict that could not resolve the whole dependency graph
+  // is not proof the rebase left the repo actually clean. Gates BOTH terminal-merge paths (not just
+  // --auto-merge): the decided design is "the terminal merge must not proceed on an incomplete run",
+  // and a PR built from an unverified green is still asserting the fixes are good.
+  if (!isRunComplete(finalCheck) && !options.allowIncomplete) {
+    return { status: 'final-check-incomplete', finalCheck };
+  }
 
   if (options.mode === 'auto-merge') {
     await effects.git.ffMergeAndDeleteBranch(options.workBranchName, options.baseBranch);
