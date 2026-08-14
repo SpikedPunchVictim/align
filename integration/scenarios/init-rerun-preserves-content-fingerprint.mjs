@@ -38,11 +38,13 @@
 // does not require perturbing nest's source tree — so this scenario pins the cause and the two-arm
 // consequence is pinned by a unit test in core, where the rename is exact.
 //
-// EXPECTED TO BE RED UNTIL THE FIX LANDS, against `local` AND `0.1.4`. This scenario declares the
-// CORRECT behavior (ADR 025's model), and the behavior is currently wrong in both. `expectFailOn`
-// is deliberately NOT set: it means "this version is known-bad and must stay red", which is a
-// claim about a PUBLISHED artifact. Adding `'0.1.4'` here is correct only once `local` is green,
-// otherwise a green-on-local run could never distinguish "fixed" from "never ran".
+// `expectFailOn: ['0.1.4']` was added only AFTER `local` went green (fix: init.ts carries both
+// fields forward). It asserts the published artifact is known-bad and must STAY red — a claim that
+// is only meaningful once the fixed side passes, since otherwise a red run could not distinguish
+// "the bug" from "the scenario never ran". Verified against the real published 0.1.4, where it
+// fails at step 8 and NOT earlier: 0.1.4's `baseline accept` does write `contentFingerprint`
+// (shipped 2026-07-12, before the v0.1.4 tag), so step 5 passes there and the scenario fails for
+// the intended reason rather than incidentally.
 export default {
   id: 'init-rerun-preserves-content-fingerprint',
   project: 'nest',
@@ -54,6 +56,7 @@ export default {
   // `baseline accept`, which writes only `.align/baseline.json` + `.align/version.json` — both
   // already in that set. `introduce-arch-violation` edits `align.config.ts`, also already in it.
   // No path is added by this scenario that `init` alone does not already touch.
+  expectFailOn: ['0.1.4'],
   tags: ['destructive'],
   writeSet: ['package.json', 'package-lock.json', 'align.config.ts', 'CLAUDE.md', '.gitignore', '.align/baseline.json', '.align/version.json'],
   steps: [

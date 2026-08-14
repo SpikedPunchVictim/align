@@ -334,6 +334,26 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   // persist a stale path, which is the exact drift `store.reconcileMoves` exists to prevent
   // elsewhere. Always read `ruleId`/`file` off `v` (the current scan), never off `prior`.
   //
+  // `contentFingerprint` and `acceptedValue` ARE carried from `prior`, and the omission of that
+  // was a defect (repro: integration/scenarios/init-rerun-preserves-content-fingerprint.mjs, plus
+  // the two-arm unit test in core/test/baseline.test.ts). This rebuild is a whole-entry
+  // reconstruction, so every field it does not explicitly carry is silently DROPPED. Dropping
+  // these two is not cosmetic: `applyMoves` matches orphans on `contentFingerprint`, so an entry
+  // that lost it can never be rescued when its file is renamed — it becomes an unmatched orphan
+  // and the next `align baseline prune` DELETES it while reporting it as fixed, exit 0. Losing
+  // `acceptedValue` silently disables FRAGILE #8's `arch.metric` growth advisory for that entry.
+  //
+  // Both are spread conditionally rather than assigned, because `BaselineEntry` declares them
+  // optional for back-compat (`baseline/schema.ts`: files written before the fields existed must
+  // still parse) and writing an explicit `undefined` would serialize a null-ish key into every
+  // entry of every baseline align touches.
+  //
+  // NOT computed from `v` for entries that have no prior. `init`-seeded entries have never carried
+  // `contentFingerprint` in any release, so backfilling one here would newly make them eligible
+  // for move-transfer — a behavior change to the rescue path (the mechanism F1 was about), not a
+  // fix to this drop. It may well be the right follow-up; it needs its own justification and its
+  // own test, and it is deliberately not smuggled in here.
+  //
   // This is a merge of PROVENANCE, not a union of ENTRIES: an existing entry with no matching
   // fingerprint in `violations` still isn't in this map at all and is dropped, same as before —
   // that half stays governed by `partitionAndRefuseIfBaselineWriteAtRisk` above, which already
@@ -354,6 +374,8 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
             file: v.file,
             acceptedAt: prior?.acceptedAt ?? Date.now(),
             acceptedBy: prior?.acceptedBy ?? (options.acceptExisting ? ('accept-existing' as const) : ('init-seed' as const)),
+            ...(prior?.contentFingerprint === undefined ? {} : { contentFingerprint: prior.contentFingerprint }),
+            ...(prior?.acceptedValue === undefined ? {} : { acceptedValue: prior.acceptedValue }),
           };
         }),
         ...seedAtRisk.retained,

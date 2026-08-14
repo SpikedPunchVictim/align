@@ -427,3 +427,72 @@ describe('baseline move-transfer (ADR 006)', () => {
     });
   });
 });
+
+// The consequence half of the `init`-strips-contentFingerprint defect. The CAUSE (init rebuilding
+// entries without the field) is pinned end-to-end by
+// `integration/scenarios/init-rerun-preserves-content-fingerprint.mjs`; this is the part that makes
+// it severity-zero rather than cosmetic, pinned here because the rename can be exact.
+//
+// These two tests are deliberately identical except for one thing: whether the accepted entry
+// carries a `contentFingerprint`. Everything else — the rename, the live violation, `knownFiles` —
+// is the same. Before the `init` fix, a re-run of `align init` was exactly the operation that
+// turned the first store into the second.
+describe('move-transfer depends on contentFingerprint — the two arms of the init-strip defect', () => {
+  const ORIGINAL_FILE = 'src/api/old.ts';
+  const RENAMED_FILE = 'src/api/new.ts';
+  const SNIPPET = `import './target'`;
+
+  /** The same violation after its file was renamed: identical rule and identical snippet, new path.
+   * Its `id` differs because the path is one of the fingerprint's inputs — which is precisely why
+   * move-transfer needs `contentFingerprint` (rule + snippet, path-independent) to recognize it. */
+  function renamedViolation() {
+    return makeViolation({
+      id: computeFingerprint(['no-dependency', 'r1', RENAMED_FILE, 'target.ts', './target']),
+      file: toRepoRelativePath(RENAMED_FILE),
+      snippet: SNIPPET,
+    });
+  }
+
+  const originalId = computeFingerprint(['no-dependency', 'r1', ORIGINAL_FILE, 'target.ts', './target']);
+  // The rename means the original path is GONE from the scan — the precondition move-transfer
+  // requires (FRAGILE #7: a transfer only fires when the orphan's own file genuinely disappeared).
+  const knownFilesAfterRename = new Set([toRepoRelativePath(RENAMED_FILE)]);
+
+  it('WITH contentFingerprint (an entry written by `baseline accept`): the rename is rescued', () => {
+    const store = new InMemoryBaselineStore();
+    store.accept(
+      [makeViolation({ id: originalId, file: toRepoRelativePath(ORIGINAL_FILE), snippet: SNIPPET })],
+      'manual',
+    );
+
+    const moved = renamedViolation();
+    const result = store.prune([moved], knownFilesAfterRename);
+
+    expect(result.moved).toEqual([{ from: originalId, to: moved.id }]);
+    expect(result.removed).toEqual([]);
+    expect(store.isBaselined(moved.id)).toBe(true); // debt stays accepted at its new path
+    expect(store.show()[0]?.acceptedBy).toBe('manual'); // and the human's consent survives the move
+  });
+
+  it('WITHOUT contentFingerprint (the same entry after an `init` re-run): prune DELETES it and calls it fixed', () => {
+    // Byte-for-byte what `init` used to write: provenance preserved, contentFingerprint dropped.
+    const store = new InMemoryBaselineStore([
+      {
+        fingerprint: originalId,
+        ruleId: toRuleId('r1'),
+        file: toRepoRelativePath(ORIGINAL_FILE),
+        acceptedAt: 1_700_000_000_000,
+        acceptedBy: 'manual',
+      },
+    ]);
+
+    const moved = renamedViolation();
+    const result = store.prune([moved], knownFilesAfterRename);
+
+    // The defect, stated as an assertion: the identical rename is now unrecognizable.
+    expect(result.moved).toEqual([]);
+    expect(result.removed).toEqual([originalId]); // reported to the user as "fixed"
+    expect(store.isBaselined(moved.id)).toBe(false); // ...while the violation is still there, now red
+    expect(store.show()).toHaveLength(0); // the consent record is gone, unrecoverably
+  });
+});

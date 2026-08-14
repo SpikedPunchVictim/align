@@ -5,6 +5,7 @@ import { readBaseline, writeBaseline } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
 import { describeRetainedEntries, partitionSkippedCheckoutCandidates } from '../nested-checkout-retention.js';
+import { describeUnverifiablePrunes, selectUnverifiablePrunes } from '../unverified-prune.js';
 import { computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
 
 /**
@@ -185,6 +186,13 @@ export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, 
     `Pruned ${forfeited.length} fixed violation(s) from the baseline; ` +
       `${result.moved.length} ${result.moved.length === 1 ? 'entry' : 'entries'} transferred (file moves).`,
   );
+  // Not every entry in that "fixed" count was verified to be fixed — see `unverified-prune.ts`.
+  // Reported after the headline rather than folded into it: the deletion itself is almost always
+  // correct, so this qualifies the claim rather than contradicting it.
+  const unverifiable = selectUnverifiablePrunes(forfeited, knownFiles);
+  if (unverifiable.length > 0) {
+    console.log(describeUnverifiablePrunes(unverifiable));
+  }
   if (retained.length > 0) {
     console.log(describeRetainedEntries(retained, run.skippedNestedCheckouts));
   }
