@@ -136,7 +136,7 @@ offered as a transfer candidate. A genuine rename still transfers exactly as bef
 baseline written by an earlier version, nothing in it needs repair — the defect was in what a scan
 would do next, not in anything already stored.
 
-### Deleting baseline entries now requires a scan that saw everything
+### Deleting baseline entries from a scan align cannot trust is now refused
 
 `align baseline prune` and `align init` both delete or overwrite accepted baseline entries. Both
 used to do so on the results of any scan, including one that failed. A scan that errors evaluates no
@@ -212,9 +212,11 @@ for untested files, you will now see those files escalated instead.
 ### Accepting violations into the baseline over MCP is now opt-in
 
 The `align_propose_rules` MCP tool has an `accept_new_into_baseline` option that writes to
-`.align/baseline.json`. It is now refused by default. An agent granting itself amnesty from a rule
-it is failing is a decision the baseline model reserves for a human, and the tool was writing
-without one.
+`.align/baseline.json`. Any call where it would actually write — the option set, and new violations
+present to accept — is now refused by default. An agent granting itself amnesty from a rule it is
+failing is a decision the baseline model reserves for a human, and the tool was writing without one.
+(A call carrying the option when there is no new debt writes nothing either way, so there is nothing
+to refuse and it still succeeds.)
 
 A human can enable it per project by adding `export const allowBaselineFromMcp = true;` to
 `align.config.ts`. No MCP tool can set that — only an edit to the repository's own config. When the

@@ -85,7 +85,7 @@ type error**: `runSecurityGate` in `core/src/orchestrator.ts` called
 explicitly. A caller with genuinely nothing to pass now says so, which is a reviewable decision
 rather than an invisible default.
 
-(The concrete class keeps a `= []` default on its own methods so the 11 two-argument calls in
+(The concrete class keeps a `= []` default on its own methods so the 10 two-argument calls in
 `core/test/baseline.test.ts` still compile; the interface is what production code holds. The
 residual — a caller holding the concrete class could still omit it — is stated in the source and
 was checked: both `.prune(...)` call sites, `commands/baseline.ts` and `commands/upgrade.ts`, pass

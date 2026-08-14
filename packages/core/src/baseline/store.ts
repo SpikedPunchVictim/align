@@ -162,7 +162,7 @@ export class InMemoryBaselineStore implements BaselineStore {
 
   // `= []` on the CLASS implementations of `reconcileMoves`/`prune`/`applyMoves` below, while the
   // INTERFACE declares the parameter required (see its doc comments): a default satisfies a required
-  // interface parameter, which keeps the 11 two-argument calls in `core/test/baseline.test.ts` (which
+  // interface parameter, which keeps the two-argument calls in `core/test/baseline.test.ts` (which
   // construct this class directly) compiling. The residual this deliberately leaves: a caller
   // holding the concrete class rather than `BaselineStore` can still omit it. Verified 2026-08-13 —
   // no production code does; the only two `.prune(...)` call sites (`commands/baseline.ts`,
