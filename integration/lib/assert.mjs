@@ -70,8 +70,10 @@ export function evaluateMcpExpect(expect, mcpResult) {
 
 /** Evaluates a standalone `assert` step against the snapshot store (label -> captured state,
  * populated by `snapshot:` steps) and the current captured state. `kind` is a small, closed
- * vocabulary (ADR 025 increment 1 needs exactly these four) — extend deliberately, not by
- * convention, since an unrecognized kind throws rather than silently passing. */
+ * vocabulary — extend deliberately, not by convention, since an unrecognized kind throws rather
+ * than silently passing. (Increment 1 needed exactly four; `jsonArrayEveryHasField` was added for
+ * the `init`-strips-contentFingerprint scenario, which has to assert on a FIELD's presence across
+ * every baseline entry — no existing kind could see inside an array's elements.) */
 export function evaluateAssert(assertSpec, snapshots, currentState) {
   const { kind } = assertSpec;
   if (kind === 'fileUnchanged' || kind === 'fileChanged') {
@@ -115,6 +117,42 @@ export function evaluateAssert(assertSpec, snapshots, currentState) {
     return value.length === assertSpec.equals
       ? { pass: true, failures: [] }
       : { pass: false, failures: [`expected ${assertSpec.file} to have ${assertSpec.equals} entries, got ${value.length}`] };
+  }
+  if (kind === 'jsonArrayEveryHasField') {
+    const raw = resolveNormalized(currentState, assertSpec.file);
+    if (raw === undefined) return { pass: false, failures: [`'${assertSpec.file}' is not present`] };
+    const value = JSON.parse(raw);
+    if (!Array.isArray(value)) return { pass: false, failures: [`'${assertSpec.file}' is not a JSON array`] };
+    // An empty array satisfies BOTH `equals: true` and `equals: false` vacuously — "every entry
+    // has it" and "no entry has it" are each trivially true of nothing. That is precisely the
+    // false-green F6 fixed for `jsonArrayLength` (a degraded assertion comparing [] with [] and
+    // passing without observing anything), so fail loudly rather than let a scenario whose seed
+    // silently produced zero entries report success.
+    if (value.length === 0) {
+      return {
+        pass: false,
+        failures: [
+          `assert jsonArrayEveryHasField: '${assertSpec.file}' is an EMPTY array — this assertion would pass ` +
+            'vacuously for either value of `equals`, so it is treated as a scenario bug (the step that was ' +
+            'supposed to seed entries produced none).',
+        ],
+      };
+    }
+    const nonObjects = value.filter((e) => e === null || typeof e !== 'object').length;
+    if (nonObjects > 0) {
+      return { pass: false, failures: [`'${assertSpec.file}' has ${nonObjects} entr(ies) that are not objects`] };
+    }
+    const withField = value.filter((e) => Object.prototype.hasOwnProperty.call(e, assertSpec.field)).length;
+    const wanted = assertSpec.equals === true ? value.length : 0;
+    return withField === wanted
+      ? { pass: true, failures: [] }
+      : {
+          pass: false,
+          failures: [
+            `expected every one of ${assertSpec.file}'s ${value.length} entries to ` +
+              `${assertSpec.equals === true ? 'HAVE' : 'LACK'} '${assertSpec.field}', but ${withField} of them have it`,
+          ],
+        };
   }
   if (kind === 'exists') {
     const raw = resolveNormalized(currentState, assertSpec.file);
