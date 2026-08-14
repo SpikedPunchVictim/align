@@ -85,10 +85,16 @@ describe('detectVersionSkewAdvisory (global-vs-local align version skew)', () =>
       const childRoot = path.join(parent, 'packages', 'app');
       const childCoreDir = path.join(childRoot, 'node_modules', '@spikedpunch', 'align-core');
       fs.mkdirSync(childCoreDir, { recursive: true });
-      fs.writeFileSync(path.join(childCoreDir, 'package.json'), JSON.stringify({ name: '@spikedpunch/align-core', version: '0.2.0' }));
+      // Deliberately a version align will never ship. This fixture used to say '0.2.0', chosen
+      // when that was safely not the running version — the 0.2.0 bump then made the closest core
+      // MATCH `ALIGN_VERSION`, so no skew was detected and the assertion below read `undefined`.
+      // The test is about resolution ORDER, not about any particular number, so the number must be
+      // one no bump can ever collide with.
+      const NEVER_THE_RUNNING_VERSION = '9.9.9';
+      fs.writeFileSync(path.join(childCoreDir, 'package.json'), JSON.stringify({ name: '@spikedpunch/align-core', version: NEVER_THE_RUNNING_VERSION }));
 
       const advisory = detectVersionSkewAdvisory(childRoot);
-      expect(advisory?.message).toContain('0.2.0');
+      expect(advisory?.message).toContain(NEVER_THE_RUNNING_VERSION);
       expect(advisory?.message).not.toContain('0.1.0');
       expect(advisory?.message).toContain(path.join(childCoreDir, 'package.json'));
     });

@@ -123,9 +123,9 @@ const TEXT_RULES = [
  * number a scenario legitimately prints (a violation count, a line number, a nest package
  * version like `11.1.26` embedded in a scanned file path) and that is exactly the "wrong
  * direction" failure ADR 025 warns about ("wrong in the other [direction] and real regressions
- * are hidden"). Confined to align's own five published versions plus the literal string `local`.
+ * are hidden"). Confined to align's own six published versions plus the literal string `local`.
  */
-const KNOWN_ALIGN_VERSIONS = ['0.1.0', '0.1.1', '0.1.2', '0.1.3', '0.1.4'];
+const KNOWN_ALIGN_VERSIONS = ['0.1.0', '0.1.1', '0.1.2', '0.1.3', '0.1.4', '0.2.0'];
 
 function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -149,8 +149,8 @@ const KNOWN_VERSION_PATTERN = new RegExp(`(?<![\\d.])(?:${KNOWN_ALIGN_VERSIONS.m
  * — none of them assert "the installed align identifies itself as X". A scenario that DOES care
  * (a future version-skew or `align docs`/`align skill` cross-version comparison scenario, ADR 025
  * §7 table) must request `keepVersion: true` on its capture calls, or this rule would normalize
- * away the exact signal being tested. Genuinely confined to align's own five published versions
- * now that boundary anchors are in place (F7) — before the fix, "confined to align's own five
+ * away the exact signal being tested. Genuinely confined to align's own six published versions
+ * now that boundary anchors are in place (F7) — before the fix, "confined to align's own
  * published versions" was aspirational prose the substring-replace implementation did not honor.
  */
 function normalizeVersionInText(text) {

@@ -9,14 +9,24 @@
  * one breaks CI, which is ADR 022's own words: "a released version with no registry entry is a
  * build failure, not an empty section."
  *
- * **Scoped to the current version only, deliberately — not backfilled to 0.1.0–0.1.3.** Those
+ * **Scoped to the current version only, deliberately — not backfilled to 0.1.0–0.1.4.** Those
  * releases shipped before `.align/version.json` or this registry existed, and ADR 022's own
  * provenance-failure section documents, as its primary evidence, that nothing in this repo can
  * reliably reconstruct what changed in an old release after the fact (the same investigation that
  * failed to date `baseline.json`'s writer). Authoring synthetic notes/validators for those
  * versions now would assert a fact nobody verified — worse than the honest gap. Enforcement here
  * starts at the version this slice ships in and applies going forward: every version from here on
- * must have an entry, but this registry makes no completeness claim about 0.1.0–0.1.3.
+ * must have an entry, but this registry makes no completeness claim about 0.1.0–0.1.4.
+ *
+ * **0.1.4 deliberately has no entry, and once did.** An earlier revision keyed this registry — and
+ * `UPGRADING.md`'s corresponding section — to `0.1.4`, describing the fingerprint-churn fixes, the
+ * `**` selector change and the `.align/version.json` stamp as though they had shipped in it. They
+ * had not: the `v0.1.4` tag is the published release, and every one of those commits lands after
+ * it. The notes were describing unreleased work under a released version's name. Keying them to
+ * 0.2.0, where they actually ship, is what makes `align upgrade --from 0.1.4` correct — under the
+ * old keying it selected entries strictly newer than 0.1.4 and so skipped the very notes a 0.1.4
+ * user most needed. The published 0.1.4 therefore has no entry because nothing shipped in it that
+ * this registry is in a position to describe.
  *
  * **Notes come from `notes.generated.ts`, never a hand-typed literal here** (ADR 022, ADR 021's
  * one-record invariant). That file is compiled from the repo-root `UPGRADING.md` by
@@ -41,53 +51,30 @@ import { globDoubleStarSelectorDriftValidator } from './validators/glob-double-s
 import { baselineEntriesInSkippedCheckoutsValidator } from './validators/baseline-entries-in-skipped-checkouts.js';
 import { globDoubleStarSelectorRewriteTransform } from './transforms/glob-double-star-rewrite.js';
 
-const CURRENT_ENTRY_VERSION = '0.1.4';
-
-/**
- * The next release's entry, authored BEFORE `packages/cli/package.json`'s `version` is bumped to
- * it. That ordering is deliberate and safe in both directions:
- *
- *  - It cannot make the completeness test pass falsely. `migration-registry-completeness.test.ts`
- *    asks whether the CURRENT version (read from `package.json`, still `0.1.4`) has an entry — an
- *    entry for some OTHER version has no bearing on that question, and `hasEntryForVersion` matches
- *    the exact version string, never a prefix.
- *  - It cannot leak this version's notes or validators into a 0.1.4 user's `align upgrade`.
- *    `selectRange` excludes entries newer than `to` (= the running binary's version) in every one of
- *    its branches, including the `from: 'unknown'` one — see its "Entries newer than `to`" clause,
- *    which exists for exactly this shape. This entry activates when, and only when, the version
- *    bump lands.
- *
- * Both properties are asserted, not assumed (`migration-skipped-checkout-baseline-validator.test.ts`).
- */
-const NEXT_ENTRY_VERSION = '0.2.0';
+const CURRENT_ENTRY_VERSION = '0.2.0';
 
 export const MIGRATION_REGISTRY: readonly VersionRegistryEntry[] = [
   {
     version: CURRENT_ENTRY_VERSION,
+    // Sourced from the compiled notes by key, never hand-typed here (ADR 021's one-record
+    // invariant) — `UPGRADING.md` is the single authored record and `notes.generated.ts` is its
+    // compiled form. `hasNotesForVersion` is what turns an empty result into a build failure now
+    // that this version is the released one.
     notes: COMPILED_NOTES[CURRENT_ENTRY_VERSION] ?? [],
-    validators: [globDoubleStarSelectorDriftValidator],
+    validators: [globDoubleStarSelectorDriftValidator, baselineEntriesInSkippedCheckoutsValidator],
     // task #16 slice E: "rewrite this selector so its match set is exactly what it was before
     // 0.2.0" (ADR 022's headline 0.2.0 transform candidate), paired with the validator above per
     // its own precondition.
+    //
+    // `baselineEntriesInSkippedCheckoutsValidator` gets **no transform, deliberately** — ADR 022
+    // admission criterion 2: a transform's remediation must be "mechanical and unambiguous — one
+    // correct answer, derivable from state align can already observe." Here the two available
+    // answers (opt the checkout back in via `includeNestedCheckouts`, or let the entries stay
+    // dormant) are an *intent* decision about whether that subtree is part of this repo's
+    // architecture at all, which nothing align can observe decides. Per the same criterion,
+    // "anything requiring authorial intent stays validator-only", and ADR 022 names that a correct
+    // end state, not an unfinished one: "Some validators will never acquire a transform."
     transforms: [{ validator: globDoubleStarSelectorDriftValidator, transform: globDoubleStarSelectorRewriteTransform }],
-  },
-  {
-    version: NEXT_ENTRY_VERSION,
-    // Sourced from the compiled notes by key, never hand-typed here (ADR 021's one-record
-    // invariant) — `UPGRADING.md` is the single authored record and `notes.generated.ts` is its
-    // compiled form. The `?? []` mirrors the entry above; `hasNotesForVersion` is what turns an
-    // empty result into a failure once this version is the released one.
-    notes: COMPILED_NOTES[NEXT_ENTRY_VERSION] ?? [],
-    validators: [baselineEntriesInSkippedCheckoutsValidator],
-    // **No transform, deliberately** — ADR 022 admission criterion 2: a transform's remediation must
-    // be "mechanical and unambiguous — one correct answer, derivable from state align can already
-    // observe." Here the two available answers (opt the checkout back in via
-    // `includeNestedCheckouts`, or let the entries stay dormant) are an *intent* decision about
-    // whether that subtree is part of this repo's architecture at all, which nothing align can
-    // observe decides. Per the same criterion, "anything requiring authorial intent stays
-    // validator-only", and ADR 022 names that a correct end state, not an unfinished one: "Some
-    // validators will never acquire a transform."
-    transforms: [],
   },
 ];
 

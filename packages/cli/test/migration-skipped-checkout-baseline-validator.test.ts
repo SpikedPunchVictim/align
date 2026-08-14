@@ -206,28 +206,37 @@ describe('MIGRATION_REGISTRY — the 0.2.0 entry (ADR 022)', () => {
     expect(entry?.notes).toBe(COMPILED_NOTES['0.2.0']);
   });
 
-  it('carries the stranded-baseline validator and, deliberately, no transform', () => {
+  it('carries both 0.2.0 validators, and pairs a transform with the glob-drift one only', () => {
     const entry = MIGRATION_REGISTRY.find((e) => e.version === '0.2.0');
-    expect(entry?.validators.map((v) => v.id)).toEqual(['baseline-entries-in-skipped-checkouts']);
-    // ADR 022 criterion 2: the remediation here is an intent decision (opt the path back in vs let
-    // the entries go dormant), so this validator stays validator-only by design.
-    expect(entry?.transforms).toEqual([]);
+    expect(entry?.validators.map((v) => v.id)).toEqual([
+      'glob-double-star-selector-drift',
+      'baseline-entries-in-skipped-checkouts',
+    ]);
+    // ADR 022 criterion 2: the stranded-baseline remediation is an intent decision (opt the path
+    // back in vs let the entries go dormant), so it stays validator-only by design. Asserted as
+    // "no transform names THIS validator" rather than "the entry has no transforms", because the
+    // entry does carry one — for glob drift, whose rewrite is mechanical.
+    expect(entry?.transforms.map((t) => t.validator.id)).toEqual(['glob-double-star-selector-drift']);
+    expect(entry?.transforms.some((t) => t.validator.id === 'baseline-entries-in-skipped-checkouts')).toBe(false);
   });
 
-  it('does not disturb the completeness invariant for the CURRENT version, which is still 0.1.4', () => {
+  it('is the entry for the released version, and 0.1.4 deliberately has none', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(here, '..', 'package.json'), 'utf8')) as { version: string };
-    expect(pkg.version).toBe('0.1.4'); // guard: this test's premise, stated rather than assumed
     expect(hasEntryForVersion(MIGRATION_REGISTRY, pkg.version)).toBe(true);
     expect(hasNotesForVersion(MIGRATION_REGISTRY, pkg.version)).toBe(true);
+    // The published v0.1.4 tag predates every commit these notes describe. An earlier revision
+    // keyed them to 0.1.4 anyway, which is what made `--from 0.1.4` skip them (see below). The
+    // absence of a 0.1.4 entry is the corrected state, so it is pinned rather than left implicit.
+    expect(hasEntryForVersion(MIGRATION_REGISTRY, '0.1.4')).toBe(false);
   });
 
-  it("stays inert until the version bump: selectRange excludes an entry newer than the running binary's version", () => {
-    // Both branches an `align upgrade` on 0.1.4 can take — an unknown stamp (the common case) and a
-    // known one — must exclude 0.2.0, or a 0.1.4 user would be shown notes for a release they are
-    // not running.
-    expect(selectRange(MIGRATION_REGISTRY, 'unknown', '0.1.4').entries.map((e) => e.version)).toEqual(['0.1.4']);
-    expect(selectRange(MIGRATION_REGISTRY, '0.1.3', '0.1.4').entries.map((e) => e.version)).toEqual(['0.1.4']);
-    // ...and it DOES appear once the binary is 0.2.0, so the entry is not dead code.
+  it('reaches a 0.1.4 user by BOTH routes — the re-key defect was that --from 0.1.4 skipped these notes', () => {
+    // The common case: no `.align/version.json`, because nothing published ever wrote one.
+    expect(selectRange(MIGRATION_REGISTRY, 'unknown', '0.2.0').entries.map((e) => e.version)).toEqual(['0.2.0']);
+    // The documented remedy for a missing stamp. `selectRange` takes entries strictly NEWER than
+    // `from`, so while these notes were mis-keyed to 0.1.4 this call returned nothing at all and a
+    // user following that advice saw an empty migration. Both routes must now agree.
     expect(selectRange(MIGRATION_REGISTRY, '0.1.4', '0.2.0').entries.map((e) => e.version)).toEqual(['0.2.0']);
+    expect(selectRange(MIGRATION_REGISTRY, '0.1.3', '0.2.0').entries.map((e) => e.version)).toEqual(['0.2.0']);
   });
 });

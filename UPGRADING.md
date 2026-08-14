@@ -6,13 +6,13 @@ notes are authored **once, here**, and compiled, never hand-copied into a TypeSc
 could drift from this text.
 
 Sections are version-keyed: every `##` heading names exactly one released version (a bare semver,
-e.g. `## 0.1.4`), and every `###` heading under it is one migration note. The compiler treats a
+e.g. `## 0.2.0`), and every `###` heading under it is one migration note. The compiler treats a
 misnamed or out-of-place heading as a build failure, not a section it can silently skip.
 
 This document does not tell you what commands to run. It explains what changed and why, factually,
 per version. (Guided remediation is `align upgrade`'s job.)
 
-## 0.1.4
+## 0.2.0
 
 ### Why violation fingerprints changed
 
@@ -82,44 +82,6 @@ records which align version last touched `.align/`, so `align check` and `align 
 you when your artifacts were written by a different align than the one running now. Nothing to do —
 this is informational only.
 
-### Changes that need nothing from you
-
-Worth knowing about, but no migration:
-
-- **A corrupt `.align/baseline.json` now fails loudly** instead of being read as empty. Previously
-  a merge-conflicted baseline was silently treated as "nothing accepted", and the next
-  `align baseline accept` overwrote the file, destroying every entry. If you hit the new error,
-  the most likely cause is an unresolved merge conflict — resolve it or restore from git.
-- **`align init` and `align build --apply` refuse to rewrite a malformed align block** in
-  `CLAUDE.md` or `align.config.ts` rather than guessing which content is yours. Previously an
-  orphaned start marker could cause the next run to delete everything between it and the block —
-  in `align.config.ts`, that meant your ruleset. If you see the new error, restore exactly one
-  `<!-- align:start -->` … `<!-- align:end -->` pair, or delete both markers and let align
-  re-append.
-- **Config errors print cleanly and exit non-zero** instead of emitting a raw Node stack trace.
-  This covers a syntax error in `align.config.ts`, a missing `default` export, a malformed
-  `excludes`/`compositionRoots`/`knownPublicDeepImports` export, and a corrupt or schema-invalid
-  `.align/generated-rules.json`. Schema-invalid `.align/` artifacts now name the file and list
-  the offending fields instead of dumping a raw validation error.
-- **`align agent run` twice in the same day works.** It used to crash on a branch-name collision;
-  it now resumes onto the existing `align/fixes-<date>` branch, and refuses to continue at all
-  if it cannot land on that branch.
-- **`align doctor` honours your excludes the same way `align check` does.** It previously used a
-  laxer matcher, so you may see fewer advisories.
-- **Baseline move-transfer only fires on a real move.** Previously an orphaned entry was
-  transferred onto any current violation with matching rule id + snippet in a different file —
-  so fixing a violation in one file while adding a textually identical one in another, in the
-  same commit, silently baselined the new one and left CI green. A transfer now requires the
-  orphan's own file to have genuinely disappeared from the scan. Renames still transfer, which
-  is what the mechanism exists for; `align baseline prune` was affected too and is also fixed.
-- **A fix proposal listing the same file twice is rejected** rather than silently applying only
-  one of the two entries' edits.
-
-`align doctor` still always exits 0, including on a config error, which it reports as a
-`config-error` advisory.
-
-## 0.2.0
-
 ### Nested git checkouts are no longer scanned by default
 
 A directory below your repository root that carries its own `.git` — a `git worktree`, a submodule,
@@ -156,18 +118,20 @@ checkout they belong to.
 
 Move-transfer is the mechanism that keeps a renamed file's accepted debt accepted: when a violation
 disappears from one file and an identical one appears in another, align transfers the baseline entry
-rather than reporting the old one fixed and the new one new. Release 0.1.4 tightened it so a
-transfer requires the original file to have genuinely disappeared from the scan.
+rather than reporting the old one fixed and the new one new. An earlier change in this release
+tightened it so a transfer requires the original file to have genuinely disappeared from the scan
+(see "Baseline move-transfer only fires on a real move" below).
 
 Auto-excluding a nested checkout makes a file disappear from the scan in exactly that way, for an
-entirely different reason — the file did not move, align simply stopped looking at it. Before this
-release that was enough to make a checkout-resident baseline entry eligible for transfer, and the
-entry would then be re-homed onto any live violation sharing its rule and its source line. For a
-vendored copy of the same code that is the expected case, not a rare coincidence. The result was a
-violation nobody had ever reviewed carrying a real person's acceptance timestamp and name, on a
-plain `align check` with no destructive command involved, reported as a green verdict and exit 0.
+entirely different reason — the file did not move, align simply stopped looking at it. Without the
+fix described here, that would be enough to make a checkout-resident baseline entry eligible for
+transfer, and the entry would then be re-homed onto any live violation sharing its rule and its
+source line. For a vendored copy of the same code that is the expected case, not a rare coincidence.
+The result would be a violation nobody had ever reviewed carrying a real person's acceptance
+timestamp and name, on a plain `align check` with no destructive command involved, reported as a
+green verdict and exit 0.
 
-align now treats a file inside a skipped checkout as still known rather than as gone, so it is never
+align treats a file inside a skipped checkout as still known rather than as gone, so it is never
 offered as a transfer candidate. A genuine rename still transfers exactly as before. If you have a
 baseline written by an earlier version, nothing in it needs repair — the defect was in what a scan
 would do next, not in anything already stored.
@@ -194,9 +158,13 @@ exceptional one — a fresh clone in CI, or a monorepo whose cross-package impor
 `node_modules`, will hit it. That is the intended cost: those are precisely the runs whose "fixed"
 verdicts were never verified. The refusal names how many entries were at risk and why.
 
-`align init` also refuses now, rather than overwriting, when `.align/baseline.json` exists but
-cannot be parsed — a corrupt baseline is not an absent one. And a run of `align init` that refuses
-no longer leaves a `.align/` directory behind on a repo that did not have one.
+A corrupt baseline is likewise no longer treated as an absent one. `.align/baseline.json` used to be
+read as empty when it could not be parsed, so a merge-conflicted baseline silently became "nothing
+accepted" and the next `align baseline accept` overwrote the file, destroying every entry. Reading a
+malformed baseline now fails loudly wherever it is read, and `align init` refuses rather than
+overwriting when the file exists but cannot be parsed. If you hit that error, the most likely cause
+is an unresolved merge conflict — resolve it or restore from git. A run of `align init` that refuses
+also no longer leaves a `.align/` directory behind on a repo that did not have one.
 
 ### `align init` no longer restamps consent records it did not author
 
@@ -264,6 +232,10 @@ results no longer depend on where you were standing. Invoked outside any align p
 now reports that cleanly instead of scanning whatever happened to be under the current directory.
 `align doctor` keeps its always-exit-0 contract in that case and reports it as an advisory.
 
+If you kept a wrapper script, a shell alias, or a habit of `cd`-ing to the repository root before
+invoking align, that is no longer necessary. It remains harmless — align does not change your shell's
+working directory, and never did — so nothing breaks if you leave it in place.
+
 `align init` is the exception, and deliberately so: on a first run neither marker exists yet, so it
 stays scoped to the current directory. It prints the directory it is initializing before it writes
 anything, so a run from the wrong place is visible immediately.
@@ -291,17 +263,41 @@ lockfile onto the new scheme with no other effect. Until then, `align check --fr
 `align build --verify` recognize a lockfile on the old scheme and report it distinctly from a
 genuine hand-edit, rather than accusing an untouched repo of tampering.
 
-### Smaller 0.2.0 changes that need nothing from you
+### Changes that need nothing from you
 
 Worth knowing about, but no migration:
 
+- **`align init` and `align build --apply` refuse to rewrite a malformed align block** in
+  `CLAUDE.md` or `align.config.ts` rather than guessing which content is yours. Previously an
+  orphaned start marker could cause the next run to delete everything between it and the block —
+  in `align.config.ts`, that meant your ruleset. If you see the new error, restore exactly one
+  `<!-- align:start -->` … `<!-- align:end -->` pair, or delete both markers and let align
+  re-append.
+- **Config errors print cleanly and exit non-zero** instead of emitting a raw Node stack trace.
+  This covers a syntax error in `align.config.ts`, a missing `default` export, a malformed
+  `excludes`/`compositionRoots`/`knownPublicDeepImports` export, and a corrupt or schema-invalid
+  `.align/generated-rules.json`. Schema-invalid `.align/` artifacts now name the file and list
+  the offending fields instead of dumping a raw validation error.
+- **`align agent run` twice in the same day works.** It used to crash on a branch-name collision;
+  it now resumes onto the existing `align/fixes-<date>` branch, and refuses to continue at all
+  if it cannot land on that branch.
+- **`align doctor` honours your excludes the same way `align check` does.** It previously used a
+  laxer matcher, so you may see fewer advisories.
+- **Baseline move-transfer only fires on a real move.** Previously an orphaned entry was
+  transferred onto any current violation with matching rule id + snippet in a different file —
+  so fixing a violation in one file while adding a textually identical one in another, in the
+  same commit, silently baselined the new one and left CI green. A transfer now requires the
+  orphan's own file to have genuinely disappeared from the scan. Renames still transfer, which
+  is what the mechanism exists for; `align baseline prune` was affected too and is also fixed.
+- **A fix proposal listing the same file twice is rejected** rather than silently applying only
+  one of the two entries' edits.
 - **`align upgrade` is new.** It reads `.align/version.json`, works out what changed between the
   version that last wrote your `.align/` artifacts and the one running now, and walks the migration
-  with your consent before anything is written. Most repositories have no `.align/version.json` —
-  it only started being written in 0.1.4, and only when align writes something else under `.align/`
-  — so the version you are upgrading *from* is usually unknown. In that case align deliberately
-  shows every release's notes up to the current one rather than guessing, which is why you may see
-  0.1.4's notes and 0.2.0's together.
+  with your consent before anything is written. `.align/version.json` is itself new in this release,
+  so on any repository set up by an earlier align there is nothing for it to read and the version
+  you are upgrading *from* is unknown. align shows this release's notes in full rather than
+  guessing. Passing `--from 0.1.4` explicitly reaches the same set, because everything described in
+  this document ships in 0.2.0.
 - **Version-skew detection now resolves `@spikedpunch/align-core` the way Node does**, walking up
   the directory tree instead of checking one fixed path. In a hoisted monorepo — pnpm or npm
   workspaces — core usually lives at the workspace root, so the old lookup found nothing and
@@ -322,3 +318,6 @@ Worth knowing about, but no migration:
   unmapped.
 - **Unknown `.align/` artifact provenance is reported by `align doctor`, not by `align check`.**
   It is a repository-health observation, and `check`'s output is for the verdict.
+
+`align doctor` still always exits 0, including on a config error, which it reports as a
+`config-error` advisory.
