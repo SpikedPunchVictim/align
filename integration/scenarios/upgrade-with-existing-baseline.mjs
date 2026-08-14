@@ -6,21 +6,26 @@
 // `--allow-incomplete` — see below) reconciles; `.align/version.json` ends up stamped.
 //
 // **Why `install: '0.1.4'` with NO `--from` override still exercises the full flow, not the
-// trivial "already at current version" shortcut.** `packages/cli/package.json`'s own `version`
-// field has not yet been bumped past `0.1.4` for the in-progress 0.2.0 release, so `local`'s
-// `ALIGN_VERSION` also reads `0.1.4` — a literal `stamp.alignVersion === ALIGN_VERSION` comparison
-// would look like a no-op. **It isn't one**, because a REAL published 0.1.4 predates ADR 022
+// trivial "already at current version" shortcut.** This mattered acutely before the 0.2.0 bump,
+// when `packages/cli/package.json` still read `0.1.4` and so `local`'s `ALIGN_VERSION` did too —
+// a literal `stamp.alignVersion === ALIGN_VERSION` comparison would have looked like a no-op.
+// **It wasn't one**, and the reason it wasn't is the reason this scenario still holds now that
+// `local` reads `0.2.0`: a REAL published 0.1.4 predates ADR 022
 // entirely: it never wrote `.align/version.json` at all (verified empirically, 2026-08-10 — after
 // `align init --accept-existing` + `align baseline accept` under a genuine 0.1.4 install,
 // `.align/version.json` does not exist). `runUpgrade` (`packages/cli/src/commands/upgrade.ts`)
 // reads that absence as `rangeFrom = 'unknown'`, which SKIPS the `rangeFrom !== 'unknown'` early-
 // return entirely and selects every registry entry `<= to` (`migrations/range.ts`'s `selectRange`)
-// — so the `0.1.4` entry's validators, notes, and reconciliation all run for real, printing
-// `align upgrade: unknown → 0.1.4`. This is in fact the MORE realistic case: every install made
+// — so the registry's validators, notes, and reconciliation all run for real, printing
+// `align upgrade: unknown → 0.2.0`. This is in fact the MORE realistic case: every install made
 // before 0.2.0 has no stamp, which is exactly what "install 0.1.4" (a real pre-0.2.0 release)
-// produces. Once the release process bumps the version for 0.2.0, `local`'s `ALIGN_VERSION` will
-// read `0.2.0` and this scenario's assertions keep working unchanged (`unknown → 0.2.0`) — no
-// scenario edit needed.
+// produces. The bump landed as anticipated and this scenario needed no edit: its assertions were
+// written version-neutral (`stdoutContains: 'unknown → '`), so they carried across unchanged.
+//
+// Note the notes are now keyed to `0.2.0`, not `0.1.4` — they describe commits that all postdate
+// the `v0.1.4` tag, and while they were mis-keyed `align upgrade --from 0.1.4` selected nothing at
+// all. This scenario never exercised that route (it passes no `--from`), which is precisely how the
+// mis-keying survived the harness. A scenario covering the explicit `--from` path is still owed.
 //
 // **The measurement question, answered honestly (see the increment-2 report for the full
 // writeup).** The churn mechanism this scenario exists to make reproducible is specifically

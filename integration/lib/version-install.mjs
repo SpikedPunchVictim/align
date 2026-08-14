@@ -10,11 +10,15 @@
 //     package's `workspace:*` dependency to its CURRENT VERSION NUMBER (verified empirically:
 //     packing plugin-typescript, whose package.json says `"@spikedpunch/align-core":
 //     "workspace:*"`, produces a tarball whose package.json says `"@spikedpunch/align-core":
-//     "0.1.4"` — a bare version indistinguishable from a real published one). Since the
-//     monorepo's version today (0.1.4) collides with the latest PUBLISHED version, installing the
-//     `align-cli` tarball naively would have npm resolve its declared `align-core@0.1.4`
+//     "<the monorepo's current version>"` — a bare version indistinguishable from a real published
+//     one). Whenever the monorepo's version equals the latest PUBLISHED version — which is the
+//     steady state for the whole span between a publish and the next bump — installing the
+//     `align-cli` tarball naively would have npm resolve its declared `align-core@<that version>`
 //     dependency from the REGISTRY, silently testing a Frankenstein mix of local cli/core and
-//     published agent/plugin-typescript. Fixed with npm's `overrides` field (npm >= 8.3): forces
+//     published agent/plugin-typescript. (Right now the tree sits at the other end of that cycle:
+//     bumped to 0.2.0, not yet published, so the numbers differ and the collision is momentarily
+//     absent. It returns the moment 0.2.0 ships, which is why this is fixed structurally rather
+//     than by relying on the numbers to differ.) Fixed with npm's `overrides` field (npm >= 8.3): forces
 //     every transitive resolution of the four `@spikedpunch/*` package names to their local
 //     tarball, regardless of what version range is declared anywhere in the tree — no version
 //     bump needed, no publish-time coordination, package.json `version` fields stay untouched.
@@ -103,13 +107,18 @@ function writePackageJsonFor(workingDir, version, tarballs, options = {}) {
 
 /**
  * F5: the ORIGINAL authenticity check compared the installed `align-cli` version string against
- * `packages/cli/package.json`'s version — but that string equals the latest PUBLISHED version
- * (`0.1.4`) for the entire life of an unreleased bump, which is the permanent steady state between
- * releases (align's own version field doesn't move until a release, see the release process this
- * file's header comment describes). If the `overrides` field ever silently stopped applying —
- * `pnpm`/`npm` behavior change, a workspace `.npmrc` shadowing it, a lockfile quirk — npm would
- * fall back to resolving `align-cli@0.1.4`/`align-core@0.1.4` from the REGISTRY, and the version
- * check alone could not tell that apart from a genuine local install: both report `0.1.4`.
+ * `packages/cli/package.json`'s version — but for the whole span between a publish and the next
+ * bump, that string EQUALS the latest published version (align's own version field doesn't move
+ * until a release, see the release process this file's header comment describes). If the
+ * `overrides` field ever silently stopped applying — `pnpm`/`npm` behavior change, a workspace
+ * `.npmrc` shadowing it, a lockfile quirk — npm would fall back to resolving that same version of
+ * `align-cli`/`align-core` from the REGISTRY, and the version check alone could not tell that apart
+ * from a genuine local install: both report the same number.
+ *
+ * The tree is momentarily on the other side of that cycle (bumped to 0.2.0, unpublished), so today
+ * the numbers happen to differ. That is a coincidence of timing, not a property to lean on — it
+ * ends when 0.2.0 ships — which is exactly why the two checks below do not consult the version
+ * string at all.
  *
  * Two INDEPENDENT, stronger checks, both required to pass:
  *
