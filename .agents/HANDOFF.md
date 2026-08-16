@@ -126,9 +126,13 @@ agents on one machine. Re-run the suite ~15x on a quiet box and confirm before t
 
 ### #25 — nested checkouts: **MERGED AND SHIPPED as ADR 027.** History below, kept for context
 
-The `wt-25*` and `wt-docs-*` worktrees under `.claude/worktrees/` are **spent** — their work is in
-the branch. They are untracked and safe to remove once you have confirmed you need nothing from
-them; `git worktree list` still shows nine.
+The eight `wt-25*` / `wt-docs-*` worktrees were **removed on 2026-08-16**, after verifying each was
+clean (no modified or untracked files), its HEAD was an ancestor of the branch, and it held zero
+commits not already in `fix`. `git worktree list` now shows only the main tree, and
+`.claude/worktrees/` is gone — so the working tree is exactly the two in-flight type files.
+
+The eight **branches** (`wt-25`, `wt-25b`…`wt-docs-b`) still exist and are fully merged into `fix`.
+They are harmless labels; delete them with `git branch -d` if you want the namespace clean.
 
 The rest of this section is the historical record of how #25 landed. Its "STILL OWED" list is
 resolved — see the note at its end. **ADR 027's closing section is the thing to actually read**:
