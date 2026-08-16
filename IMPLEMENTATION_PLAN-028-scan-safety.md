@@ -1,0 +1,277 @@
+# ADR 028 — scan blind spots: staged plan
+
+Transient. Delete this file when every stage is Complete. The permanent record is
+[`docs/adr/028-scan-blind-spots-and-the-absence-inference.md`](docs/adr/028-scan-blind-spots-and-the-absence-inference.md);
+`IMPLEMENTATION_PLAN.md` is the long-lived rules track and is **not** to be edited for this work.
+
+**Scope decision (2026-08-16):** the middle option. Blind-spot record, existence probe, and the
+`knownFiles()`/double-scan collapse ship in **0.2.0**. The pipeline reframe (ADR 028 §7) is decided
+in principle and deferred to a later release with its own ADR.
+
+**Gate for every stage** — no stage is Complete until all four are green:
+
+```
+pnpm build && pnpm typecheck && pnpm test      # fast gate, run always
+node packages/cli/dist/index.js check          # red is blocking
+node packages/cli/dist/index.js doctor         # advisory only, always exits 0
+node integration/run.mjs --targets local       # Docker
+```
+
+Release gate, once at the end: `node integration/run.mjs --targets 0.1.4,local` — three scenarios
+carry `expectFailOn: ['0.1.4']` as calibration; if those pass against 0.1.4 the harness is broken and
+nothing it reports can be trusted.
+
+**Three decisions made while defining the work** (they were latent gaps in the first draft):
+
+1. **The run carries the observed file set, not just the blind spots.** Stage 3 cannot delete
+   `orchestrator.knownFiles()` unless `CheckRun` already carries what that method returns. So Stage 1
+   adds *both* — per-domain observed files and blind spots — and Stage 3 becomes a pure deletion.
+2. **The two scan domains stay separate on the run.** `CheckRun` carries source and manifest
+   domains distinctly. `knownFiles()` merges them today (orchestrator.ts:252-259) while `check` keeps
+   them per-gate; the merge is the bug, not the interface.
+3. **The migration validator stays checkout-specific.** `migrations/validators/baseline-entries-in-skipped-checkouts.ts`
+   is wired into the 0.2.0 registry entry (registry.ts:64) with its own `UPGRADING.md` note. It exists
+   because 0.2.0 *changed* scan scope for checkouts. Symlink and exclude blindness are not new in
+   0.2.0 — they are standing bugs — so widening this validator would misreport them as migration
+   consequences. Re-point it onto the generalized helper; do **not** widen its scope.
+
+---
+
+## Stage 1: The walk records what it could not see
+
+**Goal**: `walkSourceFiles` returns blind spots with reasons; `DependencyGraph` and `CheckRun` carry
+them **and** the observed file set, per domain; `skippedNestedCheckouts` is gone.
+
+**Work** — 29 files. Ordered so the tree compiles at each step.
+
+*Types first*
+- `core/src/types/graph.ts:106` — replace `skippedNestedCheckouts` with `blindSpots: readonly ScanBlindSpot[]`;
+  define `ScanBlindSpot` / `ScanBlindSpotReason` (variants: `nested-checkout`, `excluded{pattern}`,
+  `default-excluded-dir{name}`, `unreadable{error}`, `not-regular-file`). Required, not optional.
+- `core/src/gates/types.ts:48-61` — same on `CheckRun`, **plus** the observed file sets:
+  source and manifest kept separate (decision 2).
+
+*Producer*
+- `plugin-typescript/src/scanner.ts:199-241` — `walkSourceFiles` collects blind spots at each of the
+  five exits (`:208` excluded dir, `:215` checkout, `:224` unreadable, `:228` default-excluded,
+  `:233` excluded file) plus the new `not-regular-file` case at `:227/:231`.
+- Move the `DEFAULT_EXCLUDED_DIR_NAMES` test **before** the `isDirectory()/isFile()` branch, so a
+  symlinked `node_modules`/`dist` classifies as `default-excluded-dir` rather than
+  `not-regular-file`. Checked this repo: its `node_modules` directories are real, so this is not the
+  universal case an earlier draft claimed — but it occurs in generated and container layouts and the
+  fix is free.
+- `scanner.ts:118,161-169` — thread through `scan()` onto the returned graph.
+
+*Containment helper*
+- `core/src/baseline/skipped-checkouts.ts` → generalize to at-or-under matching over blind-spot
+  paths. Still **one** containment test in one module (ADR 027's rule). Keep
+  `isUnderSkippedCheckout` as a narrow wrapper for the migration validator (decision 3).
+
+*Consumers — src*
+- `core/src/orchestrator.ts` — `:96,151,182` (error-path graph literals), `:146,177,219` (advisory
+  building), `:193-198` (the `reconcileMoves` call), `:238` (CheckRun assembly), `:306-314` (manifest
+  domain, still passes its own — **not** merged), `:364-371` (multi-graph union: union blind spots
+  the same way).
+- `core/src/baseline/store.ts:43-85,168-232` — signature and the `applyMoves` guard at `:232`.
+- `core/src/gates/advisories.ts:111` — advisory now names reasons; dedupe paths and cap with
+  `+N more`, matching `describeUnverifiablePrunes`.
+- `core/src/payload/builder.ts:44-48,105` — wire-format field. **Verified not a break** (2026-08-16):
+  `git show v0.1.4:packages/core/src/payload/builder.ts` has zero occurrences — the field was added
+  in `b38a56f` for unreleased task #25, so no published version emits it. The four MCP `registerTool`
+  calls declare no `outputSchema` (results are free-form text, `server.ts:90`), nothing in-repo reads
+  `payload.skippedNestedCheckouts`, and `UPGRADING.md` names only the advisory. **Do it in this
+  stage**: `CheckPayload` is unversioned (`irVersion: '1'` is the ruleset IR, a different artifact),
+  so this is the last release in which the rename is free.
+- `core/src/components/registry.ts` — `skippedCheckoutsMatchingSelector` generalizes: a component
+  whose files all sit under *any* blind spot gets the sharper diagnosis, not just checkouts.
+- `cli/src/nested-checkout-retention.ts` — `partitionSkippedCheckoutCandidates` generalizes;
+  `describeRetainedEntries` states the reason.
+- `cli/src/commands/baseline.ts:158`, `init.ts:102`, `upgrade.ts:262,342`, `doctor.ts` — call sites.
+- `cli/src/migrations/validators/baseline-entries-in-skipped-checkouts.ts` — re-point onto the
+  generalized helper, scope unchanged (decision 3).
+
+*Tests — re-point, never delete*
+- `core/test/`: `helpers.ts:81,90`, `baseline.test.ts`, `orchestrator.test.ts:496`,
+  `payload-builder.test.ts:46`, `gates/advisories.test.ts:243`, `surface/inferSurface.test.ts:29`
+- `cli/test/`: `baseline-debt.test.ts`, `errored-run-mutations.test.ts`, `nested-checkout-scan-scope.test.ts`
+- `plugin-typescript/test/`: `nested-checkout.test.ts`, `manifest.test.ts`
+- `agent/test/`: `helpers.ts`, `fakeEffects.ts`, `e2e-git.test.ts` — the agent package builds graphs
+  too; it was missing from the first draft entirely.
+
+**Success Criteria**
+- `skippedNestedCheckouts` appears nowhere outside the migration validator's narrow wrapper. A
+  transient overlap during the stage is fine; shipping two records is not, and removal is a
+  criterion of *this* stage.
+- Blind-spot volume is bounded: an excluded or default-excluded directory is recorded once and never
+  descended into, so `node_modules` contributes one record, not thousands.
+
+**Tests**
+- Scanner unit, one per reason: symlinked file, symlinked directory (subtree absent, **one** record),
+  broken symlink, `chmod 000` directory, `excludes`-matched file, `excludes`-matched directory,
+  `DEFAULT_EXCLUDED_DIR_NAMES` hit, nested checkout.
+- Symlinked `node_modules` → `default-excluded-dir`, not `not-regular-file` (pins the ordering fix).
+- `node_modules` contributes exactly one blind spot (pins the volume bound).
+- Table-driven exhaustiveness keyed by the reason union: adding a variant without a retention
+  decision fails the build or the test.
+- Every existing checkout test passes under the new field, equivalent-or-stronger.
+
+**Status**: Not Started
+
+---
+
+## Stage 2: Existence probe, and the guard on both destructive arms
+
+**Goal**: an orphan whose file is absent from the scan is retained when the filesystem still has it,
+whatever the cause — closing the tail Stage 1 cannot enumerate.
+
+**Work**
+- Define `FileExistenceProbe` (`(file: RepoRelativePath) => boolean`) in core's types. **`packages/core`
+  imports `node:fs` nowhere** — verified, zero matches under `core/src`, and it stays that way.
+- `core/src/baseline/store.ts` — `InMemoryBaselineStore` takes the probe as a constructor
+  collaborator; guard both arms: the `applyMoves` transfer path (`:193-232` — the forged-consent arm,
+  reached on every `align check`) and the prune forfeit partition (`:183`).
+- **Seven construction sites**, each needs a probe — this was the gap in the first draft, which
+  assumed only the composition root:
+  `cli/src/composition-root.ts:28`, `cli/src/commands/baseline.ts:51,135,211`,
+  `cli/src/commands/upgrade.ts:337` (the preview store), `cli/src/commands/build.ts:285`.
+- CLI supplies one real `fs`-backed probe from a single module (not six inline closures); core tests
+  supply a fake.
+- `core/src/orchestrator.ts:198,314` — pass-through unchanged in shape.
+
+**Success Criteria**
+- Retention is reported with its reason, never silent (ADR 028 §3).
+- ADR 023's `refuseIfRunIncomplete` evaluated against the forfeited count only.
+- A retained entry is carried into what gets persisted — assert byte-level, not just count.
+- Grep proving core is still filesystem-free is part of the stage, not an assumption.
+
+**Tests**
+- Both arms × both mechanisms: blind-spot-recorded cause, and probe-positive-but-unrecorded cause
+  (a file present on disk, absent from the scan, with no matching blind spot — the unknown-future-cause).
+- `chmod 000` directory: pins that the probe **alone** fails here (`existsSync` swallows `EACCES`)
+  and Stage 1's record is what saves it. This is the test that justifies both mechanisms existing.
+- Broken symlink → correctly gone, still prunes.
+- Genuine deletion → still prunes; genuine rename → still transfers. No over-retention regression.
+- Core tests construct the probe without touching a filesystem.
+
+**Status**: Not Started
+
+---
+
+## Stage 3: Delete `orchestrator.knownFiles()`; `prune` scans once
+
+**Goal**: remove the method whose own doc comment apologises for it, and the second walk it serves.
+Pure deletion, because Stage 1 already put the observed file set on the run.
+
+**Work**
+- `core/src/orchestrator.ts:252-259` — delete `knownFiles()`.
+- `cli/src/commands/baseline.ts:146-151` — delete the second scan; derive from the run at `:137`.
+- `cli/src/commands/upgrade.ts:249-254` — same deletion; its **remaining** multi-walk structure
+  (`:191`, `:246`, plus the rescans inside delegated `baselinePrune`/`baselineAccept`) is out of
+  scope. Leave a note in the file; do not fix it here.
+- `cli/src/errored-run.ts:23` — corrects a doc comment that references the deleted method.
+
+**Success Criteria**
+- No code path merges source-domain and manifest-domain files into one set (decision 2).
+- `prune` behaviour is unchanged on a stable tree — this stage is a refactor, not a fix.
+
+**Tests**
+- `prune` results identical to the two-scan version on a stable tree.
+- `cli/test/nested-checkout-scan-scope.test.ts:109` documents the third scan explicitly — re-point
+  it to assert one scan.
+- Security-gate entries still reconcile against the manifest domain only.
+
+**Status**: Not Started
+
+---
+
+## Stage 4: Prune floor, and the retention escape hatch
+
+**Goal**: close the degenerate-scan hole, and stop retention from becoming a permanent leak.
+
+**Work**
+- `cli/src/commands/baseline.ts` — refuse when the scan observed nothing, independent of component
+  `empty:` policy. Sits alongside ADR 023's tier 1/2 guards as a third refusal. **Not overridable**
+  (decided 2026-08-16): an empty scan carries no information to reason from, so there is nothing an
+  override could be based on — this is tier-1 shaped, like `refuseIfRunErrored`, not tier-2.
+- Escape hatch: `align baseline prune --forget-unscanned <prefix>` — forfeits retained entries under
+  an explicit path prefix. It is a destructive write, so: ADR 023 guards, an ADR 026 declared
+  write-set, and a required explicit prefix (no bare form that forfeits everything).
+- Advisory output distinguishes "nothing to prune" from "everything retained, here is why".
+
+**Success Criteria**
+- The floor fires on the configuration `align init` itself generates — `components/registry.ts:162`
+  skips the zero-match check for anything not `empty: 'fail'`, and `commands/init.ts:146-152` sets
+  `until-populated` on every zero-file component (`--greenfield`: on all).
+
+**Tests**
+- Everything-excluded scan under `empty: 'allow'` and `'until-populated'` → refusal, **not** mass
+  delete at exit 0.
+- Partial shrinkage under `empty: 'fail'` still reaches the per-entry guards — the floor is not a
+  substitute for Stages 1-2.
+- Escape hatch: refuses on an errored run, respects `--allow-incomplete`, writes only its declared
+  set, and refuses without a prefix.
+
+**Status**: Not Started
+
+---
+
+## Stage 5: Proof, and the release surface
+
+**Goal**: pin the behaviour where it actually runs; document the change for users.
+
+**Work**
+- Three integration scenarios (ADR 025) with declared write-sets (ADR 026): **symlink**,
+  **unreadable directory**, **excludes-shrink**. Each asserts the entry survives, the advisory names
+  the reason, and `align check` does **not** forge a transfer.
+- `integration/lib/` — new assertion kinds if needed; register in `spec-validate.mjs` (the
+  `jsonArrayEveryHasField` precedent).
+- `UPGRADING.md` — 0.2.0 note: retention is a behaviour change users will notice.
+- `README.md`, `packages/cli/README.md`, `packages/agent/README.md` — carried queue item
+  (auto-exclusion + `includeNestedCheckouts`), now also blind-spot reporting.
+- `docs/core-interfaces.md:618-631` — the documented `McpCheckPayload` block is **already stale by
+  four fields** (it stops at `advisories`; the real interface continues with `ungroundedComponents`,
+  `skippedNestedCheckouts`, `baselineDebt`, `complete`). Bring it to reality, including `blindSpots`.
+- **Enforce that block against the type** so it cannot drift again — this is the mechanism that
+  actually failed here; a payload version field would not have caught it. No existing doc-integrity
+  harness to extend (checked: ADR 018's machinery covers doc-built rules, not markdown type blocks),
+  so this is new: extract the `ts` block from the markdown and compare its field list against the
+  `McpCheckPayload` declaration via the TypeScript compiler API — already a dependency through
+  `plugin-typescript`, and the idiomatic choice here over a runtime key-comparison, which cannot see
+  absent optional fields like `pagination?`.
+- `docs/adr/027-*.md` — amend with a pointer to 028 as the generalization of its closing lesson.
+- `ARCHITECTURE.md` — §3's data flow gains the blind-spot record. Also fix the false citation at
+  `orchestrator.ts:248` ("sole owner of scanning, ARCHITECTURE.md §5" — §5 is *Package layout* and
+  says no such thing).
+
+**Success Criteria**
+- `expectFailOn: ['0.1.4']` added **only after** `local` goes green, so a red run distinguishes the
+  bug from a scenario that never ran.
+- Full matrix `--targets 0.1.4,local` green, calibration intact.
+
+**Tests**
+- The three scenarios red before the fix, green after — verified in that order.
+- Flaky confirmation: 15× on the new suites.
+
+**Status**: Not Started
+
+---
+
+## Explicitly out of scope for 0.2.0
+
+- **The pipeline reframe** (ADR 028 §7) — own ADR, own release. Destructive commands first
+  (`prune`, `upgrade`, `init`); `upgrade` collapsing from ~6 walks to 1 is the largest single win.
+- **Concurrency**: `cli/src/align-dir.ts:206-209` is a non-atomic full-snapshot write with no lock;
+  the MCP server racing a CLI `accept` can lose a consent decision. Own ADR.
+- **Case-only renames on case-insensitive filesystems** (ADR 028 mechanism #8) — known gap.
+- **Whether align should follow symlinks at all** — Stage 1 records them; it does not decide this.
+- **The manifest domain's own exits** — malformed-`package.json`-as-absent (`manifest.ts:44-50`) and
+  its exclude dialect diverging from the source walker's (`manifest.ts:80-83` vs `scanner.ts:250-255`).
+  Same class, second walker. Should be next, not last.
+- **`custom.host` seatbelt rule** confining scanner imports — catches only the five direct-scan
+  projections, misses `baseline.ts`/`upgrade.ts`. Belongs with the reframe.
+
+## Carried, unrelated to this ADR
+
+F3, F4, wt-25d (dry-run rails), wt-25e (escalation output), array-selector `TypeError` in
+`parseSelector`, `init/npm-script.ts`'s untested interactive branch, backfilling `contentFingerprint`
+in `init` for entries with no prior, release chain #11→#12→#13.

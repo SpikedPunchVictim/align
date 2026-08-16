@@ -1,81 +1,90 @@
-# Prompt for the next session
+# Next session kickoff prompt
 
-Copy everything below the line into a fresh session.
+Paste everything below the line.
 
 ---
 
-Continue the align 0.2.0 release work in /Users/spikedpunchvictim/projects/align.
+You are taking over the **align 0.2.0** release work in `/Users/spikedpunchvictim/projects/align`,
+branch `fix` (80 commits ahead of `main`, nothing pushed). The previous session ended mid-flight on
+**ADR 028 Stage 1**.
 
-START HERE, in this order:
-1. `.agents/HANDOFF.md` — branch state, the verification baseline, every open item with the
-   reasoning behind it, and the non-obvious things that will cost you if you miss them.
-2. `CLAUDE.md` — the destructive-safety rules. They are binding on new work, not advisory.
-3. `docs/adr/021`–`026` — authoritative for everything shipped this cycle. **026 is the newest and
-   the one most likely to affect what you do**: a command may only touch what its scenario declares.
+## Read these first, in this order, before touching anything
 
-FIRST ACTION — reproduce the baseline before changing anything:
-    pnpm build && pnpm typecheck && pnpm test    # ~26s total
-    node packages/cli/dist/index.js check        # green, 29 baselined
-    node packages/cli/dist/index.js doctor       # exit 0
-Expect **1134 passing + 1 skipped** (create-align 46, core 450, plugin-typescript 82, agent 53+1,
-cli 503). If that does not reproduce, stop and find out why first.
+1. `.agents/HANDOFF.md` — start with the warning block at the top; the tree deliberately does not
+   compile right now.
+2. `IMPLEMENTATION_PLAN-028-scan-safety.md` — five stages with file-and-line work lists. **Do not
+   re-derive the work lists**; they were built by grepping the actual call sites and they include
+   packages an obvious grep misses (`packages/agent`'s test helpers construct `DependencyGraph`s).
+3. `docs/adr/028-scan-blind-spots-and-the-absence-inference.md` — the authoritative reasoning.
+4. `CLAUDE.md` — destructive-safety rules, binding on new work.
+5. `docs/adr/027-nested-checkout-scan-scope.md` — its closing section is the lesson ADR 028
+   generalizes, and its "required, not optional" argument is why the new field is required.
 
-STATE: branch `fix`, 61 commits ahead of `main`, no upstream, NOTHING PUSHED, working tree clean.
-Version still 0.1.4 — not yet bumped.
+## Where things stand
 
-## Your first job: finish #25 (nested-checkout auto-exclusion)
+Uncommitted: two ADR 028 docs (new), and two core type files (modified) that begin Stage 1 —
+`ScanBlindSpot`/`ScanBlindSpotReason` in `types/graph.ts` with `blindSpots` replacing
+`skippedNestedCheckouts`, and `CheckRun` in `gates/types.ts` gaining `blindSpots` plus a per-domain
+`observedFiles`.
 
-**The implementation is uncommitted in a git worktree: `.claude/worktrees/wt-25`, branch `wt-25`,
-based on `b6d38e3`.** The changes are working-tree only and are NOT in the branch, so do not delete
-that directory. Check `git worktree list` first; if it is gone, the work is lost and must be redone
-from the design in `.agents/HANDOFF.md`. Consider committing a WIP snapshot onto `wt-25` before you
-touch anything.
+`pnpm typecheck` currently reports **exactly 12 errors, all in core** (`orchestrator.ts` ×11,
+`payload/builder.ts` ×1), every one of them `skippedNestedCheckouts` no longer existing. That is the
+types-first migration working: the compiler is enumerating the work, package by package in build
+order. A different count or a different shape of error means something else changed — find out what
+before continuing.
 
-A worker finished applying the review fixes just as the last session ended, reporting 1158 passing
-+ 1 skipped inside the worktree with check green. **Nobody re-ran that — verify it yourself before
-trusting it.** Confirm `includeNestedCheckouts` reaches all eleven `check(`/`knownFiles(` call sites
-in `packages/cli/src`, and reproduce the claim that
-`packages/cli/test/nested-checkout-scan-scope.test.ts` actually catches the regression (revert one
-of the `baseline.ts` fixes, watch it fail, restore) — an end-to-end test that would pass with the
-bug present is worse than none.
+Last full-green measurement, at `f0b48c7` before these edits: **1203 passing + 1 skipped**, `align
+check` green, 15/15 local integration scenarios PASS. Re-establish it with
+`git stash && pnpm build && pnpm typecheck && pnpm test`, then `git stash pop`. Do not discard that
+stash.
 
-Then complete the four items `.agents/HANDOFF.md` lists as STILL OWED under #25 — the `prune`
-refusal (user-decided, and the most important), an ADR, an integration scenario, and an
-`UPGRADING.md` note. Read that section; it has the detail.
+## Your task
 
-When it is all green, merge it into the main tree yourself, re-run the gates there, and commit.
-**Merge trap:** run merge commands from the main tree, not from inside the worktree — a `cd` into
-the worktree at the start of a shell chain leaks into every following command and makes `git apply`
-try to patch the worktree against itself.
+Finish **Stage 1**, then stop and report before starting Stage 2.
 
-## After #25
+Work in build order — core → plugin-typescript → cli → agent — committing per package so each
+commit compiles and passes tests. The real producer work is in `plugin-typescript`'s
+`walkSourceFiles`: it currently has five exits that drop a path, and a sixth case (symlinks) that
+falls off the end of the loop entirely because `Dirent.isDirectory()` and `isFile()` are both false
+for a symlink.
 
-- `init/npm-script.ts` is the last prompt without a `confirm` seam (deliberately not unified into
-  `defaultConfirm` — it is `[Y/n]`, default YES, a different consent contract). Its interactive
-  branch is untested.
-- The flaky-test fix (`166151f`) was committed on diagnosis, not on repeated-run evidence. Run the
-  suite ~15x on a quiet machine and confirm before release.
-- Then the release chain #11 → #12 → #13 in `.agents/HANDOFF.md`. **After the version bump you MUST
-  re-run `align skill --install`** and confirm `align doctor` reports no stale-skill advisory — the
-  version branch short-circuits before the content hash, so the hash will not save you. Note doctor
-  has reported that advisory since before this work began; the bump-time reinstall clears it.
+The gate, run it always (~26s):
 
-## How to work here
+```
+pnpm build && pnpm typecheck && pnpm test
+node packages/cli/dist/index.js check      # red is blocking
+node packages/cli/dist/index.js doctor     # advisory only, always exits 0
+```
 
-- Implementation goes to Sonnet subagents. Coding standards:
-  `/Users/spikedpunchvictim/temp/enterprise-apps/CODING_BEST_PRACTICES.md`
-- **Subagents must NOT commit.** You verify the gates yourself, then commit.
-- **Provision worktrees by hand** — `git worktree add -b <name> .claude/worktrees/<name> <sha>` — and
-  point plain agents at the absolute path. The Agent tool's `isolation: "worktree"` provisioned from
-  a 51-commit-stale base twice out of three last session. Give every agent a test-count baseline to
-  verify BEFORE it starts; that is the only reason the stale tree got caught.
-- **Never relay a subagent's claims — re-run them.** Several reports last session were directionally
-  right but wrong in a detail that mattered, and one reported a test count that did not reconcile
-  with the file it had written.
-- Concurrent agents on one machine contend enough to cause timeout flakes. Expect it; do not
-  diagnose it as a race without checking whether the failure is a clock expiry or a wrong value.
-- **Treat a doc comment asserting a safety property as a claim to verify, not as evidence.** That
-  defect class has now been found five times in this repo.
-- A Fable-model review of the #25 change caught a blocking defect three Sonnet agents and I all
-  missed. Consider one before merging anything with this blast radius.
-- Present findings and wait for sign-off before starting a new stage.
+Integration (Docker, ~38s/scenario) when the fast gate is green:
+`node integration/run.mjs --targets local`
+
+## What will bite you
+
+- **A doc comment asserting a safety property is a claim to verify, not evidence.** This codebase
+  has shipped that defect at least four times, and ADR 028 exists partly because one such comment
+  ("core is the sole owner of scanning, ARCHITECTURE.md §5") cites a section that says no such thing
+  while five CLI sites violate it.
+- **"Reports success wrongly" is the severity-zero class.** A command that destroys data and exits 0
+  outranks everything. When you find one, hunt the class, not the instance.
+- **Both mechanisms in ADR 028 are required.** If you find yourself thinking the existence probe
+  makes the blind-spot record redundant, re-read the measurement: `fs.existsSync` returns *false*
+  for a file inside a `chmod 000` directory, so the probe alone misses a reproduced severity-zero.
+- **`packages/core` imports `node:fs` nowhere.** Keep it that way — that constraint is why the
+  probe is injected rather than called directly. Verify with a grep, do not assume.
+- **Re-point tests, never delete them.** Every existing `skippedNestedCheckouts` test must survive
+  as equivalent-or-stronger.
+- **`test-apps/` is gitignored working state** holding real external repos — read-only, copy
+  elsewhere before mutating. `/Users/spikedpunchvictim/projects/grizzly` is a real user project:
+  do not touch it at all.
+
+## How this user works
+
+- **Subagents must not commit.** You verify the gates yourself, then commit.
+- **Never relay a subagent's claims — re-run them.** Subagent summaries have repeatedly been
+  directionally right and wrong in a detail that mattered.
+- **Provision worktrees by hand**: `git worktree add -b <name> .claude/worktrees/<name> <sha>`.
+  The Agent tool's `isolation: "worktree"` provisioned from a stale base twice out of three.
+- **Present findings and wait for sign-off before starting a new stage.**
+- Blunt, evidence-cited assessment is rewarded; hand-waving gets pushed back on. Cite measured
+  numbers and `file:line`, never invent them. If you are uncertain, say so and say why.

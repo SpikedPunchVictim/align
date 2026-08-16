@@ -1,10 +1,30 @@
 # Handoff — align 0.2.0 release work
 
-**Written 2026-08-11, updated 2026-08-12.** Branch `fix`, **58 commits ahead of `main`**, **no
-upstream, nothing pushed**, working tree clean.
+**Written 2026-08-11, updated 2026-08-16.** Branch `fix`, **80 commits ahead of `main`**, **no
+upstream, nothing pushed**. Version is **0.2.0** across all five packages.
+
+> ### ⚠ The working tree does not compile right now, and that is expected
+>
+> Mid-flight on **ADR 028 Stage 1**. Uncommitted:
+>
+> ```
+>  M packages/core/src/gates/types.ts      # CheckRun: blindSpots + observedFiles
+>  M packages/core/src/types/graph.ts      # ScanBlindSpot types; blindSpots replaces skippedNestedCheckouts
+>  ?? docs/adr/028-scan-blind-spots-and-the-absence-inference.md
+>  ?? IMPLEMENTATION_PLAN-028-scan-safety.md
+> ```
+>
+> `pnpm typecheck` reports **exactly 12 errors, all in core** (`orchestrator.ts` ×11,
+> `payload/builder.ts` ×1), every one of them `skippedNestedCheckouts` no longer existing. That is
+> the types-first migration working as intended — the compiler is enumerating the work. If you see
+> a different count or a different shape of error, something else changed and you should find out
+> what before continuing.
+>
+> **Start by reading `IMPLEMENTATION_PLAN-028-scan-safety.md`.** It has the five stages with
+> file-and-line work lists. `docs/adr/028-*.md` is the authoritative reasoning behind them.
 
 Read this, then `CLAUDE.md` (destructive-safety rules — binding on new work), then
-`docs/adr/021`–`026`. The ADRs are authoritative; this file only tells you where
+`docs/adr/021`–`028`. The ADRs are authoritative; this file only tells you where
 things stand and what is not obvious from the code.
 
 ---
@@ -17,12 +37,17 @@ node packages/cli/dist/index.js check     # must be green
 node packages/cli/dist/index.js doctor    # must exit 0
 ```
 
-Current, as of 2026-08-12: **1134 passing + 1 skipped** — create-align 46, core 450,
-plugin-typescript 82, agent 53 (+1 skipped), cli 503. `align check` green (29 baselined, 0 red).
-Measured wall-clock: build 5s, typecheck 9s, test 12s — **26s for the whole gate**, so run it
-always. The Docker harness costs ~38s per scenario (~9m for the full local suite); use the tiers.
+Last full-green measurement, at commit `f0b48c7` (2026-08-14, before the ADR 028 type changes):
+**1203 passing + 1 skipped**, `align check` green, all 15 local integration scenarios PASS,
+`nest-incomplete` PASS, 0.1.4 red as calibrated. Measured wall-clock: **~26s for the whole gate**,
+so run it always. The Docker harness costs ~38s per scenario (~9m for the full local suite); use
+the tiers.
 
-If these do not reproduce, stop and find out why before doing anything else.
+To re-establish that baseline while the tree is mid-migration:
+`git stash && pnpm build && pnpm typecheck && pnpm test` — then `git stash pop`. **Do not** commit
+or discard the stash without reading the warning at the top of this file.
+
+If the stashed baseline does not reproduce, stop and find out why before doing anything else.
 
 ## What shipped this session
 
@@ -99,12 +124,15 @@ drives `runUpgrade` twice (real git subprocesses plus two full scans), 1–3s qu
 run check never completed, and the reproduction environment was contaminated by four concurrent
 agents on one machine. Re-run the suite ~15x on a quiet box and confirm before the release.
 
-### #25 — nested checkouts: DECIDED, IMPLEMENTED, REVIEWED, **NOT MERGED**
+### #25 — nested checkouts: **MERGED AND SHIPPED as ADR 027.** History below, kept for context
 
-**The work is uncommitted in a git worktree: `.claude/worktrees/wt-25` (branch `wt-25`, based on
-`b6d38e3`). Do not delete that directory — the changes are working-tree only and are NOT in the
-branch.** First action next session: confirm it is still there (`git worktree list`), and consider
-committing a WIP snapshot onto `wt-25` as a safety net before touching anything.
+The `wt-25*` and `wt-docs-*` worktrees under `.claude/worktrees/` are **spent** — their work is in
+the branch. They are untracked and safe to remove once you have confirmed you need nothing from
+them; `git worktree list` still shows nine.
+
+The rest of this section is the historical record of how #25 landed. Its "STILL OWED" list is
+resolved — see the note at its end. **ADR 027's closing section is the thing to actually read**:
+"changing what a scan sees is never local to scanning" is the lesson ADR 028 generalizes.
 
 **Decided design** (user's call): (1) auto-exclude — during the walk, skip any non-root directory
 containing its own `.git` (a *directory* for a clone/submodule, a *file* for a linked worktree);
@@ -146,22 +174,71 @@ plugin-typescript 88, agent 53+1, cli 508), check green with 29 baselined, docto
 not independently re-run any of this** — the session ended first. Reproduce it in the worktree
 before trusting it, then merge.
 
-**STILL OWED — nobody has started these:**
+**All four "STILL OWED" items are closed:** (1) prune retention shipped as
+`cli/src/nested-checkout-retention.ts`; (2) the ADR is `docs/adr/027`; (3) the integration scenario
+exists; (4) `UPGRADING.md`'s 0.2.0 section carries the note and the registry is keyed to 0.2.0.
 
-1. **`prune` must refuse or warn when an orphan's file falls under `graph.skippedNestedCheckouts`
-   (user-decided).** This gap exists INDEPENDENT of the wiring bug and survives fixing it: a user
-   upgrading with accepted entries for files inside a submodule the old align scanned now has those
-   files auto-excluded, so the violations are *unobservable, not fixed* — tier 2's own vocabulary —
-   yet the run is green and complete, so `prune` deletes the entries silently. The data to detect
-   this now exists on the graph. This is the same invariant ADR 023 already establishes.
-2. **An ADR for #25.** It changes default scan scope for every user, adds a field to a persisted
-   portable artifact, and introduces `'nested-checkout-skipped'` as a wire-visible advisory kind
-   other tooling will match on. Consequences must record that `DependencyGraph.skippedNestedCheckouts`
-   is a REQUIRED field, hence compile-breaking for any out-of-tree `Scanner` implementor.
-3. **An integration scenario** — `CLAUDE.md` rule 2, and a default-behaviour change is exactly what
-   the cross-version matrix exists for.
-4. **A migration note in `UPGRADING.md`'s `## 0.2.0` section** for the default scan-scope change,
-   then `pnpm --filter @spikedpunch/align-cli compile-notes`.
+---
+
+### ADR 028 — scan blind spots: **IN PROGRESS, Stage 1 started.** This is the live work
+
+**Read `IMPLEMENTATION_PLAN-028-scan-safety.md` first**, then `docs/adr/028-*.md`. Both are
+uncommitted. The plan has file-and-line work lists per stage; do not re-derive them.
+
+**The defect class**, in one line: `!knownFiles.has(entry.file)` is read as "this file was deleted",
+but it actually means "this scan produced no node for this path". Every gap between those is either a
+silent deletion of a consent record, or — worse — a **forged move-transfer** that stamps a real
+human's `acceptedAt`/`acceptedBy` onto a violation nobody reviewed and turns `align check` green.
+The transfer arm fires on **every plain `align check`** (`orchestrator.check` → `reconcileMoves`,
+`check.ts:114` persists unconditionally). No destructive command, no flag, no completeness gate.
+
+**Nine mechanisms enumerated** (ADR 028 has the table with sites). Three were unknown when ADR 027
+was written, and two are reproduced against the built binary:
+
+- **symlinks** — `readdirSync(…, {withFileTypes:true})` does not follow links, so `isDirectory()`
+  and `isFile()` are BOTH false and a symlink matches neither branch of the walk. An entire
+  symlinked subtree vanishes with no record, not even an uncertainty marker. Fixture + probe output
+  is in the ADR; re-runnable from
+  `…/scratchpad/mysym/repo` if that scratch dir survives, trivially rebuilt if not.
+- **unreadable directory** — `catch { return }` at `scanner.ts:224`, still silent even after this
+  release's `unverified-prune.ts` work, because that only reports entries WITHOUT a
+  `contentFingerprint` and `baseline accept` always writes one.
+- **`excludes`** — reproduced: accept a violation, add a second file with the identical import, then
+  exclude the first file. `align check` exits 0 GREEN with the entry's `file` rewritten to the
+  second file, carrying the original provenance.
+
+**The decision is two overlapping mechanisms, and both are required** — this is the part most likely
+to be "simplified" by someone who has not read the measurement:
+
+1. the walk records every blind spot with its reason (`ScanBlindSpot`), and
+2. an **injected** existence probe covers causes nobody enumerated.
+
+Neither alone works. `fs.existsSync` returns **false** for a file inside a `chmod 000` directory —
+it swallows the `EACCES` — so the probe alone misses mechanism #5, one of the two reproduced
+severity-zeros. The record alone is exactly as complete as our enumeration, and this ADR exists
+because the previous enumeration missed three. The probe must be injected because **`packages/core`
+imports `node:fs` nowhere** and that stays true.
+
+**Decisions already made — do not relitigate without new evidence:**
+
+- The **pipeline reframe is deferred** to a later release with its own ADR (ADR 028 §7). An earlier
+  diagnosis blamed this bug class on commands re-deriving inputs mid-invocation; that diagnosis was
+  **retracted before implementation** — the confirmed defects fire on a single-walk `check` with the
+  chain intact. The multi-walk sprawl is real, ugly, and has zero confirmed kills.
+- **Empty-scan prune refusal is NOT overridable** — tier-1 shaped, because a scan that observed
+  nothing carries no fact an override could rest on.
+- **The payload rename is free only in this release.** `CheckPayload` is unversioned; verified no
+  published version emits `skippedNestedCheckouts` (`v0.1.4`'s builder has zero occurrences).
+- **The migration validator stays checkout-specific.** `migrations/validators/baseline-entries-in-skipped-checkouts.ts`
+  is wired into the 0.2.0 registry entry. Symlink/exclude blindness are standing bugs, not
+  consequences of upgrading, so widening it would misreport them.
+
+**Also found, deliberately out of scope, each recorded in ADR 028:** the manifest walker's own exits
+(malformed `package.json` treated as absent — the corrupt-≠-absent discipline BUG #1 banned, in a
+second walker — and an exclude dialect that diverges from the source walker's); `writeBaseline` is a
+non-atomic full-snapshot write with no lock, so the long-lived MCP server racing a CLI `accept` can
+lose a consent decision; `docs/core-interfaces.md`'s documented payload block is already stale by
+four fields, with nothing enforcing it.
 
 ### The last unseamed prompt
 
@@ -238,7 +315,15 @@ harness's ~1.0% (nest) are both real measurements, but neither cleanly attribute
 churn — both repos scan `complete: false`, so some share may be a completeness artifact. Say
 "upper bound", not "the churn rate".
 
-**`packages/cli/package.json` is still `0.1.4`.** The upgrade scenario works anyway because a real
-published 0.1.4 predates ADR 022 and never wrote `version.json`, so `upgrade` sees
-`rangeFrom = 'unknown'` — which is also the realistic case for every pre-0.2.0 install. It keeps
-working after the bump.
+**The version bump to 0.2.0 has happened** (all five packages, lockstep). Two things it broke that
+you should expect to see again on the next bump: three tests asserted pre-bump state and had to be
+re-pointed, and `version-skew.test.ts` had a fixture pinned to the literal `'0.2.0'` which collided
+with the now-real version and silently weakened its own assertion to `undefined` — replaced with a
+`'9.9.9'` sentinel. **Bumping the version silently weakens version-pinned fixtures; grep for the
+literal before and after.**
+
+**The migration registry has exactly ONE entry (`0.2.0`), and 0.1.4 deliberately has none.** It once
+did, keyed wrong: `v0.1.4` is the tip of `main`, every commit the notes describe postdates it, and
+`selectRange` takes entries strictly newer than `from` — so `align upgrade --from 0.1.4` selected
+nothing. Re-keyed and verified against the built binary: `unknown` / `0.1.4` / `0.1.3` all yield 14
+notes. `registry.ts`'s module comment records this.
