@@ -193,7 +193,41 @@ whatever the cause — closing the tail Stage 1 cannot enumerate.
 - Genuine deletion → still prunes; genuine rename → still transfers. No over-retention regression.
 - Core tests construct the probe without touching a filesystem.
 
-**Status**: Not Started
+**Status**: Complete (2026-08-17, commits `97c1e45` / `d1ba7ce` / `e8b19d9`, plus `6fa7f02` for F3)
+
+Measured at completion: typecheck 0 errors, **1256 passing + 1 skipped**, `align check` green with
+29 baselined, `align doctor` exit 0, `--targets local` 15/15 PASS.
+
+**The probe is REQUIRED with no default.** There is no safe default — `() => false` silently
+restores pre-ADR-028 behaviour at any site that forgets it (ADR 027's counter-example), `() => true`
+makes `prune` a permanent no-op. 6 production and 59 test sites state their answer; the compiler
+enumerated all of them because `443ea2a` had just made tests typechecked.
+
+**Retention stayed in the CLI helper, not core.** `init`'s destructive path never calls
+`store.prune`, so a store-only guard would have protected `prune` and missed both of init's write
+paths — the fix-one-arm shape ADR 027's F1 was.
+
+Four defects, two found by this stage's own tests and two by review:
+
+1. **Over-retention, the opposite severity-zero.** The probe was applied without ADR 028's "absent
+   from the scan" precondition. Every scanned file also exists on disk, so it retained every
+   genuinely-fixed violation — `prune` becomes a permanent no-op and the baseline can only grow.
+2. The retention message rendered an **empty cause list** for a probe-retained entry, which by
+   construction has no covering blind spot. The split now carries its reason.
+3. **`fs.existsSync` is case-insensitive** on macOS/Windows, so a case-only rename read as "still
+   present": move-transfer suppressed, `align check` RED on a pure rename (violating ADR 006), entry
+   retained forever. That falsified two of ADR 028's own claims. The probe now compares parent
+   directory entry names — case-exact everywhere, and a developer's Mac now agrees with Linux CI
+   about a shared committed baseline. Measured before/after: `moves=0` -> `moves=1`.
+4. A `..` in a hand-edited baseline **probed outside the repo**. Now containment-guarded.
+
+**F3, from the Stage 2 review, closed in `6fa7f02`** — the second walker had the same disease. A
+`package.json` behind an unreadable directory was on disk, unobserved, covered by no blind spot, and
+read absent to the probe, so it reached the content match — where manifest collisions are the NORM,
+since the snippet is the dependency line itself. Three exits now recorded (`unreadable`, a new
+`unparseable` variant for corrupt-!=-absent, and `excluded`), plus the identical
+`existsSync`-hides-`EACCES` bug in `loadWorkspacePackages`. Measured on the reproduction:
+observed=false, probe=false, **covered-by-blind-spot=true**.
 
 ---
 
@@ -220,7 +254,26 @@ Pure deletion, because Stage 1 already put the observed file set on the run.
   it to assert one scan.
 - Security-gate entries still reconcile against the manifest domain only.
 
-**Status**: Not Started
+**Status**: Complete (2026-08-17, commit `25ccf98`)
+
+Measured at completion: typecheck 0 errors, **1258 passing + 1 skipped**, every prune/upgrade suite
+green (55 tests), `align check` green, `doctor` exit 0, `--targets local` 15/15 PASS.
+
+**The first success criterion is met in substance but NOT literally, and the difference is
+deliberate.** `baseline prune` still unions the two domains, because it cannot not: `store.prune`
+takes a single `knownFiles` and `applyMoves` iterates every entry regardless of gate, so a
+per-domain split would make each domain's entries look unobserved during the other's pass — mass
+over-retention at best. The deleted helper unioned them too. What changed is that the merge is now
+explicit, at the one call site that needs it, derived from the run that produced the violations, at
+no extra I/O — instead of hidden inside a helper that walked again. `CheckRun` keeps the domains
+apart so that consumer makes the choice visibly. Splitting `store.prune` by domain would need the
+store to know which gate produced each entry, which is a larger interface change than this stage.
+
+The second walk was never a performance complaint: it only scanned, never running the guard steps or
+rule evaluation that are `check()`'s actual error sources, so an errored run still produced a
+healthy-looking file set. Pinned by "one walk per domain per check" in core (counting fakes) plus a
+value-level assertion the escape hatch is gone — it was reachable from JS consumers, not only
+TypeScript ones.
 
 ---
 
