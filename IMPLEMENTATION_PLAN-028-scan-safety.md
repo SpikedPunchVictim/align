@@ -115,7 +115,47 @@ them **and** the observed file set, per domain; `skippedNestedCheckouts` is gone
   decision fails the build or the test.
 - Every existing checkout test passes under the new field, equivalent-or-stronger.
 
-**Status**: Not Started
+**Status**: Complete (2026-08-16, commits `e042520` / `443ea2a` / `19bf230`)
+
+Measured at completion: typecheck 0 errors, **1229 passing + 1 skipped** (from 1203+1 at `f0b48c7`),
+`align check` green with 29 baselined and output byte-identical to baseline, `align doctor` exit 0,
+`node integration/run.mjs --targets local` 15/15 PASS, whole fast gate 24.4s.
+
+Four defects were found while building this stage, all fixed here — recorded because each is a
+shape worth recognising again:
+
+1. **The volume bound did not hold for `excludes`.** `excludes: ['generated/**']` does not match the
+   directory `generated`, so the walk descended and recorded one blind spot PER FILE. Fixed by
+   stopping the walk at a directory whose subtree a trailing `/**` already excludes — this narrows
+   what the walk WALKS, never what it includes, pinned by a partial-subtree test.
+2. **A blind spot at the repo root protected nothing.** An unreadable scan root records path `''`,
+   and at-or-under matching answered false for every file — so the one case where align sees nothing
+   was the case where `prune` would empty the baseline at exit 0.
+3. **The `/**` test ran on the raw pattern**, so a `/**` inside a brace group (`src/{a/**,b/**}`)
+   never bounded the record: 10 spots against 2 for the equivalent un-braced form. Now expanded
+   through core's own `expandBraces`.
+4. **`validateComponents`' likely-cause message was uncapped** — a selector with no literal anchor
+   matches every blind spot, so one component's error could carry ~200 paths as prose.
+
+**One decision taken that this plan did not specify.** The record is complete; the advisory is not.
+Measured on this repo: 200 blind spots, 143 of them `default-excluded-dir`. `check` reports only the
+three kinds a user cannot predict from their own config (checkout, unreadable, symlink);
+`excluded`/`default-excluded-dir` are recorded but not advised, so retention still protects entries
+under them and `prune`/`init` still print the reason when an entry is actually retained. Reviewed
+and upheld. Consequence to expect: `align check`'s output on a clean repo is unchanged.
+
+**Out-of-stage work this forced, done in `443ea2a`.** No package typechecked its tests
+(`"include": ["src"]`), which quietly undercut ADR 027/028's whole argument for REQUIRED fields —
+in test code a silent regression never became a compile error. Twelve fixtures built `CheckRun`s
+with no `blindSpots` and passed. Each package now has a `tsconfig.test.json`; the 103 errors that
+surfaced were all real, including two `components-registry` tests that passed for the wrong reason
+and an `agent` helper silently discarding path normalisation at runtime.
+
+**Reported, deliberately not fixed:** `packages/core/src/build/` (`diff.ts`, `export-ir.ts`,
+`ground.ts`, `hash.ts`, `impact.ts`) is not scanned by align at all — `build` is in
+`DEFAULT_EXCLUDED_DIR_NAMES`. Pre-existing (confirmed against `HEAD~`), and it survives
+`validateComponents` because that check is per-component and needs only one match — ADR 028 §6's
+exact argument, occurring in align's own tree.
 
 ---
 
