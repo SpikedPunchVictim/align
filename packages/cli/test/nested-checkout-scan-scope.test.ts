@@ -106,10 +106,12 @@ describe("scan-scope consistency across every CheckRun-producing surface (task #
       expect(await baselineAccept(tmpDir)).toBe(0);
       expect(await runCheck(tmpDir, { json: false })).toBe(0); // accepted -> green
 
-      // 4. `align baseline prune` computes `knownFiles` from a THIRD scan (`orchestrator.knownFiles`,
-      // `commands/baseline.ts`). If that scan didn't resolve the checkout, the just-accepted entry's
-      // file would look absent — an "orphan" — and `store.prune` would delete it unconditionally
-      // while reporting success and exiting 0. Assert the entry survives.
+      // 4. `align baseline prune` takes `knownFiles` off ITS OWN `check` run (ADR 028 Stage 3 —
+      // this used to be a THIRD scan via the now-deleted `orchestrator.knownFiles`). If that run
+      // didn't resolve the checkout, the just-accepted entry's file would look absent — an "orphan"
+      // — and `store.prune` would delete it unconditionally while reporting success and exiting 0.
+      // Assert the entry survives. The scan-count property itself is pinned in core, by
+      // `orchestrator.test.ts`'s "one walk per domain per check".
       const beforePrune = readBaseline(tmpDir);
       expect(beforePrune).toHaveLength(1);
       expect(await baselinePrune(tmpDir)).toBe(0);

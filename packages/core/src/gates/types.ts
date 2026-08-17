@@ -59,15 +59,23 @@ export interface CheckRun {
   readonly blindSpots: readonly ScanBlindSpot[];
   /** The files this run actually observed, per scan domain (ADR 028 §5).
    *
-   * This is what lets `orchestrator.knownFiles()` be deleted: that method existed only because
-   * `CheckRun` did not carry the graph, so `align baseline prune` had to run a SECOND full scan to
-   * recover the file set — two independent walks whose results were assumed to agree.
+   * This is what LET `orchestrator.knownFiles()` be deleted (ADR 028 Stage 3, done). That method
+   * existed only because `CheckRun` did not carry the graph, so `align baseline prune` had to run a
+   * SECOND full scan to recover the file set — two independent walks whose results were assumed to
+   * agree, and nothing would have noticed when they did not.
    *
-   * The two domains are deliberately NOT merged. `check` evaluates them per-gate (the architecture
-   * gate over `graph.nodes`, the security gate over `inventory.manifests`), and the deleted
-   * `knownFiles()` unioned them — so `prune` reasoned over a set `check` never used. Merging also
-   * mis-classifies: `.json` is an asset extension to the source walker but a first-class file to the
-   * manifest walker, so a `package.json` judged by the wrong domain's vocabulary reads as absent.
+   * Carried PER DOMAIN, because `check` evaluates them per-gate: the architecture gate reasons over
+   * `graph.nodes`, the security gate over `inventory.manifests`, and each runs its own
+   * `reconcileMoves`. Judging one by the other's vocabulary mis-classifies — `.json` is an asset
+   * extension to the source walker but a first-class file to the manifest walker, so a
+   * `package.json` weighed by the source domain reads as absent.
+   *
+   * `baseline prune` does union them, and that is not a contradiction: `store.prune` takes a single
+   * `knownFiles` and `applyMoves` iterates EVERY entry regardless of gate, so a per-domain split
+   * would make each domain's entries look unobserved during the other's pass. The union it needs is
+   * now written at that call site, derived from this run and costing no extra I/O — where the
+   * deleted helper performed it invisibly, from a walk no rule evaluation had ever seen. Separate on
+   * the run, merged explicitly by the one consumer that must.
    *
    * Empty sets when the corresponding gate didn't evaluate — same discipline as the fields above. */
   readonly observedFiles: {

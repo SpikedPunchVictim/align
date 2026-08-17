@@ -247,12 +247,20 @@ export async function runUpgrade(rootDir: string, options: UpgradeOptions): Prom
     const fullRun = await fullOrchestrator.check({ rootDir, excludes, includeNestedCheckouts });
     const allViolations = fullRun.gates.flatMap((g) => g.violations);
 
-    let knownFiles: ReadonlySet<RepoRelativePath>;
-    try {
-      knownFiles = await orchestrator.knownFiles({ rootDir, excludes, includeNestedCheckouts });
-    } catch (err) {
-      return reportCliError('align upgrade', err);
-    }
+    // ADR 028 Stage 3: from `fullRun`, the run that produced `allViolations` above — not from a
+    // third walk, and not from `orchestrator` (whose run was evaluated against the REAL baseline, so
+    // its violations are filtered and its file set belongs to a different question). Same union as
+    // `baselinePrune` performs, for the same reason; see the comment there.
+    //
+    // NOT FIXED HERE, deliberately: this command still walks more than once (`:191` and `:246`, plus
+    // the rescans inside the `baselinePrune`/`baselineAccept` it delegates to). ADR 028 lists that
+    // collapse as its own work with its own ADR — it is the largest single win of the deferred
+    // pipeline reframe, and doing it here would mean restructuring a command that writes, without
+    // the write-set and scenario coverage that deserves.
+    const knownFiles: ReadonlySet<RepoRelativePath> = new Set([
+      ...fullRun.observedFiles.source,
+      ...fullRun.observedFiles.manifest,
+    ]);
 
     pruneOutcome = await reconcilePrune(
       rootDir,

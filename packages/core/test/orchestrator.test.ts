@@ -830,3 +830,69 @@ describe('GateOrchestrator', () => {
     });
   });
 });
+
+/**
+ * ADR 028 Stage 3. `orchestrator.knownFiles()` is deleted; `align baseline prune` takes its file set
+ * off the run instead of walking a second time. The CLI-level consequence is pinned by
+ * `cli/test/nested-checkout-scan-scope.test.ts`; the property that makes it true is pinned here,
+ * because this is where walks actually happen.
+ *
+ * Two independent walks feeding one decision was not a performance complaint. `prune` deleted
+ * entries using a file set no rule evaluation had ever seen, and nothing compared the two — so when
+ * they disagreed (a file deleted between them), the disagreement was invisible and pointed toward
+ * deletion. One walk per domain, one set of facts, and `CheckRun` carries them.
+ */
+describe('one walk per domain per check (ADR 028 Stage 3)', () => {
+  function countingRegistry(nodes: readonly ReturnType<typeof node>[]): {
+    readonly registry: StaticPluginRegistry;
+    readonly calls: () => number;
+  } {
+    let calls = 0;
+    const plugin = {
+      name: 'counting',
+      scanner: {
+        scan: async () => {
+          calls += 1;
+          return graph([...nodes], []);
+        },
+      },
+    };
+    return { registry: new StaticPluginRegistry([plugin as never]), calls: () => calls };
+  }
+
+  it('check() scans the source domain exactly once and the manifest domain exactly once', async () => {
+    const { registry, calls: sourceScans } = countingRegistry([node('api/a.ts', 'api')]);
+    let manifestScans = 0;
+    const manifestScanner = {
+      scan: () => {
+        manifestScans += 1;
+        return { manifests: [], lockfilePresent: false, blindSpots: [] };
+      },
+    };
+    const ruleset = { irVersion: '1' as const, components: {}, rules: [] };
+
+    const orchestrator = new GateOrchestrator(
+      registry,
+      ruleset,
+      new InMemoryBaselineStore([], neverOnDisk),
+      new Map(),
+      manifestScanner,
+    );
+    const run = await orchestrator.check({ rootDir: '/tmp/x', excludes: [] });
+
+    expect(sourceScans()).toBe(1);
+    expect(manifestScans).toBe(1);
+    // And the run carries what the deleted second walk used to go and fetch, so no consumer has a
+    // reason to scan again. If `observedFiles.source` were ever empty on a green run, `prune` would
+    // treat every entry as unobserved — which is why this is asserted, not assumed.
+    expect([...run.observedFiles.source]).toEqual(['api/a.ts']);
+    expect([...run.observedFiles.manifest]).toEqual([]);
+  });
+
+  it('GateOrchestrator no longer exposes a scan-only knownFiles() escape hatch', () => {
+    // Pinned as a value check, not just a compile-time one: the method was reachable from JS
+    // consumers too, and its whole hazard was being an easy way to get a file set that no rule
+    // evaluation had validated.
+    expect((GateOrchestrator.prototype as unknown as Record<string, unknown>)['knownFiles']).toBeUndefined();
+  });
+});

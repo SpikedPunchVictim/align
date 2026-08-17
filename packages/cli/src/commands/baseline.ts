@@ -146,14 +146,25 @@ export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, 
   if (refusal !== undefined) return refusal;
   const allViolations = run.gates.flatMap((g) => g.violations);
   // `knownFiles` gates move-transfer the same way `align check`'s own reconcileMoves does
-  // (FRAGILE #7 fix, bug hunt 2026-08-03) — must be the real current scan's file set, not the
-  // empty stub this used to pass (which `store.prune` used to silently ignore anyway).
-  let knownFiles: ReadonlySet<RepoRelativePath>;
-  try {
-    knownFiles = await orchestrator.knownFiles({ rootDir, excludes, includeNestedCheckouts });
-  } catch (err) {
-    return reportCliError('align baseline prune', err);
-  }
+  // (FRAGILE #7 fix, bug hunt 2026-08-03) — the real current scan's file set.
+  //
+  // ADR 028 Stage 3: taken off THE RUN ABOVE, not from a second walk. This used to call
+  // `orchestrator.knownFiles(...)`, which re-scanned both domains from scratch — so `prune` decided
+  // what to delete using a file set that no rule evaluation had ever seen, and the two walks were
+  // assumed to agree. They usually did; when they could not (a file deleted between them) the
+  // disagreement was invisible and pointed the wrong way. One walk, one set of facts.
+  //
+  // UNIONED, deliberately, and this is the one place the two domains are combined. `store.prune`
+  // takes a single `knownFiles` and `applyMoves` iterates EVERY baseline entry regardless of which
+  // gate produced it, so a per-domain split would make every manifest entry look unobserved during
+  // the source pass and vice versa — mass over-retention, or worse. The union is what the deleted
+  // `knownFiles()` computed too; the difference is that it is now visible, derived from this run,
+  // and costs no extra I/O. `CheckRun` still carries the domains apart (ADR 028 §5) precisely so
+  // this consumer can make the merge explicitly rather than inherit it from a helper.
+  const knownFiles: ReadonlySet<RepoRelativePath> = new Set([
+    ...run.observedFiles.source,
+    ...run.observedFiles.manifest,
+  ]);
   // `run.blindSpots` (ADR 027's F1 fix, generalized by ADR 028): without this, `store.prune`'s own
   // move-transfer step (`applyMoves`) could misclassify an orphaned entry whose file the scan simply
   // did not look at as "moved" via a colliding content fingerprint, forging its acceptedAt/acceptedBy

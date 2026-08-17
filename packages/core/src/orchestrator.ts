@@ -265,26 +265,6 @@ export class GateOrchestrator {
   }
 
   /**
-   * Scans both domains (TypeScript source graph + manifest inventory) and returns only their
-   * combined file set — no rule evaluation, no baseline mutation. `check()` doesn't call this; it
-   * already computes both domains internally, per-gate, for its own `reconcileMoves` calls. This
-   * exists for `align baseline prune` (`cli/commands/baseline.ts`), which needs the same
-   * `knownFiles` gating `reconcileMoves` uses (FRAGILE #7 fix, bug hunt 2026-08-03) but only has a
-   * `CheckRun` — not a graph or inventory — from its own `orchestrator.check()` call. Core stays the
-   * sole owner of scanning (ARCHITECTURE.md §5) rather than the CLI re-implementing it. Throws the
-   * same way `scanAll`/`manifestScanner.scan` do on a scan failure — callers should catch it the
-   * same way `runTrustedCheck` catches `loadConfig` failures.
-   */
-  async knownFiles(options: CheckOptions): Promise<ReadonlySet<RepoRelativePath>> {
-    const graph = await this.scanAll(options);
-    const inventory = await this.manifestScanner.scan({ rootDir: options.rootDir, excludes: options.excludes });
-    const files = new Set<RepoRelativePath>();
-    for (const node of graph.nodes) files.add(node.file);
-    for (const manifest of inventory.manifests) files.add(manifest.file);
-    return files;
-  }
-
-  /**
    * `security` gate (ADR 013): scans the manifest domain (root + workspace `package.json` +
    * `pnpm-lock.yaml`, `@spikedpunch/align-plugin-typescript`'s `NodeManifestScanner` in real deployments) and
    * evaluates every `security.manifest.*` rule against it via `evaluateManifestRule`. Always

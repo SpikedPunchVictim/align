@@ -20,11 +20,17 @@ import { reportCliError } from './cli-error.js';
  *     "Pruned N fixed violation(s)" and exiting 0.
  *   - `init` wrote `[]` over an existing baseline and printed "Initial check is green".
  *
- * Neither could catch it downstream: `orchestrator.knownFiles` only re-scans — it never runs
- * `validateSelectorSyntax`/`validateClassifiedComponents`/`validateRuleComponentRefs`/
- * `validateHostRules` or rule evaluation, which are the error sources in `check()`, so a run that
- * errors in `check()` yields a perfectly healthy `knownFiles`. There is no override: an errored
- * scan evaluated NO rules at all, so there is nothing a user could knowingly consent to.
+ * Neither could catch it downstream, and the reason is now structural rather than incidental. Until
+ * ADR 028 Stage 3 the file set came from `orchestrator.knownFiles`, a SECOND walk that only scanned:
+ * it never ran `validateSelectorSyntax`/`validateClassifiedComponents`/`validateRuleComponentRefs`/
+ * `validateHostRules` or rule evaluation — the actual error sources in `check()` — so a run that
+ * errored in `check()` still yielded a perfectly healthy-looking file set, and the two disagreed
+ * with nothing to notice it. That method is gone; the set now comes off the same `CheckRun` this
+ * guard inspects, so "the scan errored" and "here is what the scan saw" can no longer come from
+ * different walks. The guard is still required — an errored run reports `violations: []` without
+ * having evaluated anything, which is the whole defect — but it now guards one set of facts instead
+ * of arbitrating between two. There is no override: an errored scan evaluated NO rules at all, so
+ * there is nothing a user could knowingly consent to.
  *
  * **Tier 2 — `refuseIfRunIncomplete`, below.** `complete: false` (`isRunComplete`,
  * `gates/advisories.ts` — the shared predicate, also used by the MCP payload builder's `complete`
