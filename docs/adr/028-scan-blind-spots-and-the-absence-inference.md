@@ -184,6 +184,27 @@ locked/file.ts  -> false   inside chmod 000 dir   WRONG — probe alone fails
 gone.ts         -> false   genuinely deleted      correct
 ```
 
+**Amended 2026-08-17, when the probe was implemented.** The table above measures `fs.existsSync`,
+which is what the probe was going to be. It is not what shipped: `existsSync` is case-INSENSITIVE on
+macOS and Windows, so after a case-only rename (`Utils.ts` → `utils.ts`) the orphaned entry read as
+"still present", the move-transfer was suppressed, `align check` went **red on a pure rename** —
+violating ADR 006 — and `prune` retained the stale entry forever. That would have made two claims in
+this ADR false: that case-only renames (#8) are "recorded rather than fixed", and that "a genuine
+rename whose old file is genuinely gone still transfers exactly as before". The probe therefore
+compares against the parent directory's actual entry names, which is case-exact on every platform —
+and, more valuably, makes a developer's Mac and Linux CI agree about a shared committed baseline.
+Two rows of the table change as a result, neither weakening the argument for two mechanisms:
+
+- `Utils.ts` when only `utils.ts` exists → now **false** (was `true`). #8 stays exactly as
+  documented: unaddressed, and unchanged in behaviour by this ADR.
+- `broken.ts` (dangling symlink) → now **true** (was `false`). Something does occupy that path, and
+  concluding "deleted" from a dangling link is the kind of unproven inference this decision refuses
+  to make. It also makes the probe agree with mechanism 1, which already records every symlink as
+  `not-regular-file`; previously the two disagreed here and the record silently won. Command-level
+  behaviour is unchanged either way — the entry was retained before and is retained now.
+
+The load-bearing row is untouched, and it is the reason both mechanisms exist:
+
 `fs.existsSync` swallows the `EACCES` and reports a file inside an unreadable directory as **absent**
 — so the probe alone does not close mechanism #5, one of the two reproduced severity-zeros. The walk
 knows that directory was unreadable; the probe knows nothing of causes but catches blind spots nobody
@@ -332,6 +353,9 @@ ADR 027-style consequence analysis.
   remaining multi-walk commands (`upgrade`, notably) are untouched this release and remain as
   documented-fragile as they are today.
 - **Case-only renames (#8) are not addressed** and remain a known gap, recorded rather than fixed.
+  Holding that line cost something: the existence probe had to be made case-exact, because the
+  obvious `fs.existsSync` implementation would have *changed* #8's behaviour from "silently
+  transfers" to "goes red and retains forever". See the amendment to the measurement table above.
 - **Reasons do not compose: the first exit to fire is the reason recorded, and `excluded` precedes
   `nested-checkout`.** The exclude test runs at the top of `visit`, before the `.git` test, so a
   nested checkout underneath an excluded ancestor is classified `excluded` at the ancestor and is
