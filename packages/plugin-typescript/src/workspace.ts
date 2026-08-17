@@ -8,6 +8,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import type { ScanBlindSpot } from '@spikedpunch/align-core';
 
 export interface WorkspacePackage {
   readonly name: string;
@@ -77,7 +78,22 @@ export function readWorkspaceGlobs(rootDir: string): string[] {
   return [];
 }
 
-export function loadWorkspacePackages(rootDir: string): WorkspacePackage[] {
+/**
+ * `record` (ADR 028 F3, optional): a sink for paths this function declines to turn into a workspace
+ * member. Optional — and that IS the anti-pattern ADR 027/028 warn about, so the exemption is
+ * argued rather than assumed. Those ADRs make a safety PARAMETER required because omitting it
+ * silently disables a protection at a production call site. This is a reporting sink, and only one
+ * of the four callers feeds a destructive inference from the result: `scanManifests`, whose
+ * inventory becomes the security gate's `knownFiles` and therefore decides move-transfer. The other
+ * three (`scanner.ts`'s classification index, `doctor.ts`'s coverage report, `init`'s component
+ * detection) infer nothing destructive from a missing member, and the source walk records their
+ * scan-scope facts separately. Making it required would churn four call sites and a dozen tests to
+ * express "I do not need this", which is what `undefined` already says.
+ */
+export function loadWorkspacePackages(
+  rootDir: string,
+  record?: (path: string, reason: ScanBlindSpot['reason']) => void,
+): WorkspacePackage[] {
   const patterns = readWorkspaceGlobs(rootDir);
   if (patterns.length === 0) return [];
 
@@ -89,9 +105,24 @@ export function loadWorkspacePackages(rootDir: string): WorkspacePackage[] {
   const packages: WorkspacePackage[] = [];
   for (const abs of dirs) {
     const pkgJsonPath = path.join(abs, 'package.json');
-    if (!fs.existsSync(pkgJsonPath)) continue;
+    const relJson = path.relative(rootDir, pkgJsonPath).split(path.sep).join('/');
+    // Read first, branch on the error, exactly as `manifest.ts`'s `buildManifestRecord` does. The
+    // previous `existsSync` guard hid the case that mattered: it swallows `EACCES`, so a member
+    // whose DIRECTORY is unreadable reported as "no package.json here" and the member vanished with
+    // no record anywhere. That was the last leg of ADR 028's F3 window — the manifest never reached
+    // the inventory, no blind spot covered it, and the existence probe also reads absent through an
+    // unreadable directory, so the entry went to the content-fingerprint match.
+    let raw: string;
     try {
-      const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8')) as { name?: unknown };
+      raw = fs.readFileSync(pkgJsonPath, 'utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        record?.(relJson, { kind: 'unreadable', error: err instanceof Error ? err.message : String(err) });
+      }
+      continue; // ENOENT: genuinely not a package directory, nothing to record
+    }
+    try {
+      const pkg = JSON.parse(raw) as { name?: unknown };
       if (typeof pkg.name === 'string' && pkg.name.length > 0) {
         const rel = path.relative(rootDir, abs).split(path.sep).join('/');
         // `rel === ''` means `abs === rootDir` — the package IS the repo root. Leave `dir` as
@@ -100,8 +131,10 @@ export function loadWorkspacePackages(rootDir: string): WorkspacePackage[] {
         const dir = rel === '' ? '' : rel.endsWith('/') ? rel : `${rel}/`;
         packages.push({ name: pkg.name, dir });
       }
-    } catch {
-      // malformed package.json: skip this one package, not the whole scan
+    } catch (err) {
+      // Malformed, not absent — the corrupt-≠-absent discipline BUG #1 established. Skip this one
+      // package, not the whole scan, but never silently.
+      record?.(relJson, { kind: 'unparseable', error: err instanceof Error ? err.message : String(err) });
     }
   }
   return packages;

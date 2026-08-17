@@ -404,6 +404,7 @@ describe('baseline move-transfer (ADR 006)', () => {
         excluded: { kind: 'excluded', pattern: 'vendor/**' },
         'default-excluded-dir': { kind: 'default-excluded-dir', name: 'dist' },
         unreadable: { kind: 'unreadable', error: 'EACCES: permission denied' },
+        unparseable: { kind: 'unparseable', error: 'Unexpected token } in JSON at position 42' },
         'not-regular-file': { kind: 'not-regular-file' },
       };
 

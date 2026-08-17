@@ -109,9 +109,18 @@ export type ScanBlindSpotReason =
    * versions: the set has grown, and an entry accepted under an older align can fall behind a name
    * added later. */
   | { readonly kind: 'default-excluded-dir'; readonly name: string }
-  /** `readdirSync` threw — permissions, or a directory racing deletion mid-walk. Silent before
-   * ADR 028, and one of the two reproduced severity-zeros. */
+  /** The bytes could not be obtained — permissions, a directory racing deletion mid-walk, a path
+   * component that is not a directory. Silent before ADR 028, and one of the two reproduced
+   * severity-zeros. */
   | { readonly kind: 'unreadable'; readonly error: string }
+  /** The bytes were obtained but could not be understood — a malformed `package.json`, a
+   * `pnpm-workspace.yaml` that is not valid YAML. Deliberately DISTINCT from `unreadable`: this is
+   * the corrupt-≠-absent discipline BUG #1 established, and the two want different advice. An
+   * unreadable path is usually an accident of permissions; an unparseable one is a file the user
+   * can open and fix, and telling them "unreadable" would send them looking at the wrong thing.
+   * ADR 028 names malformed-treated-as-absent as the same defect class occurring in a second
+   * walker, which is what this variant exists to stop. */
+  | { readonly kind: 'unparseable'; readonly error: string }
   /** Neither a regular file nor a directory: symlink, FIFO, socket. `readdirSync(…, {
    * withFileTypes: true })` does not follow links, so `isDirectory()` and `isFile()` are BOTH false
    * for a symlink and it matches neither branch of the walk — an entire symlinked subtree vanishes

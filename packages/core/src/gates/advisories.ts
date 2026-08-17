@@ -119,13 +119,15 @@ function isExternalPackageSpecifier(specifier: string): boolean {
  * so retention still protects entries under them, and `prune`/`init` still name the reason at the
  * moment an entry is actually retained, which is the moment it is actionable.
  *
- * The three that ARE reported all share the property that the user could not have predicted them
+ * The four that ARE reported all share the property that the user could not have predicted them
  * from their own config: a nested checkout appears with a generated name (ADR 027), an unreadable
- * directory is a permissions accident, and a symlink is invisible data loss the walk cannot follow.
+ * directory is a permissions accident, an unparseable file is corruption the user can actually fix,
+ * and a symlink is invisible data loss the walk cannot follow.
  */
 const ADVISORY_BLIND_SPOT_REASONS: ReadonlySet<ScanBlindSpotReason['kind']> = new Set([
   'nested-checkout',
   'unreadable',
+  'unparseable',
   'not-regular-file',
 ]);
 
@@ -154,6 +156,8 @@ function describeBlindSpotKind(kind: ScanBlindSpotReason['kind']): string {
       return 'always-excluded directory name';
     case 'unreadable':
       return 'the directory could not be read';
+    case 'unparseable':
+      return 'the file is present but could not be parsed — corrupt is not the same as absent, so align will not treat its entries as fixed';
     case 'not-regular-file':
       return 'not a regular file (symlink, FIFO or socket — the walk does not follow these, so an entire symlinked subtree is absent from the graph)';
     default: {
@@ -168,6 +172,7 @@ function describeBlindSpotKind(kind: ScanBlindSpotReason['kind']): string {
 function labelBlindSpot(spot: ScanBlindSpot): string {
   switch (spot.reason.kind) {
     case 'unreadable':
+    case 'unparseable':
       return `${spot.path} (${spot.reason.error})`;
     case 'excluded':
       return `${spot.path} (${spot.reason.pattern})`;

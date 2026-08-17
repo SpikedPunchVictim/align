@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { toComponentName } from '@spikedpunch/align-core';
 import type { ComponentDefinitionIR, DependencyGraph, ScanBlindSpot, ScanBlindSpotReason } from '@spikedpunch/align-core';
 import { TypeScriptScanner } from '../src/scanner.js';
+import { scanManifests } from '../src/manifest.js';
 
 /**
  * ADR 028 Stage 1: every exit in `walkSourceFiles` that drops a path records a `ScanBlindSpot` with
@@ -255,6 +256,16 @@ describe('every ScanBlindSpotReason variant is actually reachable from the walk'
     fs.chmodSync(path.join(dir, 'locked'), 0o000);
     // not-regular-file
     fs.symlinkSync(path.join(dir, 'root.ts'), path.join(dir, 'link.ts'));
+    // The manifest walker's own material. The ROOT `package.json` is the malformed one, not a
+    // member's: `loadWorkspacePackages` parses each member's manifest to read its `name` and drops
+    // the member entirely when that throws (`workspace.ts`), so a malformed MEMBER never reaches
+    // `scanManifests` and cannot produce a record here. That third-walker exit is a real remaining
+    // hole and ADR 028 lists it — but it is the one place mechanism 2 covers cleanly on its own: the
+    // member's `package.json` is still on disk, so the existence probe retains its entries.
+    fs.writeFileSync(path.join(dir, 'package.json'), '{ this is not json', 'utf8');
+    fs.writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), "packages:\n  - 'excluded-member'\n", 'utf8');
+    fs.mkdirSync(path.join(dir, 'excluded-member'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'excluded-member', 'package.json'), '{"name":"excluded"}\n', 'utf8');
   });
 
   afterEach(() => {
@@ -262,21 +273,32 @@ describe('every ScanBlindSpotReason variant is actually reachable from the walk'
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('emits at least one blind spot of every reason kind in a single walk', async () => {
+  it('every ScanBlindSpotReason variant is produced by one of align\'s two walkers', async () => {
     const graph = await new TypeScriptScanner().scan({
       rootDir: dir,
       components: allComponent(),
       excludes: ['generated/**'],
     });
+    // BOTH walkers, because the union spans both and no single walker emits all of it. The source
+    // walk cannot produce `unparseable` — it never parses anything it did not already classify as a
+    // source file — and the manifest walk cannot produce `nested-checkout` or `default-excluded-dir`,
+    // which is itself pinned by `manifest.test.ts`. Asserting per-walker would therefore force a
+    // false expectation on one of them; asserting over the union is the true claim.
+    const inventory = scanManifests(dir, ['excluded-member']);
 
+    // Keyed by the union: adding a variant without giving it a real producer fails to compile here,
+    // and adding one whose producer is never exercised fails the assertion below. Together with
+    // `core/test/baseline.test.ts`'s retention table, this is ADR 028's answer to "the previous
+    // enumeration missed three mechanisms".
     const kinds: Readonly<Record<ScanBlindSpotReason['kind'], true>> = {
       'nested-checkout': true,
       excluded: true,
       'default-excluded-dir': true,
       unreadable: true,
+      unparseable: true,
       'not-regular-file': true,
     };
-    const seen = new Set(graph.blindSpots.map((s) => s.reason.kind));
+    const seen = new Set([...graph.blindSpots, ...inventory.blindSpots].map((s) => s.reason.kind));
     expect([...Object.keys(kinds)].filter((k) => !seen.has(k as ScanBlindSpotReason['kind']))).toEqual([]);
   });
 });

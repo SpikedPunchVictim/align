@@ -73,6 +73,8 @@ export function describeBlindSpotReason(reason: ScanBlindSpotReason): string {
       return `always-excluded directory name '${reason.name}'`;
     case 'unreadable':
       return `unreadable: ${reason.error}`;
+    case 'unparseable':
+      return `present but could not be parsed: ${reason.error}`;
     case 'not-regular-file':
       return 'not a regular file (symlink, FIFO or socket — the walk does not follow these)';
     default: {

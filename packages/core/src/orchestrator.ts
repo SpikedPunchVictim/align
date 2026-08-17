@@ -72,6 +72,7 @@ export class GateOrchestrator {
       gateResult: securityGate,
       movedCount: securityMoves,
       observedFiles: manifestFiles,
+      blindSpots: manifestBlindSpots,
     } = await this.runSecurityGate(options);
 
     const parseStart = performance.now();
@@ -221,7 +222,7 @@ export class GateOrchestrator {
 
     const advisories: Advisory[] = [
       ...buildUncertaintyAdvisories(graph.uncertain),
-      ...buildScanBlindSpotAdvisories(graph.blindSpots),
+      ...buildScanBlindSpotAdvisories([...graph.blindSpots, ...manifestBlindSpots]),
       ...movedAdvisories(moves.length + securityMoves),
       // ADR 017 Part A: computed after evaluation succeeds (same "trustworthy ruleset" precondition
       // as `ungroundedComponents` below) — an ungrounded external selector is vacuously green, not
@@ -246,7 +247,14 @@ export class GateOrchestrator {
       advisories,
       scannedAt,
       ungroundedComponents,
-      blindSpots: graph.blindSpots,
+      // UNION of both walkers, unlike `observedFiles` right below it, and the difference is not an
+      // inconsistency. `observedFiles` answers "which files did THIS gate reason over", which is
+      // per-gate by construction (ADR 028 §5). `blindSpots` answers "which paths did this run fail
+      // to look at", which is a property of the repository, not of a gate — and its consumer is
+      // `align baseline prune`'s retention, which partitions entries from BOTH domains through one
+      // set. Narrowing it to the source domain would leave every manifest entry unprotected by the
+      // very record F3 added for them.
+      blindSpots: [...graph.blindSpots, ...manifestBlindSpots],
       // The two domains stay SEPARATE (ADR 028 §5): `source` is this gate's own `knownFiles`, the
       // exact set `reconcileMoves` above reasoned over, and `manifest` is the security gate's, the
       // exact set ITS `reconcileMoves` reasoned over. The deleted `knownFiles()` unioned them, so
@@ -292,6 +300,9 @@ export class GateOrchestrator {
      * nothing, and reporting a partial set as if it were the domain is the false-completeness shape
      * this ADR exists to stop. */
     readonly observedFiles: ReadonlySet<RepoRelativePath>;
+    /** This domain's own blind spots (ADR 028 F3), carried out so `CheckRun.blindSpots` can be the
+     * union of both walkers. Empty when the manifest scan threw. */
+    readonly blindSpots: readonly ScanBlindSpot[];
   }> {
     const start = performance.now();
     const securityRules = this.ruleset.rules.filter(
@@ -315,6 +326,7 @@ export class GateOrchestrator {
         },
         movedCount: 0,
         observedFiles: new Set<RepoRelativePath>(),
+        blindSpots: [],
       };
     }
 
@@ -327,32 +339,22 @@ export class GateOrchestrator {
     // manifest inventory's files, a deliberately disjoint scan domain from the graph above
     // (ADR 013) — never derived from `allViolations` (see the architecture gate's comment above).
     const knownFiles = new Set(inventory.manifests.map((m) => m.file));
-    // `[]`, stated explicitly because `BaselineStore.reconcileMoves` requires it (review 2026-08-13:
-    // it was optional, and this exact call site omitted it, silently reinstating the pre-F1
-    // behaviour with no type error). The fact this rests on, verified by reading the manifest domain
-    // end to end: `ManifestScanOptions` carries only `rootDir` and `excludes`, `ManifestInventory`
-    // has no blind-spot field, and the concrete scanner (`plugin-typescript`'s
-    // `scanManifests`) enumerates the root `package.json` plus `pnpm-workspace.yaml` glob members
-    // with no `.git` test anywhere — so this domain performs no nested-checkout auto-exclusion, and
-    // no manifest is ever absent from `knownFiles` for that reason. A manifest that leaves this
-    // inventory left for a genuine reason (dropped from the workspace globs, deleted, malformed) —
-    // precisely the case FRAGILE #7's move-rescue exists to handle, so passing the architecture
-    // gate's blind spots here would suppress a legitimate rescue. Pinned by an executable test
-    // (`plugin-typescript/test/manifest.test.ts`), not left as an assertion in this comment.
+    // `inventory.blindSpots` (ADR 028 F3, 2026-08-17). This argument used to be `[]`, defended by a
+    // long comment arguing the manifest domain could never lose a manifest for a scan-scope reason.
+    // The nested-checkout half of that was true and is still pinned by an executable test
+    // (`plugin-typescript/test/manifest.test.ts`) — this domain performs no `.git` auto-exclusion.
+    // The rest was false: `scanManifests` had its own unrecorded exits, and one of them was a real
+    // forged-transfer window. A `package.json` inside an unreadable directory is on disk, absent
+    // from the inventory, covered by no blind spot, and reads absent to the existence probe
+    // (`existsSync` swallows the `EACCES`), so it reached the content-fingerprint match — where
+    // collisions are the NORM, not the exception, because a manifest violation's snippet is the
+    // dependency line itself and workspace packages pin the same dependencies. The walker now
+    // records what it could not turn into a record, and those paths route here.
     //
-    // AMENDED for ADR 028 Stage 2, because the sentence above was becoming false: the store's
-    // existence probe now blocks the move-rescue for two of those three causes. A de-globbed or
-    // malformed `package.json` is STILL ON DISK, so the orphan is retained rather than offered for
-    // a content match, and only genuine deletion/rename still rescues. That is the correct outcome
-    // — a malformed manifest is corrupt, not absent, which is the discipline BUG #1 established —
-    // but it IS a behaviour change in this domain and it is not what the paragraph above described.
-    // The residual, recorded rather than fixed here: a manifest inside an unreadable directory is
-    // on disk, unobserved, has no blind spot (this domain records none, hence the `[]`), and reads
-    // absent to the probe, so it can still reach the content match. Manifest snippets are
-    // dependency lines that collide freely across workspace packages, so that is a real forged-
-    // transfer window. It is pre-existing, Stage 2 narrows it rather than widening it, and the
-    // manifest walker's own exits are the named next piece of work in ADR 028's out-of-scope list.
-    const moves = this.baselineStore.reconcileMoves(allViolations, knownFiles, []);
+    // Still per-domain, NOT merged with `graph.blindSpots` (ADR 028 §5): a source blind spot can
+    // never explain a missing manifest, and passing it here would suppress a legitimate move-rescue
+    // for a manifest that genuinely moved.
+    const moves = this.baselineStore.reconcileMoves(allViolations, knownFiles, inventory.blindSpots);
     const newViolations = allViolations.filter((v) => !this.baselineStore.isBaselined(v.id));
     const baselinedCount = allViolations.length - newViolations.length;
     const rulesWithNoViolations = securityRules.filter(
@@ -372,6 +374,7 @@ export class GateOrchestrator {
       },
       movedCount: moves.length,
       observedFiles: knownFiles,
+      blindSpots: inventory.blindSpots,
     };
   }
 

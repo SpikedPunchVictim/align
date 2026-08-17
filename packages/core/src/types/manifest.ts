@@ -8,6 +8,7 @@
  * (ARCHITECTURE.md §5).
  */
 import type { RepoRelativePath } from './branded.js';
+import type { ScanBlindSpot } from './graph.js';
 
 /** `optionalDependencies` is scanned (source-hygiene cares about any non-registry specifier
  * regardless of field) but deliberately excluded from `security.manifest.new-dependency`'s
@@ -42,13 +43,26 @@ export interface ManifestRecord {
 
 export interface ManifestInventory {
   readonly manifests: readonly ManifestRecord[];
+  /** Every path this manifest scan declined to, or could not, turn into a record — ADR 028 applied
+   * to the SECOND walker (F3 from the Stage 2 review).
+   *
+   * The source walker got this in Stage 1; this domain did not, and `runSecurityGate` passed `[]`.
+   * That left a real forged-transfer window: a `package.json` inside an unreadable directory is on
+   * disk, absent from the inventory, covered by no blind spot, and reads absent to the existence
+   * probe (`existsSync` swallows `EACCES`) — so it reached `applyMoves`' content-fingerprint match.
+   * Collisions there are the NORM rather than the exception, because a manifest violation's snippet
+   * is the dependency line itself, identical across every workspace package pinning the same dep.
+   *
+   * Required, not optional, for the reason ADR 027 records: the optional form of this exact kind of
+   * parameter is what let a production call site silently keep pre-fix behaviour. */
+  readonly blindSpots: readonly ScanBlindSpot[];
   /** Whether `pnpm-lock.yaml` was found and parsed — informational only in v1 (no rule currently
    * branches on it), kept on the inventory since a future lockfile-dependent rule (e.g. Rule 5's
    * registry-provenance check, rejected on evidence per ADR 013) would need it. */
   readonly lockfilePresent: boolean;
 }
 
-export const EMPTY_MANIFEST_INVENTORY: ManifestInventory = { manifests: [], lockfilePresent: false };
+export const EMPTY_MANIFEST_INVENTORY: ManifestInventory = { manifests: [], lockfilePresent: false, blindSpots: [] };
 
 export interface ManifestScanOptions {
   readonly rootDir: string; // absolute filesystem path

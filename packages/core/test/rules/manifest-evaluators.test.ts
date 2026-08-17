@@ -21,7 +21,7 @@ function manifest(file: string, raw: string, deps: ManifestRecord['dependencies'
 }
 
 function inventory(...manifests: ManifestRecord[]): ManifestInventory {
-  return { manifests, lockfilePresent: true };
+  return { manifests, lockfilePresent: true, blindSpots: [] };
 }
 
 describe('evaluateSourceHygiene (security.manifest.source-hygiene, ADR 013)', () => {

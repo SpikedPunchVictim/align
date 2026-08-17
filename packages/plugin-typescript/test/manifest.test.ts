@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { NodeManifestScanner, scanManifests } from '../src/manifest.js';
+import { loadWorkspacePackages } from '../src/workspace.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.join(here, 'fixtures');
@@ -93,5 +94,96 @@ describe('the manifest scan domain does NOT auto-exclude nested checkouts (pins 
     const inventory = scanManifests(dir);
 
     expect(inventory.manifests.map((m) => m.file).sort()).toEqual(['package.json', 'vendor/submodule/package.json']);
+  });
+});
+
+/**
+ * ADR 028 F3: the manifest walker records its own blind spots.
+ *
+ * Before this, `runSecurityGate` passed `[]` and the walker recorded nothing, which left a real
+ * forged-transfer window — a `package.json` inside an unreadable directory is on disk, absent from
+ * the inventory, covered by no blind spot, and reads absent to the existence probe (`existsSync`
+ * swallows the `EACCES`), so it reached `applyMoves`' content-fingerprint match. Collisions there
+ * are the NORM: a manifest violation's snippet is the dependency line itself, identical across
+ * every workspace package pinning the same dependency.
+ */
+describe('scanManifests records what it could not turn into a record (ADR 028 F3)', () => {
+  let dir: string;
+
+  afterEach(() => {
+    if (dir !== undefined) {
+      const locked = path.join(dir, 'locked');
+      if (fs.existsSync(locked)) fs.chmodSync(locked, 0o755);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function repo(): string {
+    const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'align-manifest-blind-spots-')));
+    fs.writeFileSync(path.join(d, 'package.json'), `${JSON.stringify({ name: 'root' })}\n`, 'utf8');
+    return d;
+  }
+
+  it('records a MALFORMED package.json as unparseable, not as absent — corrupt is not deleted (BUG #1)', () => {
+    dir = repo();
+    fs.writeFileSync(path.join(dir, 'package.json'), '{ "name": "root", ', 'utf8');
+
+    const inventory = scanManifests(dir, []);
+
+    expect(inventory.manifests).toHaveLength(0);
+    expect(inventory.blindSpots).toHaveLength(1);
+    expect(inventory.blindSpots[0]?.path).toBe('package.json');
+    expect(inventory.blindSpots[0]?.reason.kind).toBe('unparseable');
+    // The parse error is carried, so the advisory can tell a user to go fix their JSON rather than
+    // sending them to look at permissions.
+    expect((inventory.blindSpots[0]?.reason as { error: string }).error).toMatch(/JSON/i);
+  });
+
+  it('records an UNREADABLE manifest, where the old existsSync-first read reported genuine absence', () => {
+    dir = repo();
+    fs.writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), "packages:\n  - 'locked'\n", 'utf8');
+    fs.mkdirSync(path.join(dir, 'locked'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'locked', 'package.json'), `${JSON.stringify({ name: 'locked' })}\n`, 'utf8');
+    // Loaded as a workspace member first, THEN made unreadable — otherwise `loadWorkspacePackages`
+    // could not read its name and the member would never be enumerated at all.
+    const members = loadWorkspacePackages(dir).map((p) => p.name);
+    expect(members).toContain('locked');
+    fs.chmodSync(path.join(dir, 'locked'), 0o000);
+
+    const inventory = scanManifests(dir, []);
+
+    const unreadable = inventory.blindSpots.filter((s) => s.reason.kind === 'unreadable');
+    expect(unreadable.map((s) => s.path)).toEqual(['locked/package.json']);
+  });
+
+  it('does NOT record a genuinely absent manifest — ENOENT is the one sound absence', () => {
+    dir = repo();
+    fs.writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), "packages:\n  - 'members/*'\n", 'utf8');
+    fs.mkdirSync(path.join(dir, 'members', 'ghost'), { recursive: true });
+
+    const inventory = scanManifests(dir, []);
+
+    // A directory with no `package.json` is not a blind spot: there is nothing there, so an entry
+    // for it really was deleted. Recording it would make prune a no-op for genuinely-removed
+    // packages — retention has to stay a claim align can defend.
+    expect(inventory.blindSpots).toEqual([]);
+  });
+
+  it('records an EXCLUDED workspace member against its directory, naming the pattern', () => {
+    dir = repo();
+    fs.writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), "packages:\n  - 'vendor'\n", 'utf8');
+    fs.mkdirSync(path.join(dir, 'vendor'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'vendor', 'package.json'), `${JSON.stringify({ name: 'vendored' })}\n`, 'utf8');
+
+    const inventory = scanManifests(dir, ['vendor']);
+
+    expect(inventory.manifests.map((m) => m.file)).toEqual(['package.json']);
+    // Against the DIRECTORY, so at-or-under containment covers the manifest beneath it.
+    expect(inventory.blindSpots).toEqual([{ path: 'vendor', reason: { kind: 'excluded', pattern: 'vendor' } }]);
+  });
+
+  it('records nothing for an ordinary healthy repo', () => {
+    dir = repo();
+    expect(scanManifests(dir, []).blindSpots).toEqual([]);
   });
 });

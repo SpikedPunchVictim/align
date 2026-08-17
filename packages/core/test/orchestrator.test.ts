@@ -623,7 +623,7 @@ describe('GateOrchestrator', () => {
             dependencies: [{ name: 'xlsx', specifier: 'https://cdn.sheetjs.com/xlsx-0.20.2/xlsx-0.20.2.tgz', field: 'dependencies' }],
           },
         ],
-        lockfilePresent: true,
+        lockfilePresent: true, blindSpots: [],
       });
       const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk), new Map(), manifestScanner);
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -644,7 +644,7 @@ describe('GateOrchestrator', () => {
         { name: 'zod', specifier: '^3.23.8', field: 'dependencies' },
       ];
       const manifestScanner: ManifestScanner = {
-        scan: () => ({ manifests: [{ file: toRepoRelativePath('package.json'), raw: '{}', dependencies: deps }], lockfilePresent: true }),
+        scan: () => ({ manifests: [{ file: toRepoRelativePath('package.json'), raw: '{}', dependencies: deps }], lockfilePresent: true, blindSpots: [] }),
       };
       const baseline = new InMemoryBaselineStore([], neverOnDisk);
       const orchestrator = new GateOrchestrator(registry, ruleset, baseline, new Map(), manifestScanner);
@@ -682,7 +682,7 @@ describe('GateOrchestrator', () => {
         manifests: [
           { file: toRepoRelativePath('package.json'), raw: '{}', dependencies: [{ name: 'xlsx', specifier: 'https://cdn.sheetjs.com/xlsx.tgz', field: 'dependencies' }] },
         ],
-        lockfilePresent: true,
+        lockfilePresent: true, blindSpots: [],
       });
       const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk), new Map(), manifestScanner);
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -726,7 +726,7 @@ describe('GateOrchestrator', () => {
       ]);
       const manifestScanner = fakeManifestScanner({
         manifests: [{ file: toRepoRelativePath('package.json'), raw: '{}', dependencies: [{ name: 'xlsx', specifier: 'https://cdn.sheetjs.com/xlsx.tgz', field: 'dependencies' }] }],
-        lockfilePresent: true,
+        lockfilePresent: true, blindSpots: [],
       });
       const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk), new Map(), manifestScanner);
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -754,7 +754,7 @@ describe('GateOrchestrator', () => {
               dependencies: [{ name: 'xlsx', specifier: 'https://cdn.sheetjs.com/xlsx.tgz', field: 'dependencies' }],
             },
           ],
-          lockfilePresent: true,
+          lockfilePresent: true, blindSpots: [],
         });
         const orchestrator = new GateOrchestrator(registry, ruleset, baseline, new Map(), manifestScanner1);
         const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -773,7 +773,7 @@ describe('GateOrchestrator', () => {
               dependencies: [{ name: 'xlsx', specifier: 'https://cdn.sheetjs.com/xlsx.tgz', field: 'dependencies' }],
             },
           ],
-          lockfilePresent: true,
+          lockfilePresent: true, blindSpots: [],
         });
         const orchestrator2 = new GateOrchestrator(registry, ruleset, baseline, new Map(), manifestScanner2);
         const run = await orchestrator2.check({ rootDir: '/repo', excludes: [] });
@@ -800,7 +800,7 @@ describe('GateOrchestrator', () => {
               dependencies: [{ name: 'xlsx', specifier: 'https://cdn.sheetjs.com/xlsx.tgz', field: 'dependencies' }],
             },
           ],
-          lockfilePresent: true,
+          lockfilePresent: true, blindSpots: [],
         });
         const orchestrator = new GateOrchestrator(registry, ruleset, baseline, new Map(), manifestScanner1);
         const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -817,7 +817,7 @@ describe('GateOrchestrator', () => {
               dependencies: [{ name: 'xlsx', specifier: 'https://cdn.sheetjs.com/xlsx.tgz', field: 'dependencies' }],
             },
           ],
-          lockfilePresent: true,
+          lockfilePresent: true, blindSpots: [],
         });
         const orchestrator2 = new GateOrchestrator(registry, ruleset, baseline, new Map(), manifestScanner2);
         const run = await orchestrator2.check({ rootDir: '/repo', excludes: [] });

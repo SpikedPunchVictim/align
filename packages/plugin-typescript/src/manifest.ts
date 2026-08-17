@@ -12,6 +12,7 @@ import * as path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import {
   toRepoRelativePath,
+  type ScanBlindSpot,
   type ManifestDependency,
   type ManifestDepField,
   type ManifestInventory,
@@ -77,23 +78,64 @@ function findDependencyLine(raw: string, depName: string): number | undefined {
   return undefined;
 }
 
-function isExcluded(relDir: string, excludes: readonly string[]): boolean {
-  if (relDir === '') return false;
-  return excludes.some((pattern) => relDir === pattern || relDir.startsWith(`${pattern}/`));
+/** Returns the matching pattern rather than a boolean, so the blind-spot record can name the one
+ * responsible (ADR 028 §3 — reasons are printed, never just counts).
+ *
+ * NOTE, recorded rather than fixed here: this dialect is exact-or-directory-prefix only, with no
+ * `globMatch`, and therefore DIVERGES from the source walker's (`scanner.ts`). One `excludes` entry
+ * can drop a package's sources while keeping its manifest, or the reverse. ADR 028 names that
+ * divergence as its own out-of-scope item; this change makes the manifest domain record what it
+ * skips, it does not reconcile the two dialects. */
+function matchingExclude(relDir: string, excludes: readonly string[]): string | undefined {
+  if (relDir === '') return undefined;
+  return excludes.find((pattern) => relDir === pattern || relDir.startsWith(`${pattern}/`));
 }
 
-function buildManifestRecord(rootDir: string, relDir: string, lockImporter: LockImporter | undefined): ManifestRecord | undefined {
+/**
+ * ADR 028 applied to this walker (F3): the ONE read, with its failure modes told apart.
+ *
+ * The previous shape was `existsSync` then `readFileSync` then `JSON.parse`, each failure collapsing
+ * to `undefined` — so "there is no package.json here" (sound: nothing to record) was indistinguishable
+ * from "I could not read it" and "I could not parse it" (both unsound: corrupt is not absent, the
+ * discipline BUG #1 established, violated here in a second walker exactly as ADR 028 predicted).
+ * `existsSync` made it worse: it swallows `EACCES`, so a manifest inside an unreadable directory
+ * reported as genuinely gone.
+ *
+ * Reading first and branching on `code` is what separates them. ENOENT is the only genuine absence;
+ * everything else is a blind spot, recorded with its reason so `applyMoves` and `store.prune` route
+ * the entry to "still known" instead of inferring a rename or a fix.
+ */
+function buildManifestRecord(
+  rootDir: string,
+  relDir: string,
+  lockImporter: LockImporter | undefined,
+  record: (path: string, reason: ScanBlindSpot['reason']) => void,
+): ManifestRecord | undefined {
   const pkgJsonPath = path.join(rootDir, relDir, 'package.json');
-  if (!fs.existsSync(pkgJsonPath)) return undefined;
+  const relFile = relDir === '' ? 'package.json' : `${relDir}/package.json`;
 
   let raw: string;
   try {
     raw = fs.readFileSync(pkgJsonPath, 'utf8');
-  } catch {
+  } catch (err) {
+    // ENOENT is the one sound absence: there is genuinely no manifest at this path, so an entry for
+    // it really was deleted. EACCES/ENOTDIR/EISDIR/ELOOP all mean "align could not look", which is
+    // the case that must never be read as deletion.
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      record(relFile, { kind: 'unreadable', error: err instanceof Error ? err.message : String(err) });
+    }
     return undefined;
   }
-  const pkg = readJson<RawPackageJson>(pkgJsonPath);
-  if (pkg === undefined) return undefined;
+
+  let pkg: RawPackageJson;
+  try {
+    pkg = JSON.parse(raw) as RawPackageJson;
+  } catch (err) {
+    // Corrupt, not absent. The file is right there and the user can fix it; treating its entries as
+    // fixed would delete consent records over a typo in a JSON file.
+    record(relFile, { kind: 'unparseable', error: err instanceof Error ? err.message : String(err) });
+    return undefined;
+  }
 
   const dependencies: ManifestDependency[] = [];
   for (const field of DEP_FIELDS) {
@@ -107,8 +149,7 @@ function buildManifestRecord(rootDir: string, relDir: string, lockImporter: Lock
     }
   }
 
-  const filePath = relDir === '' ? 'package.json' : `${relDir}/package.json`;
-  return { file: toRepoRelativePath(filePath), raw, dependencies };
+  return { file: toRepoRelativePath(relFile), raw, dependencies };
 }
 
 /** Scans the manifest domain for one repo: the root `package.json` (always, even though it's
@@ -120,18 +161,30 @@ function buildManifestRecord(rootDir: string, relDir: string, lockImporter: Lock
 export function scanManifests(rootDir: string, excludes: readonly string[] = []): ManifestInventory {
   const lock = readLockfile(rootDir);
   const manifests: ManifestRecord[] = [];
+  const blindSpots: ScanBlindSpot[] = [];
+  const record = (relPath: string, reason: ScanBlindSpot['reason']): void => {
+    blindSpots.push({ path: toRepoRelativePath(relPath), reason });
+  };
 
-  const rootRecord = buildManifestRecord(rootDir, '', lock?.importers?.['.']);
+  const rootRecord = buildManifestRecord(rootDir, '', lock?.importers?.['.'], record);
   if (rootRecord !== undefined) manifests.push(rootRecord);
 
-  for (const pkg of loadWorkspacePackages(rootDir)) {
+  for (const pkg of loadWorkspacePackages(rootDir, record)) {
     const relDir = pkg.dir.endsWith('/') ? pkg.dir.slice(0, -1) : pkg.dir;
-    if (isExcluded(relDir, excludes)) continue;
-    const record = buildManifestRecord(rootDir, relDir, lock?.importers?.[relDir]);
-    if (record !== undefined) manifests.push(record);
+    const pattern = matchingExclude(relDir, excludes);
+    if (pattern !== undefined) {
+      // Recorded against the DIRECTORY, not the manifest path: at-or-under containment then covers
+      // the member's `package.json` and anything else under it, matching how the source walker
+      // records an excluded directory.
+      record(relDir, { kind: 'excluded', pattern });
+      continue;
+    }
+    const memberRecord = buildManifestRecord(rootDir, relDir, lock?.importers?.[relDir], record);
+    if (memberRecord !== undefined) manifests.push(memberRecord);
   }
 
-  return { manifests, lockfilePresent: lock !== undefined };
+  blindSpots.sort((a, b) => a.path.localeCompare(b.path));
+  return { manifests, lockfilePresent: lock !== undefined, blindSpots };
 }
 
 /** `@spikedpunch/align-core`'s `ManifestScanner` injection seam, concretely implemented for the pnpm/Node
