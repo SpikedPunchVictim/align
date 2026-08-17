@@ -118,7 +118,7 @@ export function createFakeEffects(fixProvider: FixProvider, initialFiles: Record
     externalNodes: [],
     externalEdges: [],
     uncertain: [],
-    skippedNestedCheckouts: [],
+    blindSpots: [],
     scannedAt: 0,
   };
   let checkRuns: CheckRun[] = [];

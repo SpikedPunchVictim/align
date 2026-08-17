@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { InMemoryBaselineStore } from '../src/baseline/store.js';
 import { computeFingerprint } from '../src/baseline/fingerprint.js';
 import { toComponentName, toRepoRelativePath, toRuleId } from '../src/types/branded.js';
+import type { ScanBlindSpotReason } from '../src/types/graph.js';
 import type { Violation } from '../src/types/violation.js';
+import { blindSpot } from './helpers.js';
 
 function makeViolation(overrides: Partial<Violation> = {}): Violation {
   return {
@@ -302,14 +304,14 @@ describe('baseline move-transfer (ADR 006)', () => {
       expect(store.show()).toHaveLength(1);
     });
 
-    // F1 (task #25 forged-transfer fix, review 2026-08-12): a file the scan auto-excluded because
-    // it lives inside a nested checkout (`CheckRun.skippedNestedCheckouts`) is absent from
+    // F1 (ADR 027's forged-transfer fix, generalized by ADR 028): a file the scan declined to look
+    // at — for ANY reason recorded in `CheckRun.blindSpots` — is absent from
     // `knownFiles` for a reason that has nothing to do with the file moving. Before this fix,
     // `applyMoves` read that absence exactly like a real rename/deletion and went looking for a
     // content-fingerprint match — which a vendored copy of the same code (same ruleId, identical
     // trimmed import line) reliably provides, forging the orphan's `acceptedAt`/`acceptedBy` onto a
     // live, never-accepted violation elsewhere.
-    describe('F1 fix: a skipped-checkout-resident orphan is never mistaken for a move', () => {
+    describe('F1 fix: an orphan under a scan blind spot is never mistaken for a move', () => {
       it('reconcileMoves leaves a checkout-resident orphan in place instead of transferring it onto a colliding, never-accepted violation', () => {
         const store = new InMemoryBaselineStore();
         const original = makeViolation({
@@ -328,10 +330,10 @@ describe('baseline move-transfer (ADR 006)', () => {
         });
 
         // `vendor/submodule/service.ts` is absent from `knownFiles` (the scan auto-excluded the
-        // checkout) but the checkout is named in `skippedNestedCheckouts` — the "still known" signal
-        // this fix adds.
+        // checkout) but the checkout is a recorded blind spot — the "still known" signal this fix
+        // adds.
         const knownFiles = new Set([toRepoRelativePath('lib/service.ts')]);
-        const result = store.reconcileMoves([liveUnaccepted], knownFiles, [toRepoRelativePath('vendor/submodule')]);
+        const result = store.reconcileMoves([liveUnaccepted], knownFiles, [blindSpot('vendor/submodule')]);
 
         expect(result).toEqual([]); // no forged transfer reported
         expect(store.isBaselined(liveUnaccepted.id)).toBe(false); // lib/service.ts still shows red
@@ -356,9 +358,9 @@ describe('baseline move-transfer (ADR 006)', () => {
         });
 
         const knownFiles = new Set([toRepoRelativePath('lib/service.ts')]);
-        const result = store.prune([liveUnaccepted], knownFiles, [toRepoRelativePath('vendor/submodule')]);
+        const result = store.prune([liveUnaccepted], knownFiles, [blindSpot('vendor/submodule')]);
 
-        // Landed in `removed` (the arm `nested-checkout-retention.ts` partitions and re-adds),
+        // Landed in `removed` (the arm `scan-blind-spot-retention.ts` partitions and re-adds),
         // never in `moved` — this is the property the CLI's retention logic depends on.
         expect(result.moved).toEqual([]);
         expect(result.removed).toEqual([original.id]);
@@ -386,11 +388,66 @@ describe('baseline move-transfer (ADR 006)', () => {
         const result = store.reconcileMoves(
           [moved],
           new Set([toRepoRelativePath('renamed.ts')]),
-          [toRepoRelativePath('vendor/unrelated-checkout')],
+          [blindSpot('vendor/unrelated-checkout')],
         );
         expect(result).toEqual([{ from: original.id, to: moved.id }]);
         expect(store.isBaselined(moved.id)).toBe(true);
         expect(store.isBaselined(original.id)).toBe(false);
+      });
+
+      // ADR 028: the same protection, once per `ScanBlindSpotReason` variant. Keyed by the union so
+      // adding a variant without deciding its retention behaviour fails the build here — the
+      // enforcement ADR 028 asks for, since the previous enumeration (ADR 027) covered only
+      // `nested-checkout` and missed five, two of them reproduced severity-zeros.
+      const REASONS: Readonly<Record<ScanBlindSpotReason['kind'], ScanBlindSpotReason>> = {
+        'nested-checkout': { kind: 'nested-checkout' },
+        excluded: { kind: 'excluded', pattern: 'vendor/**' },
+        'default-excluded-dir': { kind: 'default-excluded-dir', name: 'dist' },
+        unreadable: { kind: 'unreadable', error: 'EACCES: permission denied' },
+        'not-regular-file': { kind: 'not-regular-file' },
+      };
+
+      for (const [kind, reason] of Object.entries(REASONS)) {
+        it(`reason '${kind}': the orphan is retained, never forged onto a colliding live violation`, () => {
+          const store = new InMemoryBaselineStore();
+          const original = makeViolation({
+            id: computeFingerprint(['no-dependency', 'r1', 'vendor/submodule/service.ts', 'target.ts', './target']),
+            file: toRepoRelativePath('vendor/submodule/service.ts'),
+            snippet: `import './target'`,
+          });
+          store.accept([original], 'manual');
+          const liveUnaccepted = makeViolation({
+            id: computeFingerprint(['no-dependency', 'r1', 'lib/service.ts', 'target.ts', './target']),
+            file: toRepoRelativePath('lib/service.ts'),
+            snippet: `import './target'`,
+          });
+          const knownFiles = new Set([toRepoRelativePath('lib/service.ts')]);
+
+          const moves = store.reconcileMoves([liveUnaccepted], knownFiles, [blindSpot('vendor/submodule', reason)]);
+
+          expect(moves).toEqual([]);
+          expect(store.isBaselined(liveUnaccepted.id)).toBe(false);
+          expect(store.show()[0]?.file).toBe('vendor/submodule/service.ts');
+          expect(store.show()[0]?.acceptedBy).toBe('manual');
+        });
+      }
+
+      // The scan ROOT being unreadable records a blind spot whose path is `''`. At-or-under matching
+      // over `''` must cover the whole repository — otherwise the one case where align saw NOTHING
+      // is the one case where it protects nothing, and `prune` empties the baseline at exit 0.
+      it("a blind spot at the repo root ('') covers every path", () => {
+        const store = new InMemoryBaselineStore();
+        const original = makeViolation({
+          id: computeFingerprint(['no-dependency', 'r1', 'src/a.ts', 'target.ts', './target']),
+          file: toRepoRelativePath('src/a.ts'),
+          snippet: `import './target'`,
+        });
+        store.accept([original], 'manual');
+
+        const result = store.prune([], new Set(), [blindSpot('', { kind: 'unreadable', error: 'EACCES' })]);
+
+        expect(result.removed).toEqual([original.id]); // classified as orphaned-but-retainable...
+        expect(result.moved).toEqual([]); // ...and never forged onto anything
       });
     });
 

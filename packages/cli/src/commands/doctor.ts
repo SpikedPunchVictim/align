@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import type { Command } from 'commander';
 import {
   areAdvisoriesComplete,
-  buildSkippedNestedCheckoutAdvisories,
+  buildScanBlindSpotAdvisories,
   buildUncertaintyAdvisories,
   computeDeepImportHits,
   computeUngovernedEdgeGaps,
@@ -176,7 +176,7 @@ async function collectDoctorReport(rootDir: string, program: Command | undefined
     if (graph !== undefined) {
       uncertain = graph.uncertain;
       advisories.push(...buildUncertaintyAdvisories(graph.uncertain));
-      advisories.push(...buildSkippedNestedCheckoutAdvisories(graph.skippedNestedCheckouts));
+      advisories.push(...buildScanBlindSpotAdvisories(graph.blindSpots));
 
       const unmapped = graph.nodes.filter((n) => n.component === UNMAPPED_COMPONENT);
       if (unmapped.length > 0) {

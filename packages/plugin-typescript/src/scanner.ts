@@ -10,6 +10,7 @@ import * as path from 'node:path';
 import ts from 'typescript';
 import {
   classifyFile,
+  expandBraces,
   globMatch,
   toComponentName,
   toRepoRelativePath,
@@ -22,6 +23,8 @@ import {
   type ExternalDependencyEdge,
   type ExternalPackageNode,
   type RepoRelativePath,
+  type ScanBlindSpot,
+  type ScanBlindSpotReason,
   type ScanInput,
   type Scanner,
   type UncertaintyMarker,
@@ -115,7 +118,7 @@ export class TypeScriptScanner implements Scanner {
 
     const excludes = [...input.excludes];
     const includeNestedCheckouts = input.includeNestedCheckouts ?? [];
-    const { files, skippedNestedCheckouts } = walkSourceFiles(rootDir, excludes, includeNestedCheckouts);
+    const { files, blindSpots } = walkSourceFiles(rootDir, excludes, includeNestedCheckouts);
 
     const nodes: DependencyGraphNode[] = [];
     const edges: DependencyGraphEdge[] = [];
@@ -155,7 +158,7 @@ export class TypeScriptScanner implements Scanner {
       input.components,
       nodes.map((n) => n.file),
       workspaceIndex,
-      skippedNestedCheckouts,
+      blindSpots,
     );
 
     return {
@@ -164,7 +167,7 @@ export class TypeScriptScanner implements Scanner {
       externalNodes: [...externalNodesById.values()],
       externalEdges,
       uncertain,
-      skippedNestedCheckouts,
+      blindSpots,
       scannedAt,
     };
   }
@@ -181,7 +184,7 @@ function intern(cache: Map<string, string>, value: string): string {
 
 interface WalkResult {
   readonly files: string[];
-  readonly skippedNestedCheckouts: RepoRelativePath[];
+  readonly blindSpots: ScanBlindSpot[];
 }
 
 /**
@@ -196,16 +199,42 @@ function hasOwnGit(absDir: string): boolean {
   return fs.existsSync(path.join(absDir, '.git'));
 }
 
+/**
+ * The one walk, and the one place align learns what it could NOT see (ADR 028). Every `return`,
+ * `continue` and fall-through below that drops a path now records a `ScanBlindSpot` with its reason,
+ * because a consumer of absence (`applyMoves` infers "renamed", `store.prune` infers "fixed",
+ * `validateComponents` infers "empty component") otherwise reads a path this walk declined to look
+ * at as a path the repository no longer has. Two of those confusions were reproduced against the
+ * built binary and both destroy a human consent record at exit 0.
+ *
+ * BOUNDED BY CONSTRUCTION. A skipped directory is recorded once and never descended into, so
+ * `node_modules` contributes ONE record rather than one per file beneath it, and matching is
+ * at-or-under (`core/src/baseline/scan-blind-spots.ts`) so the single record still covers every file
+ * in the subtree. That bound is a Stage 1 success criterion and is pinned by a test.
+ *
+ * ONE MECHANISM IS DELIBERATELY MISSING. An extension outside `SOURCE_EXTENSIONS` (ADR 028's
+ * mechanism #6) is NOT recorded: enumerating every non-source file in a repository is expensive and
+ * noisy, and ADR 028's second mechanism — the injected existence probe, Stage 2 — covers the case
+ * that matters without it. That is the ONLY exit here that is silent on purpose.
+ */
 function walkSourceFiles(
   repoRoot: string,
   excludes: readonly string[],
   includeNestedCheckouts: readonly string[],
 ): WalkResult {
   const files: string[] = [];
-  const skippedNestedCheckouts: RepoRelativePath[] = [];
+  const blindSpots: ScanBlindSpot[] = [];
+  const record = (relPath: string, reason: ScanBlindSpotReason): void => {
+    blindSpots.push({ path: toRepoRelativePath(relPath), reason });
+  };
+
   const visit = (absDir: string): void => {
     const relDir = path.relative(repoRoot, absDir).split(path.sep).join('/');
-    if (isExcludedPath(relDir, excludes)) return;
+    const excludePattern = matchingExcludePatternForDirectory(relDir, excludes);
+    if (excludePattern !== undefined) {
+      record(relDir, { kind: 'excluded', pattern: excludePattern });
+      return;
+    }
     // `relDir === ''` is the scan root itself (`rootDir`, the caller-supplied scan boundary) —
     // exempted structurally, by construction, regardless of whether it happens to have a `.git` of
     // its own. Nothing here assumes it does: align scans a plain non-git directory fine (every
@@ -213,31 +242,67 @@ function walkSourceFiles(
     // trust that" — it is "this function's job is to find checkouts NESTED BELOW the root; the
     // root itself is never a candidate to skip, full stop."
     if (relDir !== '' && hasOwnGit(absDir) && !isExcludedPath(relDir, includeNestedCheckouts)) {
-      skippedNestedCheckouts.push(toRepoRelativePath(relDir));
+      record(relDir, { kind: 'nested-checkout' });
       return;
     }
 
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(absDir, { withFileTypes: true });
-    } catch {
-      return; // unreadable directory: read-only survey posture, skip rather than crash
+    } catch (err) {
+      // Read-only survey posture: skip rather than crash — but never silently. This exit was the
+      // most dangerous of the six before ADR 028, and it stayed dangerous even after this release's
+      // `unverified-prune.ts` work, which reports only entries WITHOUT a `contentFingerprint` while
+      // `baseline accept` always writes one. `fs.existsSync` does not rescue it either: it swallows
+      // the EACCES and reports a file inside a chmod 000 directory as ABSENT, which is exactly why
+      // ADR 028 needs this record AND the probe rather than the probe alone.
+      //
+      // `relDir` is `''` when the scan ROOT itself is unreadable. That is a real, if rare, case, and
+      // the containment test treats `''` as covering the whole repo precisely so it retains
+      // everything instead of matching nothing — see `isUnderDirectory` in core.
+      record(relDir, { kind: 'unreadable', error: err instanceof Error ? err.message : String(err) });
+      return;
     }
     for (const entry of entries) {
-      if (entry.isDirectory()) {
-        if (!DEFAULT_EXCLUDED_DIR_NAMES.has(entry.name)) visit(path.join(absDir, entry.name));
+      const relEntry = path.relative(repoRoot, path.join(absDir, entry.name)).split(path.sep).join('/');
+      // BEFORE the isDirectory()/isFile() branch, deliberately. `readdirSync(…, {withFileTypes:
+      // true})` does not follow symlinks, so a SYMLINKED `node_modules` or `dist` answers false to
+      // both and would otherwise be filed under `not-regular-file` — technically true, but it buries
+      // the always-excluded case (which every repo has, and which nobody needs to act on) among the
+      // symlink records (which are surprising and DO need attention). Checked this repo: its
+      // `node_modules` directories are real, so this is not the universal case an earlier draft
+      // claimed — but it occurs in generated and container layouts, and the fix is free.
+      if (DEFAULT_EXCLUDED_DIR_NAMES.has(entry.name)) {
+        record(relEntry, { kind: 'default-excluded-dir', name: entry.name });
         continue;
       }
-      if (entry.isFile() && SOURCE_EXTENSIONS.has(path.extname(entry.name))) {
-        const relFile = path.relative(repoRoot, path.join(absDir, entry.name)).split(path.sep).join('/');
-        if (!isExcludedPath(relFile, excludes)) files.push(path.join(absDir, entry.name));
+      if (entry.isDirectory()) {
+        visit(path.join(absDir, entry.name));
+        continue;
       }
+      if (entry.isFile()) {
+        // Mechanism #6, the one deliberate silence — see this function's doc comment.
+        if (!SOURCE_EXTENSIONS.has(path.extname(entry.name))) continue;
+        const filePattern = matchingExcludePattern(relEntry, excludes);
+        if (filePattern !== undefined) {
+          record(relEntry, { kind: 'excluded', pattern: filePattern });
+          continue;
+        }
+        files.push(path.join(absDir, entry.name));
+        continue;
+      }
+      // Neither a regular file nor a directory. A symlink lands here — `isDirectory()` and
+      // `isFile()` are BOTH false for one — and before ADR 028 it fell off the end of this loop with
+      // no record and not even an uncertainty marker, so an entire symlinked subtree vanished. So do
+      // FIFOs, sockets, block/character devices; recording them costs nothing and keeps this arm
+      // total rather than a symlink special case.
+      record(relEntry, { kind: 'not-regular-file' });
     }
   };
   visit(repoRoot);
   files.sort();
-  skippedNestedCheckouts.sort();
-  return { files, skippedNestedCheckouts };
+  blindSpots.sort((a, b) => a.path.localeCompare(b.path));
+  return { files, blindSpots };
 }
 
 // Exclude patterns use core's glob dialect (`globMatch`) so a component selector and an
@@ -247,10 +312,54 @@ function walkSourceFiles(
 // placeholder that silently over-matched patterns containing a real space). The two
 // literal-prefix arms below are kept: core's `globMatch` has no implicit directory-prefix
 // semantics, so removing them would break a plain `dist` exclude matching `dist/x.ts`.
-function isExcludedPath(relPath: string, excludes: readonly string[]): boolean {
-  if (relPath === '') return false;
-  return excludes.some(
+//
+// Returns the PATTERN rather than a boolean (ADR 028) so a blind-spot record can name the one
+// responsible instead of leaving the user to guess which of their excludes hid the path — the
+// reason-reporting requirement of ADR 028 §3, which exists because silent retention reads
+// identically to "nothing to prune". `isExcludedPath` below is the boolean view for callers that
+// only need the decision.
+function matchingExcludePattern(relPath: string, excludes: readonly string[]): string | undefined {
+  if (relPath === '') return undefined;
+  return excludes.find(
     (pattern) => relPath === pattern || relPath.startsWith(`${pattern}/`) || globMatch(pattern, relPath),
+  );
+}
+
+function isExcludedPath(relPath: string, excludes: readonly string[]): boolean {
+  return matchingExcludePattern(relPath, excludes) !== undefined;
+}
+
+/**
+ * The directory arm of the same question, and the reason it needs its own function: a pattern of
+ * the form `<prefix>/**` does NOT match `<prefix>` itself under core's glob dialect. Before ADR 028
+ * that only cost a wasted descent — every file underneath matched the pattern individually and was
+ * dropped one by one, so `files` came out identical. Now it costs a blind-spot record PER FILE
+ * instead of one for the subtree, which turns a bounded record into an unbounded one: the very
+ * failure mode Stage 1's volume criterion exists to prevent, and one a real `excludes: ['**\/dist/**']`
+ * would hit on every scan.
+ *
+ * Sound because `<prefix>/**` matches exactly the descendants of `<prefix>`: if a directory is at or
+ * under `<prefix>`, every path beneath it is a descendant of `<prefix>` and therefore already
+ * excluded, so descending can only rediscover that. `files` is unchanged by construction — this
+ * narrows what the walk WALKS, never what it includes. `'**'` on its own is not a `<prefix>/**` and
+ * is left to the ordinary test above, which already matches any directory.
+ *
+ * Brace groups are expanded FIRST (`expandBraces`, core's own dialect — never a second
+ * implementation, BUG #4's lesson) because the `/**` can live inside one: `src/{a/**,b/**}` does not
+ * end in `/**` as written, so testing the raw pattern let the walk descend and record one blind spot
+ * per file. Measured on a 10-file fixture: 10 records for the brace form against 2 for the
+ * equivalent `['src/a/**','src/b/**']`, with identical `files` — the bound broken, not correctness.
+ */
+function matchingExcludePatternForDirectory(relDir: string, excludes: readonly string[]): string | undefined {
+  const direct = matchingExcludePattern(relDir, excludes);
+  if (direct !== undefined) return direct;
+  if (relDir === '') return undefined;
+  return excludes.find((pattern) =>
+    expandBraces(pattern).some((member) => {
+      if (!member.endsWith('/**')) return false;
+      const prefix = member.slice(0, -'/**'.length);
+      return relDir === prefix || relDir.startsWith(`${prefix}/`) || globMatch(prefix, relDir);
+    }),
   );
 }
 

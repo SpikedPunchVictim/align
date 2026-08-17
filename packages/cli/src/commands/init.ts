@@ -15,7 +15,7 @@ import { CONFIG_FILENAME, loadConfig } from '../config.js';
 import { writeBaseline, readBaseline, recordBaselineReconciled } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
-import { describeRetainedEntries, partitionSkippedCheckoutCandidates } from '../nested-checkout-retention.js';
+import { describeRetainedEntries, partitionBlindSpotCandidates } from '../scan-blind-spot-retention.js';
 import { defaultConfirm } from '../prompt.js';
 
 export interface InitOptions {
@@ -87,7 +87,7 @@ export interface InitOptions {
  * `refuseIfRunIncomplete` alone does not protect an existing entry whose file lives inside a
  * skipped checkout — both of `init`'s write paths would silently drop it, the exact BUG #18 shape.
  * The decided fix mirrors `baseline prune`'s: "skip-and-report," not "refuse" — every dropped entry
- * is partitioned (`nested-checkout-retention.ts`) into RETAINED (file inside a skipped checkout —
+ * is partitioned (`scan-blind-spot-retention.ts`) into RETAINED (file under a scan blind spot —
  * carried into the write unchanged) and forfeited (everything else, dropped exactly as before).
  * `refuseIfRunIncomplete` is evaluated against the forfeited count only, since a retained entry was
  * never actually at risk once retention puts it back into what gets written.
@@ -99,7 +99,7 @@ function partitionAndRefuseIfBaselineWriteAtRisk(
   allowIncomplete: boolean,
 ): { readonly refusal: number | undefined; readonly retained: readonly BaselineEntry[] } {
   const dropped = existing.filter((entry) => !persistedFingerprints.has(entry.fingerprint));
-  const { retained, forfeited } = partitionSkippedCheckoutCandidates(dropped, run.skippedNestedCheckouts);
+  const { retained, forfeited } = partitionBlindSpotCandidates(dropped, run.blindSpots);
   return { refusal: refuseIfRunIncomplete('align init', run, forfeited.length, allowIncomplete), retained };
 }
 
@@ -276,7 +276,7 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
       return reportCliError('align init', err);
     }
     console.log('Initial check is green — no baseline seeding needed.');
-    if (atRisk.retained.length > 0) console.log(describeRetainedEntries(atRisk.retained, run.skippedNestedCheckouts));
+    if (atRisk.retained.length > 0) console.log(describeRetainedEntries(atRisk.retained, run.blindSpots));
     return finish(0);
   }
 
@@ -386,6 +386,6 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     return reportCliError('align init', err);
   }
   console.log(`Seeded baseline with ${violations.length} pre-existing violation(s) — run \`align baseline show\` to review.`);
-  if (seedAtRisk.retained.length > 0) console.log(describeRetainedEntries(seedAtRisk.retained, run.skippedNestedCheckouts));
+  if (seedAtRisk.retained.length > 0) console.log(describeRetainedEntries(seedAtRisk.retained, run.blindSpots));
   return finish(0);
 }

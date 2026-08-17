@@ -26,7 +26,7 @@ function edge(
 }
 
 function graphOf(nodes: DependencyGraphNode[], edges: DependencyGraphEdge[]): DependencyGraph {
-  return { nodes, edges, externalNodes: [], externalEdges: [], uncertain: [], skippedNestedCheckouts: [], scannedAt: 0 };
+  return { nodes, edges, externalNodes: [], externalEdges: [], uncertain: [], blindSpots: [], scannedAt: 0 };
 }
 
 function declaredEntrypoint(file: string): PackageEntrypoint {

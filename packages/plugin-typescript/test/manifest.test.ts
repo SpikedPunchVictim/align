@@ -60,7 +60,7 @@ describe('NodeManifestScanner (ManifestScanner injection seam, ADR 013)', () => 
 
 /**
  * Pins the exemption `GateOrchestrator.runSecurityGate` (`core/src/orchestrator.ts`) relies on when
- * it passes `[]` for `BaselineStore.reconcileMoves`'s now-REQUIRED `skippedNestedCheckouts`
+ * it passes `[]` for `BaselineStore.reconcileMoves`'s now-REQUIRED `blindSpots`
  * (review 2026-08-13). That `[]` is only correct if the manifest domain performs no nested-checkout
  * auto-exclusion of its own — i.e. a manifest can never go missing from `knownFiles` the way task
  * #25's `TypeScriptScanner` drops a source file (`plugin-typescript/test/nested-checkout.test.ts`

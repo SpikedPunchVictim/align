@@ -5,12 +5,12 @@
  *
  * A repo upgrading from 0.1.x can therefore hold accepted baseline entries whose `file` now sits
  * inside a directory this align no longer looks at. Those violations are **unobservable, not
- * fixed** — the same distinction `nested-checkout-retention.ts` draws for the destructive writers,
+ * fixed** — the same distinction `scan-blind-spot-retention.ts` draws for the destructive writers,
  * arriving here one level earlier: `align baseline prune`/`align init` silently RETAIN such entries
  * (correctly — deleting them would destroy consent records for violations that still exist), but
  * nothing tells the user the entries have gone quiet. This validator is that telling.
  */
-import { isUnderSkippedCheckout, type BaselineEntry, type RepoRelativePath } from '@spikedpunch/align-core';
+import { isUnderSkippedCheckout, nestedCheckoutPaths, type BaselineEntry, type RepoRelativePath } from '@spikedpunch/align-core';
 import { TypeScriptPlugin } from '@spikedpunch/align-plugin-typescript';
 import { loadConfig } from '../../config.js';
 import { readBaseline } from '../../align-dir.js';
@@ -26,7 +26,7 @@ import type { Validator, ValidatorFinding } from '../types.js';
  * first `.git` it meets — `walkSourceFiles`, `plugin-typescript/src/scanner.ts`), so no entry is
  * reported twice.
  *
- * Phrasing is deliberately aligned with `describeRetainedEntries` (`nested-checkout-retention.ts`),
+ * Phrasing is deliberately aligned with `describeRetainedEntries` (`scan-blind-spot-retention.ts`),
  * which states this same fact for the prune/init writers — "unobservable, not fixed", and
  * `includeNestedCheckouts` named as the way back in. That function is not CALLED here, though: its
  * subject is entries a destructive write just retained ("Retained N entries…, add them to
@@ -49,7 +49,7 @@ function describeStrandedEntries(dir: RepoRelativePath, entries: readonly Baseli
 
 /**
  * **What this reads, and nothing else**: `align.config.ts` (via `loadConfig`), the TypeScript
- * scanner's `DependencyGraph.skippedNestedCheckouts` for this repo, and `.align/baseline.json` (via
+ * scanner's nested-checkout blind spots for this repo, and `.align/baseline.json` (via
  * `readBaseline`, the same reader `align upgrade` itself uses). It writes nothing — the tier's
  * contract, pinned by a write-set assertion in
  * `test/migration-skipped-checkout-baseline-validator.test.ts` (ADR 026: the declared write-set for
@@ -96,16 +96,21 @@ export const baselineEntriesInSkippedCheckoutsValidator: Validator = {
         components: loaded.ruleset.components,
         excludes: loaded.excludes,
         // Honoured, not ignored: a checkout the human already opted back in is scanned, so it never
-        // appears in `skippedNestedCheckouts` and its entries are correctly NOT reported here.
+        // appears among the blind spots and its entries are correctly NOT reported here.
         includeNestedCheckouts: loaded.includeNestedCheckouts,
       })
       .catch(() => undefined);
     if (graph === undefined) return [];
 
     const findings: ValidatorFinding[] = [];
-    for (const dir of [...graph.skippedNestedCheckouts].sort((a, b) => a.localeCompare(b))) {
+    // NARROWED to the nested-checkout reason on purpose, and NOT widened to every ADR 028 blind
+    // spot (ADR 028 plan, decision 3). This validator reports entries stranded by what 0.2.0
+    // CHANGED — checkout auto-exclusion is new in this release, so an entry under one is an upgrade
+    // consequence a human should be told about. Symlink and `excludes` blindness are standing bugs
+    // that predate 0.2.0; reporting them here would misattribute them to the upgrade.
+    for (const dir of [...nestedCheckoutPaths(graph.blindSpots)].sort((a, b) => a.localeCompare(b))) {
       // `isUnderSkippedCheckout` (core) is the single containment predicate for this question —
-      // shared with `InMemoryBaselineStore.applyMoves` and `nested-checkout-retention.ts`, never
+      // shared with `InMemoryBaselineStore.applyMoves` and `scan-blind-spot-retention.ts`, never
       // re-implemented here (CLAUDE.md rule 6). Called one directory at a time so the finding can
       // name WHICH checkout owns the entries, exactly as `describeRetainedEntries` does.
       const stranded = baseline.filter((entry) => isUnderSkippedCheckout(entry.file, [dir]));

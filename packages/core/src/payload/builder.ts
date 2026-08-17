@@ -1,5 +1,6 @@
 import type { ComponentName, RepoRelativePath, RuleId } from '../types/branded.js';
 import type { Category } from '../types/violation.js';
+import type { ScanBlindSpot } from '../types/graph.js';
 import type { UngroundedComponent } from '../components/registry.js';
 import type { Advisory, CheckRun, GateStatus } from '../gates/types.js';
 import { isRunComplete } from '../gates/advisories.js';
@@ -40,12 +41,18 @@ export interface McpCheckPayload {
    * `green` (an empty greenfield component is not a failure); this field is what makes that green
    * distinguishable from a fully-grounded one. */
   readonly ungroundedComponents: readonly UngroundedComponent[];
-  /** Task #25's baseline-prune review fix: repo-relative paths of directories this scan skipped
-   * because they carry their own `.git`, straight off `CheckRun.skippedNestedCheckouts` — wire-
-   * visible so an MCP/`--json` consumer can tell "this orphan's file is unobservable, not fixed"
-   * without parsing the `nested-checkout-skipped` advisory's message string. `[]` on a run whose
-   * architecture gate didn't fully evaluate, same as the source field. */
-  readonly skippedNestedCheckouts: readonly RepoRelativePath[];
+  /** ADR 028: every path this scan declined to look at and why, straight off `CheckRun.blindSpots`
+   * — wire-visible so an MCP/`--json` consumer can tell "this orphan's file is unobservable, not
+   * fixed" without parsing an advisory's message string. `[]` on a run whose architecture gate
+   * didn't fully evaluate, same as the source field.
+   *
+   * Renamed from `skippedNestedCheckouts` in 0.2.0, and that rename was free exactly once:
+   * `CheckPayload` carries NO version field (`irVersion: '1'` belongs to the ruleset IR, a different
+   * artifact), so a consumer either finds a key or silently does not. Verified before doing it —
+   * `git show v0.1.4:packages/core/src/payload/builder.ts` has zero occurrences of the old name, so
+   * no published version ever emitted it. Every rename after 0.2.0 is an unsignallable break;
+   * versioning this payload owes its own ADR (ADR 028 Consequences). */
+  readonly blindSpots: readonly ScanBlindSpot[];
   /** Change in baselined debt since the last persisted baseline: `47 → 45 (−2)`
    * (docs/proposals/reconciled-build-order.md #2). Structured so agents can read the ratchet
    * without parsing prose. */
@@ -102,7 +109,7 @@ export function buildMcpCheckPayload(run: CheckRun, options: BuildCheckPayloadOp
     ...(capped.length > pageSize ? { pagination: { cursor: String(offset + pageSize), hasMore } } : {}),
     advisories: run.advisories,
     ungroundedComponents: run.ungroundedComponents,
-    skippedNestedCheckouts: run.skippedNestedCheckouts,
+    blindSpots: run.blindSpots,
     baselineDebt,
   };
 }

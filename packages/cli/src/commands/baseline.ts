@@ -4,7 +4,7 @@ import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, writeBaseline } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
-import { describeRetainedEntries, partitionSkippedCheckoutCandidates } from '../nested-checkout-retention.js';
+import { describeRetainedEntries, partitionBlindSpotCandidates } from '../scan-blind-spot-retention.js';
 import { describeUnverifiablePrunes, selectUnverifiablePrunes } from '../unverified-prune.js';
 import { computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
 
@@ -97,27 +97,27 @@ export async function baselineAccept(rootDir: string, ruleId?: string, telemetry
  * is lost by deferring them: `align check`'s `persistMovedBaseline` (`commands/check.ts`)
  * independently transfers the same moves, unconditionally, on every run.
  *
- * A THIRD hazard, decided separately from ADR 023's two tiers: task #25's nested-checkout
- * auto-exclusion drops edges from the scan the same way a missing dependency does, but does NOT
- * set `complete: false` (`isRunComplete` only fires on a `missing-dependencies` advisory), so tier
- * 2 alone does not protect an entry whose file lives inside a skipped checkout. Unlike tier 2's
- * whole-run taint, this hazard names its own paths precisely (`run.skippedNestedCheckouts`) — so
- * the decided fix is "skip-and-report," not "refuse": every orphan `store.prune` would otherwise
- * delete is partitioned (`nested-checkout-retention.ts`) into ones whose file is inside a skipped
- * checkout (RETAINED — re-added to what gets persisted, never deleted) and everything else
- * (forfeited — pruned exactly as before). Tier 2's `refuseIfRunIncomplete` is evaluated against
- * the FORFEITED count only, since a retained entry was never actually at risk once retention put it
- * back.
+ * A THIRD hazard, decided separately from ADR 023's two tiers: a scan blind spot (ADR 028 —
+ * an auto-excluded nested checkout, an `excludes` match, a `node_modules`-class directory name, an
+ * unreadable directory, a symlink) drops files from the scan the same way a missing dependency drops
+ * edges, but does NOT set `complete: false` (`isRunComplete` only fires on a `missing-dependencies`
+ * advisory), so tier 2 alone does not protect an entry whose file is under one. Unlike tier 2's
+ * whole-run taint, this hazard names its own paths precisely (`run.blindSpots`) — so the decided fix
+ * is "skip-and-report," not "refuse": every orphan `store.prune` would otherwise delete is
+ * partitioned (`scan-blind-spot-retention.ts`) into ones whose file is under a blind spot (RETAINED
+ * — re-added to what gets persisted, never deleted) and everything else (forfeited — pruned exactly
+ * as before). Tier 2's `refuseIfRunIncomplete` is evaluated against the FORFEITED count only, since
+ * a retained entry was never actually at risk once retention put it back.
  *
  * That retention only ever partitioned `result.removed` — it had NO effect on `result.moved` (F1,
- * review 2026-08-12): `store.prune`'s own `applyMoves` step could misclassify a checkout-resident
- * orphan as "moved" instead of "removed" whenever its `contentFingerprint` collided with a live,
+ * review 2026-08-12): `store.prune`'s own `applyMoves` step could misclassify an unobserved orphan
+ * as "moved" instead of "removed" whenever its `contentFingerprint` collided with a live,
  * never-accepted violation elsewhere — the expected case for a vendored copy of the same code, not
  * an exotic one — silently forging the entry's `acceptedAt`/`acceptedBy` onto that unrelated
  * violation. A "moved" entry never reaches `result.removed`, so the retention partition below never
- * even saw it. Fixed at the source: `store.prune` is now passed `run.skippedNestedCheckouts` so
- * `applyMoves` treats a checkout-resident file as "still known" the same as a file literally present
- * in `knownFiles` — it is routed to `unmatchedOrphans` (this function's `result.removed`) instead of
+ * even saw it. Fixed at the source: `store.prune` is now passed `run.blindSpots` so `applyMoves`
+ * treats a file under any blind spot as "still known" the same as a file literally present in
+ * `knownFiles` — it is routed to `unmatchedOrphans` (this function's `result.removed`) instead of
  * being offered up for a content match, landing it in the exact arm retention already protects.
  */
 export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, telemetryPreConfig?: boolean): Promise<number> {
@@ -149,23 +149,23 @@ export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, 
   } catch (err) {
     return reportCliError('align baseline prune', err);
   }
-  // `run.skippedNestedCheckouts` (F1, task #25 forged-transfer fix, review 2026-08-12): without
-  // this, `store.prune`'s own move-transfer step (`applyMoves`) could misclassify an orphaned entry
-  // whose file lives inside a skipped checkout as "moved" via a colliding content fingerprint,
-  // forging its acceptedAt/acceptedBy onto a genuinely new, never-accepted violation elsewhere —
-  // bypassing the retention partition below entirely, since a "moved" entry never reaches
-  // `result.removed`. See `store.ts`'s `reconcileMoves`/`applyMoves` doc comments.
-  const result = store.prune(allViolations, knownFiles, run.skippedNestedCheckouts);
+  // `run.blindSpots` (ADR 027's F1 fix, generalized by ADR 028): without this, `store.prune`'s own
+  // move-transfer step (`applyMoves`) could misclassify an orphaned entry whose file the scan simply
+  // did not look at as "moved" via a colliding content fingerprint, forging its acceptedAt/acceptedBy
+  // onto a genuinely new, never-accepted violation elsewhere — bypassing the retention partition
+  // below entirely, since a "moved" entry never reaches `result.removed`. See `store.ts`'s
+  // `reconcileMoves`/`applyMoves` doc comments.
+  const result = store.prune(allViolations, knownFiles, run.blindSpots);
   // The third hazard (see this function's doc comment): `store.prune` above already deleted every
-  // unmatched orphan, INCLUDING ones whose file is unobservable this scan only because it's inside
-  // a skipped nested checkout, not because the violation is fixed. `store.prune`'s `PruneResult`
+  // unmatched orphan, INCLUDING ones whose file is unobservable this scan only because the walk
+  // never looked there, not because the violation is fixed. `store.prune`'s `PruneResult`
   // only returns fingerprints, so the original entries (with their irreplaceable acceptedAt/By) are
   // recovered from `previous.entries` — the pre-prune snapshot — the only place they still exist.
   const previousByFingerprint = new Map(previous.entries.map((entry) => [entry.fingerprint, entry]));
   const removedEntries = result.removed
     .map((fingerprint) => previousByFingerprint.get(fingerprint))
     .filter((entry): entry is BaselineEntry => entry !== undefined);
-  const { retained, forfeited } = partitionSkippedCheckoutCandidates(removedEntries, run.skippedNestedCheckouts);
+  const { retained, forfeited } = partitionBlindSpotCandidates(removedEntries, run.blindSpots);
   // Tier 2 — see this function's doc comment for why this runs here (after `store.prune`, before
   // `writeBaseline`) and why deferring on refusal loses nothing. Evaluated against FORFEITED only:
   // a retained entry is being put back below, so it was never actually at risk of deletion.
@@ -194,7 +194,7 @@ export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, 
     console.log(describeUnverifiablePrunes(unverifiable));
   }
   if (retained.length > 0) {
-    console.log(describeRetainedEntries(retained, run.skippedNestedCheckouts));
+    console.log(describeRetainedEntries(retained, run.blindSpots));
   }
 
   const recorder = createTelemetryRecorder(rootDir, 'baseline prune', telemetryPreConfig, telemetry);

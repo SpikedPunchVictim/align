@@ -1,10 +1,10 @@
-import { InMemoryBaselineStore, type BaselineEntry, type CheckRun, type RepoRelativePath } from '@spikedpunch/align-core';
+import { InMemoryBaselineStore, type BaselineEntry, type CheckRun, type RepoRelativePath, type ScanBlindSpot } from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, readVersionFile, recordBaselineReconciled } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
-import { partitionSkippedCheckoutCandidates } from '../nested-checkout-retention.js';
+import { partitionBlindSpotCandidates } from '../scan-blind-spot-retention.js';
 import { defaultConfirm } from '../prompt.js';
 import { compareVersions } from '../version-skew.js';
 import { ALIGN_VERSION } from '../telemetry/process-context.js';
@@ -259,7 +259,7 @@ export async function runUpgrade(rootDir: string, options: UpgradeOptions): Prom
       previousBaseline,
       allViolations,
       knownFiles,
-      fullRun.skippedNestedCheckouts,
+      fullRun.blindSpots,
       options,
       isInteractive,
       yes,
@@ -328,18 +328,18 @@ async function reconcilePrune(
   previousBaseline: readonly BaselineEntry[],
   allViolations: CheckRun['gates'][number]['violations'],
   knownFiles: ReadonlySet<RepoRelativePath>,
-  skippedNestedCheckouts: readonly RepoRelativePath[],
+  blindSpots: readonly ScanBlindSpot[],
   options: UpgradeOptions,
   isInteractive: boolean,
   yes: boolean,
   confirmFn: (question: string) => Promise<boolean>,
 ): Promise<ActionOutcome> {
   const previewStore = new InMemoryBaselineStore(previousBaseline);
-  // Step 1, `baselinePrune`'s `store.prune(allViolations, knownFiles, run.skippedNestedCheckouts)`.
-  // Passing the skipped paths (F1, task #25 forged-transfer fix) keeps a checkout-resident orphan out
-  // of `applyMoves`'s content-fingerprint search, so it lands in `removed` instead of being forged
-  // onto a live violation as a "move".
-  const previewResult = previewStore.prune(allViolations, knownFiles, skippedNestedCheckouts);
+  // Step 1, `baselinePrune`'s `store.prune(allViolations, knownFiles, run.blindSpots)`. Passing the
+  // blind spots (ADR 027's F1 fix, generalized by ADR 028) keeps an orphan the walk never looked at
+  // out of `applyMoves`'s content-fingerprint search, so it lands in `removed` instead of being
+  // forged onto a live violation as a "move".
+  const previewResult = previewStore.prune(allViolations, knownFiles, blindSpots);
   // Step 2: `PruneResult.removed` carries bare fingerprints, so the entries themselves are recovered
   // from the pre-prune snapshot — `previousBaseline` here, `previous.entries` there.
   const previewByFingerprint = new Map(previousBaseline.map((entry) => [entry.fingerprint, entry]));
@@ -347,13 +347,13 @@ async function reconcilePrune(
     .map((fingerprint) => previewByFingerprint.get(fingerprint))
     .filter((entry): entry is BaselineEntry => entry !== undefined);
   // Step 3: count only `forfeited`. A `retained` entry is one `baselinePrune` writes straight back
-  // (`nested-checkout-retention.ts`), so it is never deleted and was never at risk — which is why
+  // (`scan-blind-spot-retention.ts`), so it is never deleted and was never at risk — which is why
   // `baselinePrune` feeds `forfeited.length`, not `removed.length`, to both its report and its own
   // `refuseIfRunIncomplete`. Verified 2026-08-13: counting `removed.length` here instead over-counted
   // by exactly the retained entries, which made the prompt ask consent for a deletion that could not
   // happen ("Prune 1 orphaned baseline entry?" against a prune that forfeits 0 and retains 1) and made
   // the tier-2 guard below refuse on incomplete runs `baselinePrune`'s own tier 2 would have allowed.
-  const pruneAtRisk = partitionSkippedCheckoutCandidates(removedEntries, skippedNestedCheckouts).forfeited.length;
+  const pruneAtRisk = partitionBlindSpotCandidates(removedEntries, blindSpots).forfeited.length;
   if (pruneAtRisk === 0) return { actionable: false, reconciled: true };
 
   const incompleteRefusal = refuseIfRunIncomplete('align upgrade', run, pruneAtRisk, options.allowIncomplete ?? false);

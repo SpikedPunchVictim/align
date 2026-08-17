@@ -43,7 +43,8 @@ function runWith(violations: Violation[], overrides: Partial<CheckRun> = {}): Ch
     advisories: [],
     scannedAt: Date.now(),
     ungroundedComponents: [],
-    skippedNestedCheckouts: [],
+    blindSpots: [],
+    observedFiles: { source: new Set(), manifest: new Set() },
     ...overrides,
   };
 }

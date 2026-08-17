@@ -1,4 +1,4 @@
-import type { UncertaintyMarker, UncertaintyReason } from '../types/graph.js';
+import type { ScanBlindSpot, ScanBlindSpotReason, UncertaintyMarker, UncertaintyReason } from '../types/graph.js';
 import type { ExternalPackageNode } from '../types/graph.js';
 import type { RepoRelativePath } from '../types/branded.js';
 import type { RuleIR } from '../types/ir.js';
@@ -107,30 +107,133 @@ function isExternalPackageSpecifier(specifier: string): boolean {
 }
 
 /**
- * Task #25 (auto-exclude nested git checkouts, visibly): one advisory naming every nested checkout
- * the walk skipped this scan (`graph.skippedNestedCheckouts` — a worktree/submodule/vendored clone,
- * anything carrying its own `.git`, directory or file). This is the load-bearing half of the
- * decision: a directory skipped without this advisory would be indistinguishable from one that was
- * simply empty, which is exactly the false-green shape ADR 008's reference-validity amendment and
- * ADR 003's `empty:` policy both exist to prevent (a component whose files all lived under a
- * silently-skipped path would evaluate vacuously green with zero signal). Named paths, not just a
- * count, so a human/agent can tell at a glance whether an empty component correlates with one of
- * them — see `components/registry.ts`'s `skippedCheckoutsMatchingSelector` for the sharper,
- * per-component diagnosis this advisory alone can't give (it fires once per scan, not per
- * component).
+ * Which `ScanBlindSpotReason` kinds earn a per-scan advisory, and — just as deliberately — which do
+ * not. The RECORD is complete: every blind spot the walk finds lands on `graph.blindSpots` and
+ * `CheckRun.blindSpots`, and that record is what protects a baseline entry from being deleted or
+ * transferred (ADR 028's whole point). This set governs only what `align check` PRINTS every run.
+ *
+ * `excluded` and `default-excluded-dir` are deliberately absent. The user authored the `excludes`
+ * patterns themselves and `node_modules`/`dist`/`coverage` are excluded by design in every repo, so
+ * an advisory naming them fires on literally every scan and says nothing the user did not already
+ * decide — the reliable way to train a human to stop reading advisories. They are still recorded,
+ * so retention still protects entries under them, and `prune`/`init` still name the reason at the
+ * moment an entry is actually retained, which is the moment it is actionable.
+ *
+ * The three that ARE reported all share the property that the user could not have predicted them
+ * from their own config: a nested checkout appears with a generated name (ADR 027), an unreadable
+ * directory is a permissions accident, and a symlink is invisible data loss the walk cannot follow.
  */
-export function buildSkippedNestedCheckoutAdvisories(paths: readonly RepoRelativePath[]): Advisory[] {
-  if (paths.length === 0) return [];
-  const sorted = [...paths].sort((a, b) => a.localeCompare(b));
-  return [
-    {
+const ADVISORY_BLIND_SPOT_REASONS: ReadonlySet<ScanBlindSpotReason['kind']> = new Set([
+  'nested-checkout',
+  'unreadable',
+  'not-regular-file',
+]);
+
+/** Paths for one advisory line: deduped, sorted, and capped — the `describeUnverifiablePrunes`
+ * (`cli/src/unverified-prune.ts`) precedent, so every capped path list in align reads the same. A
+ * blind spot list is unbounded in principle (a repo can hold any number of symlinks), and an
+ * advisory that dumps hundreds of paths is not more informative than one that names five. */
+function describePaths(labels: readonly string[]): string {
+  const unique = [...new Set(labels)].sort((a, b) => a.localeCompare(b));
+  const shown = unique.slice(0, 5);
+  const more = unique.length - shown.length;
+  return `${shown.join(', ')}${more > 0 ? `, +${more} more` : ''}`;
+}
+
+/** The reason phrase for a whole GROUP of blind spots, which is a different question from
+ * `describeBlindSpotReason`'s per-spot phrase: `unreadable` carries a distinct `error` per path and
+ * `excluded` a distinct `pattern`, so a group header must not borrow the first member's detail and
+ * silently attribute it to the rest. Per-path detail is appended to the path itself below. */
+function describeBlindSpotKind(kind: ScanBlindSpotReason['kind']): string {
+  switch (kind) {
+    case 'nested-checkout':
+      return 'nested git checkout';
+    case 'excluded':
+      return 'matched an excludes pattern';
+    case 'default-excluded-dir':
+      return 'always-excluded directory name';
+    case 'unreadable':
+      return 'the directory could not be read';
+    case 'not-regular-file':
+      return 'not a regular file (symlink, FIFO or socket — the walk does not follow these, so an entire symlinked subtree is absent from the graph)';
+    default: {
+      const exhaustive: never = kind;
+      throw new Error(`unhandled scan blind spot kind: ${String(exhaustive)}`);
+    }
+  }
+}
+
+/** `path`, plus the reason's own per-path detail when it has one — so an `unreadable` group shows
+ * which error hit which directory instead of one error standing in for all of them. */
+function labelBlindSpot(spot: ScanBlindSpot): string {
+  switch (spot.reason.kind) {
+    case 'unreadable':
+      return `${spot.path} (${spot.reason.error})`;
+    case 'excluded':
+      return `${spot.path} (${spot.reason.pattern})`;
+    case 'default-excluded-dir':
+    case 'nested-checkout':
+    case 'not-regular-file':
+      return spot.path;
+    default: {
+      const exhaustive: never = spot.reason;
+      throw new Error(`unhandled scan blind spot reason: ${JSON.stringify(exhaustive)}`);
+    }
+  }
+}
+
+/**
+ * ADR 028, generalizing task #25's nested-checkout advisory: name the paths this scan declined to
+ * look at, so a directory the walk skipped is never indistinguishable from one that was simply
+ * empty. That is exactly the false-green shape ADR 008's reference-validity amendment and ADR 003's
+ * `empty:` policy both exist to prevent — a component whose files all lived under a silently-skipped
+ * path evaluates vacuously green with zero signal.
+ *
+ * One advisory per reason kind, not one per path, and only for the kinds in
+ * `ADVISORY_BLIND_SPOT_REASONS` above (read its comment before adding one — the omissions are the
+ * design). The nested-checkout arm keeps its own `kind` and its own remediation sentence: it is the
+ * only reason with a config-level fix (`includeNestedCheckouts`), and UPGRADING.md's 0.2.0 note
+ * names that advisory kind by string.
+ *
+ * See `components/registry.ts`'s `blindSpotsMatchingSelector` for the sharper, per-component
+ * diagnosis this advisory alone cannot give — it fires once per scan, not once per component.
+ */
+export function buildScanBlindSpotAdvisories(blindSpots: readonly ScanBlindSpot[]): Advisory[] {
+  const byKind = new Map<ScanBlindSpotReason['kind'], ScanBlindSpot[]>();
+  for (const spot of blindSpots) {
+    if (!ADVISORY_BLIND_SPOT_REASONS.has(spot.reason.kind)) continue;
+    const list = byKind.get(spot.reason.kind);
+    if (list === undefined) byKind.set(spot.reason.kind, [spot]);
+    else list.push(spot);
+  }
+
+  const advisories: Advisory[] = [];
+
+  const checkouts = byKind.get('nested-checkout');
+  if (checkouts !== undefined && checkouts.length > 0) {
+    advisories.push({
       kind: 'nested-checkout-skipped',
       message:
-        `${sorted.length} nested git checkout(s) auto-excluded from the scan (each has its own .git and ` +
-        `is not part of this project's architecture): ${sorted.join(', ')}. If one of these is genuinely ` +
-        "part of the project (e.g. a submodule), add it to align.config.ts's includeNestedCheckouts export.",
-    },
-  ];
+        `${checkouts.length} nested git checkout(s) auto-excluded from the scan (each has its own .git and ` +
+        `is not part of this project's architecture): ${describePaths(checkouts.map((s) => s.path))}. If one of ` +
+        "these is genuinely part of the project (e.g. a submodule), add it to align.config.ts's " +
+        'includeNestedCheckouts export.',
+    });
+  }
+
+  for (const kind of [...byKind.keys()].filter((k) => k !== 'nested-checkout').sort()) {
+    const spots = byKind.get(kind);
+    if (spots === undefined || spots.length === 0) continue;
+    advisories.push({
+      kind: 'scan-blind-spot',
+      message:
+        `${spots.length} path(s) were not scanned — ${describeBlindSpotKind(kind)}: ` +
+        `${describePaths(spots.map(labelBlindSpot))}. A baseline entry under one of these is unobservable ` +
+        'this scan, not fixed, so align retains it rather than pruning or transferring it (ADR 028).',
+    });
+  }
+
+  return advisories;
 }
 
 /**

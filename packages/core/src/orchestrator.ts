@@ -1,5 +1,5 @@
 import type { RepoRelativePath } from './types/branded.js';
-import type { DependencyGraph } from './types/graph.js';
+import type { DependencyGraph, ScanBlindSpot } from './types/graph.js';
 import type { RulesetIR } from './types/ir.js';
 import type { Violation } from './types/violation.js';
 import { EMPTY_MANIFEST_INVENTORY, type ManifestScanner } from './types/manifest.js';
@@ -7,7 +7,7 @@ import type { BaselineStore } from './baseline/store.js';
 import type { Advisory, CheckRun, GateResult } from './gates/types.js';
 import {
   buildBaselineGrowthAdvisories,
-  buildSkippedNestedCheckoutAdvisories,
+  buildScanBlindSpotAdvisories,
   buildUncertaintyAdvisories,
   buildUngroundedExternalSelectorAdvisories,
 } from './gates/advisories.js';
@@ -68,7 +68,11 @@ export class GateOrchestrator {
     // entirely — a disjoint scan domain (`ManifestInventory`, not `DependencyGraph`). Computed
     // first, unconditionally, so a TS scan failure below never blocks it (ADR 008's always-run
     // carve-out: `dependsOn: []`, "must always run regardless of what upstream gates report").
-    const { gateResult: securityGate, movedCount: securityMoves } = await this.runSecurityGate(options);
+    const {
+      gateResult: securityGate,
+      movedCount: securityMoves,
+      observedFiles: manifestFiles,
+    } = await this.runSecurityGate(options);
 
     const parseStart = performance.now();
 
@@ -93,7 +97,7 @@ export class GateOrchestrator {
         advisories: movedAdvisories(securityMoves),
         scannedAt,
         ungroundedComponents: [],
-        skippedNestedCheckouts: [],
+        ...untrustworthyScanScope(),
       };
     }
 
@@ -143,12 +147,12 @@ export class GateOrchestrator {
         gates,
         advisories: [
           ...buildUncertaintyAdvisories(graph.uncertain),
-          ...buildSkippedNestedCheckoutAdvisories(graph.skippedNestedCheckouts),
+          ...buildScanBlindSpotAdvisories(graph.blindSpots),
           ...movedAdvisories(securityMoves),
         ],
         scannedAt,
         ungroundedComponents: [],
-        skippedNestedCheckouts: [],
+        ...untrustworthyScanScope(),
       };
     }
 
@@ -174,12 +178,12 @@ export class GateOrchestrator {
         gates,
         advisories: [
           ...buildUncertaintyAdvisories(graph.uncertain),
-          ...buildSkippedNestedCheckoutAdvisories(graph.skippedNestedCheckouts),
+          ...buildScanBlindSpotAdvisories(graph.blindSpots),
           ...movedAdvisories(securityMoves),
         ],
         scannedAt,
         ungroundedComponents: [],
-        skippedNestedCheckouts: [],
+        ...untrustworthyScanScope(),
       };
     }
 
@@ -190,12 +194,13 @@ export class GateOrchestrator {
     // graph's node files, never derived from `allViolations` (a fixed file has no violations, so
     // deriving from violations would make every fixed file look deleted and defeat the fix).
     const knownFiles = new Set(graph.nodes.map((n) => n.file));
-    // `graph.skippedNestedCheckouts` (F1, task #25 forged-transfer fix, review 2026-08-12): passed
-    // through so a file this scan auto-excluded is never mistaken for a real rename by
-    // `applyMoves` — see `store.ts`'s `reconcileMoves` doc comment. This is the unguarded path the
-    // review named: unlike `baseline prune`, `align check` runs this on every invocation with no
-    // completeness gate at all, so it's the one place the fix matters even without `--allow-incomplete`.
-    const moves = this.baselineStore.reconcileMoves(allViolations, knownFiles, graph.skippedNestedCheckouts);
+    // `graph.blindSpots` (ADR 028, generalizing ADR 027's F1 fix): passed through so a file this
+    // scan declined to look at — for ANY of the six reasons, not just an auto-excluded checkout —
+    // is never mistaken for a real rename by `applyMoves`; see `store.ts`'s `reconcileMoves` doc
+    // comment. This is the unguarded path both ADRs named: unlike `baseline prune`, `align check`
+    // runs this on every invocation with no completeness gate at all, so it is the one place the fix
+    // matters even without `--allow-incomplete`.
+    const moves = this.baselineStore.reconcileMoves(allViolations, knownFiles, graph.blindSpots);
 
     const newViolations = allViolations.filter((v) => !this.baselineStore.isBaselined(v.id));
     const baselinedCount = allViolations.length - newViolations.length;
@@ -216,7 +221,7 @@ export class GateOrchestrator {
 
     const advisories: Advisory[] = [
       ...buildUncertaintyAdvisories(graph.uncertain),
-      ...buildSkippedNestedCheckoutAdvisories(graph.skippedNestedCheckouts),
+      ...buildScanBlindSpotAdvisories(graph.blindSpots),
       ...movedAdvisories(moves.length + securityMoves),
       // ADR 017 Part A: computed after evaluation succeeds (same "trustworthy ruleset" precondition
       // as `ungroundedComponents` below) — an ungrounded external selector is vacuously green, not
@@ -235,7 +240,20 @@ export class GateOrchestrator {
     // is trustworthy — reuses the same classification set `validateClassifiedComponents` just
     // validated against, no second pass over the graph.
     const ungroundedComponents = findUngroundedComponents(this.ruleset.components, classifiedComponents);
-    return { verdict, gates, advisories, scannedAt, ungroundedComponents, skippedNestedCheckouts: graph.skippedNestedCheckouts };
+    return {
+      verdict,
+      gates,
+      advisories,
+      scannedAt,
+      ungroundedComponents,
+      blindSpots: graph.blindSpots,
+      // The two domains stay SEPARATE (ADR 028 §5): `source` is this gate's own `knownFiles`, the
+      // exact set `reconcileMoves` above reasoned over, and `manifest` is the security gate's, the
+      // exact set ITS `reconcileMoves` reasoned over. The deleted `knownFiles()` unioned them, so
+      // `prune` reasoned over a set `check` never used — merging also mis-classifies, since `.json`
+      // is an asset extension to the source walker but a first-class file to the manifest walker.
+      observedFiles: { source: knownFiles, manifest: manifestFiles },
+    };
   }
 
   /**
@@ -265,7 +283,16 @@ export class GateOrchestrator {
    * `dependsOn: []` (ADR 008's always-run carve-out) — a manifest scan failure is this gate's own
    * `error`, never cascades from or into the architecture gate's status.
    */
-  private async runSecurityGate(options: CheckOptions): Promise<{ readonly gateResult: GateResult; readonly movedCount: number }> {
+  private async runSecurityGate(options: CheckOptions): Promise<{
+    readonly gateResult: GateResult;
+    readonly movedCount: number;
+    /** This gate's own observed file set, carried onto `CheckRun.observedFiles.manifest` (ADR 028
+     * §5) so `align baseline prune` reads the manifest domain off the run instead of walking it a
+     * second time. Empty when the manifest scan threw — an inventory that failed to build observed
+     * nothing, and reporting a partial set as if it were the domain is the false-completeness shape
+     * this ADR exists to stop. */
+    readonly observedFiles: ReadonlySet<RepoRelativePath>;
+  }> {
     const start = performance.now();
     const securityRules = this.ruleset.rules.filter(
       (rule): rule is SecurityManifestRule => ruleCategoryOf(rule) === 'security',
@@ -287,6 +314,7 @@ export class GateOrchestrator {
           dependsOn: [],
         },
         movedCount: 0,
+        observedFiles: new Set<RepoRelativePath>(),
       };
     }
 
@@ -303,13 +331,13 @@ export class GateOrchestrator {
     // it was optional, and this exact call site omitted it, silently reinstating the pre-F1
     // behaviour with no type error). The fact this rests on, verified by reading the manifest domain
     // end to end: `ManifestScanOptions` carries only `rootDir` and `excludes`, `ManifestInventory`
-    // has no `skippedNestedCheckouts` field, and the concrete scanner (`plugin-typescript`'s
+    // has no blind-spot field, and the concrete scanner (`plugin-typescript`'s
     // `scanManifests`) enumerates the root `package.json` plus `pnpm-workspace.yaml` glob members
     // with no `.git` test anywhere — so this domain performs no nested-checkout auto-exclusion, and
     // no manifest is ever absent from `knownFiles` for that reason. A manifest that leaves this
     // inventory left for a genuine reason (dropped from the workspace globs, deleted, malformed) —
     // precisely the case FRAGILE #7's move-rescue exists to handle, so passing the architecture
-    // gate's skipped paths here would suppress a legitimate rescue. Pinned by an executable test
+    // gate's blind spots here would suppress a legitimate rescue. Pinned by an executable test
     // (`plugin-typescript/test/manifest.test.ts`), not left as an assertion in this comment.
     const moves = this.baselineStore.reconcileMoves(allViolations, knownFiles, []);
     const newViolations = allViolations.filter((v) => !this.baselineStore.isBaselined(v.id));
@@ -330,6 +358,7 @@ export class GateOrchestrator {
         dependsOn: [],
       },
       movedCount: moves.length,
+      observedFiles: knownFiles,
     };
   }
 
@@ -359,16 +388,21 @@ export class GateOrchestrator {
     // uses within one scan.
     const externalNodesById = new Map<string, DependencyGraph['externalNodes'][number]>();
     for (const g of graphs) for (const n of g.externalNodes) externalNodesById.set(n.id, n);
-    // Dedup skipped-checkout paths the same way (Stage 5's multi-plugin merge is written
-    // generically; a shared subtree could in principle be walked by more than one plugin).
-    const skippedNestedCheckouts = [...new Set(graphs.flatMap((g) => g.skippedNestedCheckouts))].sort();
+    // Union the blind spots the same way (Stage 5's multi-plugin merge is written generically; a
+    // shared subtree could in principle be walked by more than one plugin). Deduped on path AND
+    // reason, not path alone: two plugins can decline the same path for different reasons, and
+    // collapsing those would silently drop one — union in the SAFE direction, since every extra
+    // record only widens what is retained rather than what is deleted.
+    const blindSpotsByKey = new Map<string, ScanBlindSpot>();
+    for (const g of graphs) for (const spot of g.blindSpots) blindSpotsByKey.set(`${spot.path}\u0000${JSON.stringify(spot.reason)}`, spot);
+    const blindSpots = [...blindSpotsByKey.values()].sort((a, b) => a.path.localeCompare(b.path));
     return {
       nodes: graphs.flatMap((g) => g.nodes),
       edges: graphs.flatMap((g) => g.edges),
       externalNodes: [...externalNodesById.values()],
       externalEdges: graphs.flatMap((g) => g.externalEdges),
       uncertain: graphs.flatMap((g) => g.uncertain),
-      skippedNestedCheckouts,
+      blindSpots,
       scannedAt: Math.min(...graphs.map((g) => g.scannedAt)),
     };
   }
@@ -387,6 +421,31 @@ function errorGate(err: unknown, archStart: number): GateResult {
     durationMs: performance.now() - archStart,
     cacheHits: 0,
     dependsOn: ['parse'],
+  };
+}
+
+/**
+ * The scan-scope half of a `CheckRun` on a path where no trustworthy scan scope exists — every
+ * early return from `check()` where a gate errored. Empty `blindSpots` and empty `observedFiles`
+ * move TOGETHER and that is the point: "these files were observed, and nothing was invisible" is a
+ * completeness claim, so reporting an observed set beside a zeroed blind-spot record would assert a
+ * guarantee the run cannot back. Both empty says "this run knows nothing about scan scope", which is
+ * true and errs toward retention in every consumer.
+ *
+ * The manifest domain is zeroed here too even on the parse-error path, where the security gate DID
+ * evaluate. That is deliberate and costs nothing: every destructive consumer must call
+ * `refuseIfRunErrored` (ADR 023 tier 1, no override) before it reads either field, so an errored run
+ * never reaches code that would look — and if that guard were ever bypassed, an empty set makes
+ * `prune` retain rather than delete.
+ *
+ * A fresh `Set` per call rather than a shared frozen constant: `ReadonlySet` is a compile-time view,
+ * not a runtime guarantee, and one shared instance handed to every caller is a cross-run aliasing
+ * hazard for the sake of an allocation that happens only on error paths.
+ */
+function untrustworthyScanScope(): Pick<CheckRun, 'blindSpots' | 'observedFiles'> {
+  return {
+    blindSpots: [],
+    observedFiles: { source: new Set<RepoRelativePath>(), manifest: new Set<RepoRelativePath>() },
   };
 }
 

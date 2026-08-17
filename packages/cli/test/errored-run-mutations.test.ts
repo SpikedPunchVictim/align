@@ -237,7 +237,7 @@ describe('the other mutating consumers of a run’s violations', () => {
   // that entry's `acceptedAt`/`acceptedBy` onto a genuinely new, never-reviewed violation elsewhere —
   // reachable through exactly this function, on exactly an errored run, since `persistMovedBaseline`
   // just persists whatever the store already decided. `applyMoves` now treats a file under
-  // `skippedNestedCheckouts` as still known, and `BaselineStore` makes passing those paths mandatory
+  // `blindSpots` as still known, and `BaselineStore` makes passing those mandatory
   // (review 2026-08-13), so no caller can silently fall back to the pre-fix behaviour; the security
   // gate passes `[]` because its manifest domain performs no nested-checkout auto-exclusion at all
   // (pinned by `plugin-typescript/test/manifest.test.ts`). That fix lives in `applyMoves`'s
@@ -281,7 +281,8 @@ describe('the other mutating consumers of a run’s violations', () => {
         advisories: [{ kind: 'baseline-moved', message: '1 entry transferred (file moves).' }],
         scannedAt: Date.now(),
         ungroundedComponents: [],
-        skippedNestedCheckouts: [],
+        blindSpots: [],
+        observedFiles: { source: new Set(), manifest: new Set() },
       };
 
       // No refusal mechanism exists in this function's signature (unlike `baselinePrune`/`runInit`,
@@ -302,7 +303,8 @@ describe('`refuseIfRunIncomplete` (ADR 023 tier 2, unit-level)', () => {
       advisories: complete ? [] : [{ kind: 'missing-dependencies', message: 'deps missing' }],
       scannedAt: Date.now(),
       ungroundedComponents: [],
-      skippedNestedCheckouts: [],
+      blindSpots: [],
+      observedFiles: { source: new Set(), manifest: new Set() },
     };
   }
 

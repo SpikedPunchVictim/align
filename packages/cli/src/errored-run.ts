@@ -70,7 +70,7 @@ export function refuseIfRunErrored(command: string, run: CheckRun, refusal: stri
  * `atRiskCount` is supplied by the caller rather than recomputed here because the two current call
  * sites (`baselinePrune` and `reconcilePrune`'s preview of it) already have to compute it to do
  * their own work — and it is NOT simply `store.prune`'s `removed.length`: both derive it as the
- * `forfeited` half of `partitionSkippedCheckoutCandidates`, since an entry retention writes straight
+ * `forfeited` half of `partitionBlindSpotCandidates`, since an entry retention writes straight
  * back was never at risk of deletion (verified 2026-08-13, when the preview still used the raw
  * `removed.length` and refused over entries the mutation would have retained); this
  * function stays a pure decision (`CheckRun` × count × flag → refuse or not) rather than reaching

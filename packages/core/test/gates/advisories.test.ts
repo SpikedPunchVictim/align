@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   areAdvisoriesComplete,
   buildBaselineGrowthAdvisories,
-  buildSkippedNestedCheckoutAdvisories,
+  buildScanBlindSpotAdvisories,
   buildUncertaintyAdvisories,
   isRunComplete,
 } from '../../src/gates/advisories.js';
@@ -10,7 +10,7 @@ import { computeFingerprint } from '../../src/baseline/fingerprint.js';
 import { toComponentName, toRepoRelativePath, toRuleId } from '../../src/types/branded.js';
 import type { BaselineEntry } from '../../src/baseline/store.js';
 import type { CheckRun } from '../../src/gates/types.js';
-import type { UncertaintyMarker } from '../../src/types/graph.js';
+import type { ScanBlindSpot, UncertaintyMarker } from '../../src/types/graph.js';
 import type { Violation } from '../../src/types/violation.js';
 
 function marker(specifier: string, reason: UncertaintyMarker['reason']): UncertaintyMarker {
@@ -205,19 +205,20 @@ describe('areAdvisoriesComplete', () => {
   });
 });
 
-// Task #25: the load-bearing "never silent" half of auto-excluding nested git checkouts — every
-// skipped checkout must be named, not just counted, so a human/agent can correlate it with an
-// empty component instead of the skip reading as an ordinary, unremarkable empty directory.
-describe('buildSkippedNestedCheckoutAdvisories', () => {
+// ADR 027's "never silent" half, generalized by ADR 028: a skipped path must be NAMED, not just
+// counted, so a human/agent can correlate it with an empty component instead of the skip reading as
+// an ordinary, unremarkable empty directory.
+describe('buildScanBlindSpotAdvisories', () => {
+  function spot(path: string, reason: ScanBlindSpot['reason'] = { kind: 'nested-checkout' }): ScanBlindSpot {
+    return { path: toRepoRelativePath(path), reason };
+  }
+
   it('returns no advisory when nothing was skipped', () => {
-    expect(buildSkippedNestedCheckoutAdvisories([])).toEqual([]);
+    expect(buildScanBlindSpotAdvisories([])).toEqual([]);
   });
 
-  it('names every skipped path, sorted, in one advisory', () => {
-    const advisories = buildSkippedNestedCheckoutAdvisories([
-      toRepoRelativePath('vendor/b-checkout'),
-      toRepoRelativePath('vendor/a-checkout'),
-    ]);
+  it('names every skipped checkout, sorted, in one advisory', () => {
+    const advisories = buildScanBlindSpotAdvisories([spot('vendor/b-checkout'), spot('vendor/a-checkout')]);
     expect(advisories).toHaveLength(1);
     expect(advisories[0]?.kind).toBe('nested-checkout-skipped');
     expect(advisories[0]?.message).toContain('vendor/a-checkout');
@@ -225,6 +226,54 @@ describe('buildSkippedNestedCheckoutAdvisories', () => {
     // Sorted, not insertion order — so the message is deterministic across scans.
     expect(advisories[0]?.message.indexOf('vendor/a-checkout')).toBeLessThan(advisories[0]?.message.indexOf('vendor/b-checkout') ?? -1);
     expect(advisories[0]?.message).toContain('includeNestedCheckouts');
+  });
+
+  it('reports unreadable directories and symlinks under their own kind, each naming its reason', () => {
+    const advisories = buildScanBlindSpotAdvisories([
+      spot('src/locked', { kind: 'unreadable', error: 'EACCES: permission denied' }),
+      spot('src/vendored', { kind: 'not-regular-file' }),
+    ]);
+    expect(advisories.map((a) => a.kind)).toEqual(['scan-blind-spot', 'scan-blind-spot']);
+    const unreadable = advisories.find((a) => a.message.includes('src/locked'));
+    // The per-path detail rides the PATH, not the group header — an `unreadable` group can hold
+    // several directories with different errors, and one standing in for all of them would be a
+    // fabricated attribution.
+    expect(unreadable?.message).toContain('EACCES: permission denied');
+    expect(unreadable?.message).toContain('could not be read');
+    const symlink = advisories.find((a) => a.message.includes('src/vendored'));
+    expect(symlink?.message).toContain('symlink');
+  });
+
+  it('gives each unreadable directory its OWN error rather than borrowing the first', () => {
+    const advisories = buildScanBlindSpotAdvisories([
+      spot('a', { kind: 'unreadable', error: 'EACCES: permission denied' }),
+      spot('b', { kind: 'unreadable', error: 'ENOTDIR: not a directory' }),
+    ]);
+    expect(advisories).toHaveLength(1);
+    expect(advisories[0]?.message).toContain('a (EACCES: permission denied)');
+    expect(advisories[0]?.message).toContain('b (ENOTDIR: not a directory)');
+  });
+
+  // The RECORD is complete; the ADVISORY is selective. `node_modules`/`dist` and user-authored
+  // `excludes` fire on essentially every scan of every repo and name nothing the user did not
+  // already decide, so an advisory for them is the reliable way to train a human to stop reading
+  // advisories. Retention still protects entries under them — that is the record's job, and
+  // `prune`/`init` still print the reason at the moment an entry is actually retained.
+  it('does NOT report excludes or always-excluded directory names — measured 143 of 200 blind spots in this repo', () => {
+    const advisories = buildScanBlindSpotAdvisories([
+      spot('node_modules', { kind: 'default-excluded-dir', name: 'node_modules' }),
+      spot('packages/cli/dist', { kind: 'default-excluded-dir', name: 'dist' }),
+      spot('test-apps/n8n', { kind: 'excluded', pattern: 'test-apps/**' }),
+    ]);
+    expect(advisories).toEqual([]);
+  });
+
+  it('caps the named paths and reports the remainder as `+N more`', () => {
+    const advisories = buildScanBlindSpotAdvisories(
+      Array.from({ length: 9 }, (_, i) => spot(`vendor/c${i}`)),
+    );
+    expect(advisories[0]?.message).toContain('9 nested git checkout(s)');
+    expect(advisories[0]?.message).toContain('+4 more');
   });
 });
 
@@ -240,7 +289,8 @@ describe('isRunComplete', () => {
       advisories,
       scannedAt: Date.now(),
       ungroundedComponents: [],
-      skippedNestedCheckouts: [],
+      blindSpots: [],
+      observedFiles: { source: new Set(), manifest: new Set() },
     };
   }
 

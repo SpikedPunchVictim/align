@@ -9,6 +9,7 @@ import {
 } from '../src/components/registry.js';
 import { toComponentName, toRepoRelativePath } from '../src/types/branded.js';
 import type { ComponentDefinitionIR, EmptyPolicy } from '../src/types/ir.js';
+import { blindSpot } from './helpers.js';
 
 const glob = (patterns: string[], empty: EmptyPolicy = 'fail'): ComponentDefinitionIR => ({
   name: '',
@@ -158,15 +159,36 @@ describe('validateComponents (selector-based, TypeScript scanner-facing)', () =>
   it('names a skipped nested checkout as the likely cause instead of the generic "renamed/moved/stale" message', () => {
     const components = { [toComponentName('vendor')]: glob(['vendor/submodule/**']) };
     try {
-      validateComponents(components, [toRepoRelativePath('a.ts')], new Map(), [toRepoRelativePath('vendor/submodule')]);
+      validateComponents(components, [toRepoRelativePath('a.ts')], new Map(), [blindSpot('vendor/submodule')]);
       expect.fail('expected throw');
     } catch (err) {
       expect(err).toBeInstanceOf(ComponentValidationError);
       const message = (err as ComponentValidationError).message;
       expect(message).toContain('vendor/submodule');
-      expect(message).toContain('auto-excluded from this scan');
+      expect(message).toContain('nested git checkout');
+      expect(message).toContain('this scan did not look at');
       expect(message).toContain('includeNestedCheckouts');
       expect(message).not.toContain('renamed/moved');
+    }
+  });
+
+  // Found by the ADR 028 Stage 1 review. `blindSpotsMatchingSelector` counts EVERY blind spot as a
+  // likely cause for a selector with no literal anchor (`**` has an empty static prefix, so it could
+  // match anywhere), and a real repo records hundreds — 200 measured on align's own tree. Uncapped,
+  // this one component's zero-match error carried the entire scan-scope record as prose.
+  it('caps the named blind spots in the thrown message rather than joining all of them', () => {
+    // `**/*.generated.ts` matches no file here, and `staticPrefixOf` gives it an EMPTY literal
+    // anchor — which is what makes every blind spot count as a likely cause.
+    const components = { [toComponentName('generated')]: glob(['**/*.generated.ts']) };
+    const many = Array.from({ length: 12 }, (_, i) => blindSpot(`vendor/c${String(i).padStart(2, '0')}`));
+    try {
+      validateComponents(components, [toRepoRelativePath('a.ts')], new Map(), many);
+      expect.fail('expected throw');
+    } catch (err) {
+      const message = (err as ComponentValidationError).message;
+      expect(message).toContain('vendor/c00');
+      expect(message).toContain('+7 more');
+      expect(message).not.toContain('vendor/c11');
     }
   });
 
@@ -177,13 +199,13 @@ describe('validateComponents (selector-based, TypeScript scanner-facing)', () =>
     // static-prefix-containment test is what catches it instead.
     const components = { [toComponentName('vendored')]: glob(['vendored/repo/src/**']) };
     try {
-      validateComponents(components, [toRepoRelativePath('a.ts')], new Map(), [toRepoRelativePath('vendored/repo')]);
+      validateComponents(components, [toRepoRelativePath('a.ts')], new Map(), [blindSpot('vendored/repo')]);
       expect.fail('expected throw');
     } catch (err) {
       expect(err).toBeInstanceOf(ComponentValidationError);
       const message = (err as ComponentValidationError).message;
       expect(message).toContain('vendored/repo');
-      expect(message).toContain('auto-excluded from this scan');
+      expect(message).toContain('this scan did not look at');
       expect(message).not.toContain('renamed/moved');
     }
   });

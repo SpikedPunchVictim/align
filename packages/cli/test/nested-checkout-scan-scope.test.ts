@@ -220,8 +220,8 @@ describe(
  * A plain repo with ONE ordinary source file plus a nested git checkout that is NEVER opted back
  * in (`includeNestedCheckouts` is simply absent) — permanently auto-excluded, every scan, task #25's
  * default behaviour. Nothing inside the checkout needs to be a real violation, or even parse: the
- * retention decision (`nested-checkout-retention.ts`) is keyed purely on a baseline entry's `file`
- * falling under one of `run.skippedNestedCheckouts`, never on the fingerprint being "real" — the
+ * retention decision (`scan-blind-spot-retention.ts`) is keyed purely on a baseline entry's `file`
+ * falling under one of `run.blindSpots`, never on the fingerprint being "real" — the
  * same reason `write-set-baseline.test.ts`/`errored-run-mutations.test.ts` seed opaque fingerprints
  * like `'stale-1'` directly rather than deriving them from an actual scan.
  */

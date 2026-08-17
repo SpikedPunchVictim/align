@@ -16,7 +16,7 @@ import { ensureAlignDir, readBaseline, writeBaseline } from '../src/align-dir.js
  *
  * Review 2026-08-13 found it had drifted. The preview used `store.prune(...).removed.length`, while
  * `baselinePrune` recovers the removed entries from its pre-prune snapshot, runs
- * `partitionSkippedCheckoutCandidates` over them, and uses `forfeited.length` for both its report
+ * `partitionBlindSpotCandidates` over them, and uses `forfeited.length` for both its report
  * and its own tier-2 guard. The preview therefore over-counted by exactly the RETAINED entries —
  * the ones whose file lives inside a nested checkout the scan auto-excluded (task #25), which
  * retention writes straight back and never deletes.

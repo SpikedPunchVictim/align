@@ -1,7 +1,8 @@
 import type { RepoRelativePath, RuleId, ViolationId } from '../types/branded.js';
+import type { ScanBlindSpot } from '../types/graph.js';
 import type { Violation } from '../types/violation.js';
 import { computeContentFingerprint } from './fingerprint.js';
-import { isUnderSkippedCheckout } from './skipped-checkouts.js';
+import { isUnderBlindSpot } from './scan-blind-spots.js';
 
 export interface BaselineEntry {
   readonly fingerprint: ViolationId; // snippet-hash, not line-based (ADR 006)
@@ -40,18 +41,20 @@ export interface BaselineStore {
    * MUST derive it from the scan's own file list, never from `currentViolations` (a fixed file has
    * no violations, so deriving from violations would make every fixed file look deleted).
    *
-   * `skippedNestedCheckouts` (task #25 forged-transfer fix, F1): repo-relative paths a scan
-   * auto-excluded because they carry their own `.git`. An entry whose file lives under one of these
-   * is treated as "still known" the same as if it were literally in `knownFiles` — see
-   * `reconcileMoves`'s doc comment below for why. REQUIRED on this interface (review 2026-08-13): it
-   * was optional, and one of the two production call sites that could omit it did — `runSecurityGate`
-   * (`orchestrator.ts`) called `reconcileMoves` with two arguments, silently reinstating the pre-fix
-   * behaviour with no type error. A caller with genuinely nothing to pass now states that by passing
-   * `[]`, which is a visible, reviewable decision rather than an invisible default. */
+   * `blindSpots` (ADR 028, generalizing ADR 027's F1 forged-transfer fix): every path THIS scan
+   * declined to look at, with its reason — an auto-excluded nested checkout, an `excludes` match, a
+   * `node_modules`-class directory name, an unreadable directory, a symlink. An entry whose file
+   * lives at or under one of these is treated as "still known" the same as if it were literally in
+   * `knownFiles` — see `reconcileMoves`'s doc comment below for why. REQUIRED on this interface
+   * (review 2026-08-13): it was optional, and one of the two production call sites that could omit
+   * it did — `runSecurityGate` (`orchestrator.ts`) called `reconcileMoves` with two arguments,
+   * silently reinstating the pre-fix behaviour with no type error. A caller with genuinely nothing
+   * to pass now states that by passing `[]`, which is a visible, reviewable decision rather than an
+   * invisible default. */
   prune(
     currentViolations: readonly Violation[],
     knownFiles: ReadonlySet<RepoRelativePath>,
-    skippedNestedCheckouts: readonly RepoRelativePath[],
+    blindSpots: readonly ScanBlindSpot[],
   ): PruneResult;
   /** Move-transfer only (ADR 006): for every baseline entry whose structural fingerprint is no
    * longer present in `currentViolations` AND whose recorded `file` is no longer in `knownFiles`
@@ -68,21 +71,23 @@ export interface BaselineStore {
    * `security` gate has no graph, only a `ManifestInventory`, ADR 013). Callers MUST derive it from
    * the scan's own file list, never from `currentViolations` (see `prune`'s doc comment above).
    *
-   * `skippedNestedCheckouts` (task #25 forged-transfer fix, F1, bug hunt/review 2026-08-12):
-   * task #25's nested-checkout auto-exclusion drops a file from `knownFiles` the same way a real
-   * rename does, but for an unrelated reason — the file didn't move, the scan simply couldn't see
-   * it. Without this, that absence alone satisfied FRAGILE #7's "orphan's own file is gone" test, so
-   * a checkout-resident entry whose `contentFingerprint` happened to collide with a live,
-   * never-accepted violation elsewhere (the expected case for a vendored copy of the same code) was
-   * silently classified as "moved" — forging the entry's `acceptedAt`/`acceptedBy` onto a violation
-   * nobody ever reviewed. Treating a file under one of these paths as "still known" routes it to
-   * `unmatchedOrphans` instead (the exact arm `prune`'s skipped-checkout retention already
-   * protects), never to a content-fingerprint search. REQUIRED — see `prune`'s note above for why
-   * the optional version was itself the defect-propagation hazard. */
+   * `blindSpots` (ADR 028, generalizing ADR 027's F1 fix): a path the walk declined to look at
+   * drops its files from `knownFiles` the same way a real rename does, but for an unrelated reason —
+   * the file didn't move, the scan simply couldn't see it. Without this, that absence alone
+   * satisfies FRAGILE #7's "orphan's own file is gone" test, so an unobserved entry whose
+   * `contentFingerprint` happens to collide with a live, never-accepted violation elsewhere (the
+   * expected case for a vendored copy of the same code, or for a file re-added under a different
+   * path) is silently classified as "moved" — forging the entry's `acceptedAt`/`acceptedBy` onto a
+   * violation nobody ever reviewed and turning `align check` green. THIS IS THE ARM THAT RUNS ON
+   * EVERY `align check`: no destructive command, no flag, no completeness gate stands in front of
+   * it. Treating a file under a blind spot as "still known" routes it to `unmatchedOrphans` instead
+   * (the exact arm `prune`'s retention already protects), never to a content-fingerprint search.
+   * REQUIRED — see `prune`'s note above for why the optional version was itself the
+   * defect-propagation hazard. */
   reconcileMoves(
     currentViolations: readonly Violation[],
     knownFiles: ReadonlySet<RepoRelativePath>,
-    skippedNestedCheckouts: readonly RepoRelativePath[],
+    blindSpots: readonly ScanBlindSpot[],
   ): readonly { readonly from: ViolationId; readonly to: ViolationId }[];
   show(filter?: { readonly ruleId?: RuleId }): readonly BaselineEntry[];
   /** Not part of docs/core-interfaces.md's contract — the CLI's persistence boundary needs a
@@ -164,23 +169,23 @@ export class InMemoryBaselineStore implements BaselineStore {
   // INTERFACE declares the parameter required (see its doc comments): a default satisfies a required
   // interface parameter, which keeps the two-argument calls in `core/test/baseline.test.ts` (which
   // construct this class directly) compiling. The residual this deliberately leaves: a caller
-  // holding the concrete class rather than `BaselineStore` can still omit it. Verified 2026-08-13 —
+  // holding the concrete class rather than `BaselineStore` can still omit it. Verified 2026-08-16 —
   // no production code does; the only two `.prune(...)` call sites (`commands/baseline.ts`,
-  // `commands/upgrade.ts`) are class-typed and both pass the paths explicitly.
+  // `commands/upgrade.ts`) are class-typed and both pass the blind spots explicitly.
   reconcileMoves(
     currentViolations: readonly Violation[],
     knownFiles: ReadonlySet<RepoRelativePath>,
-    skippedNestedCheckouts: readonly RepoRelativePath[] = [],
+    blindSpots: readonly ScanBlindSpot[] = [],
   ): readonly { readonly from: ViolationId; readonly to: ViolationId }[] {
-    return this.applyMoves(currentViolations, knownFiles, skippedNestedCheckouts).moved;
+    return this.applyMoves(currentViolations, knownFiles, blindSpots).moved;
   }
 
   prune(
     currentViolations: readonly Violation[],
     knownFiles: ReadonlySet<RepoRelativePath>,
-    skippedNestedCheckouts: readonly RepoRelativePath[] = [],
+    blindSpots: readonly ScanBlindSpot[] = [],
   ): PruneResult {
-    const { moved, unmatchedOrphans } = this.applyMoves(currentViolations, knownFiles, skippedNestedCheckouts);
+    const { moved, unmatchedOrphans } = this.applyMoves(currentViolations, knownFiles, blindSpots);
     for (const fingerprint of unmatchedOrphans) this.entries.delete(fingerprint);
     return { removed: unmatchedOrphans, moved };
   }
@@ -193,7 +198,7 @@ export class InMemoryBaselineStore implements BaselineStore {
   private applyMoves(
     currentViolations: readonly Violation[],
     knownFiles: ReadonlySet<RepoRelativePath>,
-    skippedNestedCheckouts: readonly RepoRelativePath[] = [],
+    blindSpots: readonly ScanBlindSpot[] = [],
   ): MoveResult {
     const currentIds = new Set(currentViolations.map((v) => v.id));
     const orphaned = [...this.entries.values()].filter((e) => !currentIds.has(e.fingerprint));
@@ -219,17 +224,19 @@ export class InMemoryBaselineStore implements BaselineStore {
       // identical-looking violation elsewhere is a genuinely new violation, not a move, even if the
       // content fingerprint collides. This check runs before any content-match lookup.
       //
-      // F1 (task #25 forged-transfer fix, review 2026-08-12): a file under `skippedNestedCheckouts`
-      // is ALSO treated as "still known" here, even though it's absent from `knownFiles` — the scan
-      // didn't observe it because it auto-excluded the checkout, not because the file moved. Without
-      // this, an entry like a vendored submodule's copy of some code — same ruleId, identical
-      // trimmed import line as a live, never-accepted violation elsewhere, the expected case for a
-      // vendored copy — got misclassified as "moved," forging its acceptedAt/acceptedBy onto a
-      // violation nobody reviewed. Folding it into this same branch routes it to `unmatchedOrphans`,
-      // the exact arm `baseline prune`'s skipped-checkout retention (`nested-checkout-retention.ts`)
-      // already protects from deletion — so this fix composes with that retention instead of needing
-      // a second mechanism.
-      if (knownFiles.has(entry.file) || isUnderSkippedCheckout(entry.file, skippedNestedCheckouts)) {
+      // ADR 028 (generalizing ADR 027's F1 fix, review 2026-08-12): a file under ANY recorded blind
+      // spot is ALSO treated as "still known" here, even though it's absent from `knownFiles` — the
+      // scan didn't observe it because it declined to look there (auto-excluded checkout, `excludes`
+      // match, `node_modules`-class name, unreadable directory, symlink), not because the file
+      // moved. Without this, an entry whose trimmed line matches a live, never-accepted violation
+      // elsewhere — the expected case for a vendored copy of the same code — gets misclassified as
+      // "moved," forging its acceptedAt/acceptedBy onto a violation nobody reviewed. ADR 027 closed
+      // this for the checkout reason only; ADR 028 measured five more, two of them reproduced
+      // against the built binary. Folding them into this same branch routes the entry to
+      // `unmatchedOrphans`, the exact arm `baseline prune`'s retention
+      // (`cli/src/scan-blind-spot-retention.ts`) already protects from deletion — so this composes
+      // with that retention instead of needing a second mechanism.
+      if (knownFiles.has(entry.file) || isUnderBlindSpot(entry.file, blindSpots)) {
         unmatchedOrphans.push(entry.fingerprint);
         continue;
       }

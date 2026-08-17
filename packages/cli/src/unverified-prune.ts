@@ -27,8 +27,9 @@
  * which is how an entry could regress into this shape without anyone touching the baseline by hand.
  *
  * WHY REPORT RATHER THAN RETAIN. Retention is the right instrument when the condition is
- * recoverable — `nested-checkout-retention.ts` retains checkout-resident entries because opting
- * the checkout back in makes them live again. There is no equivalent exit here: nothing restores a
+ * recoverable — `scan-blind-spot-retention.ts` retains entries under a scan blind spot because the
+ * scan can be made to see those paths again (opting a checkout back in, fixing permissions, widening
+ * `excludes`). There is no equivalent exit here: nothing restores a
  * `contentFingerprint` to an entry whose violation the scan can no longer see, so retaining these
  * would accumulate un-prunable entries forever and quietly break prune for init-onboarded repos.
  * The deletion is very likely correct; what was wrong was calling it verified.
@@ -36,7 +37,7 @@
 import type { RepoRelativePath } from '@spikedpunch/align-core';
 
 /** The subset of a baseline entry this module needs. Structural, like
- * `partitionSkippedCheckoutCandidates`'s, so callers pass their own entry type unchanged. */
+ * `partitionBlindSpotCandidates`'s, so callers pass their own entry type unchanged. */
 export interface PruneVerifiabilityCandidate {
   readonly file: RepoRelativePath;
   readonly contentFingerprint?: string;

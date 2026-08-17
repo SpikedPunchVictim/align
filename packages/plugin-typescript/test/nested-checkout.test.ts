@@ -3,8 +3,17 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { toComponentName } from '@spikedpunch/align-core';
-import type { ComponentDefinitionIR } from '@spikedpunch/align-core';
+import type { ComponentDefinitionIR, ScanBlindSpot } from '@spikedpunch/align-core';
 import { TypeScriptScanner } from '../src/scanner.js';
+
+// ADR 028 replaced `graph.skippedNestedCheckouts` with `graph.blindSpots`, a discriminated record
+// covering six reasons rather than one. Every assertion below narrows to the `nested-checkout`
+// reason so these tests keep pinning EXACTLY the fact they were written for — a plain
+// `blindSpots.toHaveLength(0)` would now be a weaker, differently-scoped claim, since every real
+// repo records `.git`/`node_modules`/`dist` blind spots too.
+function checkoutPaths(graph: { readonly blindSpots: readonly ScanBlindSpot[] }): readonly string[] {
+  return graph.blindSpots.filter((s) => s.reason.kind === 'nested-checkout').map((s) => s.path);
+}
 
 // Task #25: a nested git checkout (a `git worktree`, a submodule, a vendored clone — anything
 // carrying its own `.git`, directory or file) is auto-excluded from the scan and reported, never
@@ -43,7 +52,7 @@ describe('TypeScriptScanner — nested git checkouts are auto-excluded (task #25
 
     expect(graph.nodes.map((n) => n.file)).toContain('root.ts');
     expect(graph.nodes.map((n) => n.file)).not.toContain('vendor/some-lib/index.ts');
-    expect(graph.skippedNestedCheckouts).toContain('vendor/some-lib');
+    expect(checkoutPaths(graph)).toContain('vendor/some-lib');
   });
 
   it('skips a nested checkout whose `.git` is a FILE (a linked `git worktree`)', async () => {
@@ -59,7 +68,7 @@ describe('TypeScriptScanner — nested git checkouts are auto-excluded (task #25
 
     expect(graph.nodes.map((n) => n.file)).toContain('root.ts');
     expect(graph.nodes.map((n) => n.file)).not.toContain('.claude/worktrees/wt-25/fixture.ts');
-    expect(graph.skippedNestedCheckouts).toContain('.claude/worktrees/wt-25');
+    expect(checkoutPaths(graph)).toContain('.claude/worktrees/wt-25');
   });
 
   it('never skips the scan root itself, even though it has its own `.git`', async () => {
@@ -67,10 +76,10 @@ describe('TypeScriptScanner — nested git checkouts are auto-excluded (task #25
     const graph = await scanner.scan({ rootDir: dir, components: allComponent(), excludes: [] });
 
     expect(graph.nodes.map((n) => n.file)).toContain('root.ts');
-    expect(graph.skippedNestedCheckouts).toHaveLength(0);
+    expect(checkoutPaths(graph)).toHaveLength(0);
   });
 
-  it('reports every skipped checkout, sorted, in `skippedNestedCheckouts` — never silent', async () => {
+  it('reports every skipped checkout, sorted, in `blindSpots` — never silent', async () => {
     fs.mkdirSync(path.join(dir, 'b-checkout', '.git'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'b-checkout', 'x.ts'), 'export const x = 1;\n');
     fs.mkdirSync(path.join(dir, 'a-checkout', '.git'), { recursive: true });
@@ -79,7 +88,7 @@ describe('TypeScriptScanner — nested git checkouts are auto-excluded (task #25
     const scanner = new TypeScriptScanner();
     const graph = await scanner.scan({ rootDir: dir, components: allComponent(), excludes: [] });
 
-    expect(graph.skippedNestedCheckouts).toEqual(['a-checkout', 'b-checkout']);
+    expect(checkoutPaths(graph)).toEqual(['a-checkout', 'b-checkout']);
   });
 
   it('the opt-out (`includeNestedCheckouts`) re-includes a checkout a human declared genuinely part of the project', async () => {
@@ -96,7 +105,7 @@ describe('TypeScriptScanner — nested git checkouts are auto-excluded (task #25
     });
 
     expect(graph.nodes.map((n) => n.file)).toContain('vendor/submodule/index.ts');
-    expect(graph.skippedNestedCheckouts).toHaveLength(0);
+    expect(checkoutPaths(graph)).toHaveLength(0);
   });
 
   it('an opted-in checkout still respects ordinary `excludes` inside it (opt-out is not a bypass of every other rule)', async () => {

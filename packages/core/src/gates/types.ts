@@ -1,4 +1,5 @@
 import type { RepoRelativePath, RuleId } from '../types/branded.js';
+import type { ScanBlindSpot } from '../types/graph.js';
 import type { UngroundedComponent } from '../components/registry.js';
 import { CATEGORIES, type Violation } from '../types/violation.js';
 
@@ -42,21 +43,35 @@ export interface CheckRun {
    * Always `[]` when the architecture gate didn't fully evaluate (parse/guard-step `error`) — there
    * is no trustworthy classification to report yet. */
   readonly ungroundedComponents: readonly UngroundedComponent[];
-  /** Task #25 (auto-exclude nested git checkouts) baseline-prune review fix: repo-relative paths of
-   * directories THIS scan skipped because they carry their own `.git` (a worktree/submodule/
-   * vendored clone) and were not opted back in via `includeNestedCheckouts` — the same fact
-   * `graph.skippedNestedCheckouts` records and `buildSkippedNestedCheckoutAdvisories` renders as
-   * prose, now ALSO on the run itself as structured data. This exists so a destructive consumer
-   * (`align baseline prune`, `align init`) can test "is this orphaned entry's file inside a path
-   * this scan couldn't see" directly, instead of parsing the advisory's message string (fragile —
-   * explicitly rejected) — a baseline entry whose file lives there is unobservable this scan, not
-   * fixed, and must never be silently deleted alongside a genuinely-fixed one.
+  /** ADR 028, generalizing task #25's `skippedNestedCheckouts`: every path THIS scan declined to
+   * look at, with its reason — the same fact `graph.blindSpots` records and the advisories render
+   * as prose, on the run itself as structured data. A destructive consumer (`align baseline prune`,
+   * `align init`) tests "is this orphaned entry's file somewhere this scan couldn't see" directly
+   * rather than parsing an advisory message (fragile — explicitly rejected by ADR 027). An entry
+   * under a blind spot is unobservable this scan, not fixed, and must never be deleted alongside a
+   * genuinely-fixed one.
    *
    * Same doc-comment discipline as `ungroundedComponents` above, and the same reasoning: always
    * `[]` when the architecture gate didn't fully evaluate (parse/guard-step `error`) — there is no
    * trustworthy run to report scan scope for yet. This costs nothing in practice: every destructive
-   * consumer of this field is already required to call `refuseIfRunErrored` before it would ever
-   * look at `skippedNestedCheckouts` (ADR 023 tier 1), so an errored run never reaches the code that
-   * would read it. */
-  readonly skippedNestedCheckouts: readonly RepoRelativePath[];
+   * consumer is already required to call `refuseIfRunErrored` before it would look at this field
+   * (ADR 023 tier 1), so an errored run never reaches the code that would read it. */
+  readonly blindSpots: readonly ScanBlindSpot[];
+  /** The files this run actually observed, per scan domain (ADR 028 §5).
+   *
+   * This is what lets `orchestrator.knownFiles()` be deleted: that method existed only because
+   * `CheckRun` did not carry the graph, so `align baseline prune` had to run a SECOND full scan to
+   * recover the file set — two independent walks whose results were assumed to agree.
+   *
+   * The two domains are deliberately NOT merged. `check` evaluates them per-gate (the architecture
+   * gate over `graph.nodes`, the security gate over `inventory.manifests`), and the deleted
+   * `knownFiles()` unioned them — so `prune` reasoned over a set `check` never used. Merging also
+   * mis-classifies: `.json` is an asset extension to the source walker but a first-class file to the
+   * manifest walker, so a `package.json` judged by the wrong domain's vocabulary reads as absent.
+   *
+   * Empty sets when the corresponding gate didn't evaluate — same discipline as the fields above. */
+  readonly observedFiles: {
+    readonly source: ReadonlySet<RepoRelativePath>;
+    readonly manifest: ReadonlySet<RepoRelativePath>;
+  };
 }

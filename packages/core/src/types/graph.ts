@@ -88,6 +88,46 @@ export interface UncertaintyMarker {
   readonly reason: UncertaintyReason;
 }
 
+/**
+ * Why the walk did not look at a path (ADR 028). Every variant is a way a file that physically
+ * exists is absent from `DependencyGraph.nodes` — which consumers of absence (`applyMoves` infers
+ * "renamed", `store.prune` infers "fixed", `validateComponents` infers "empty component") would
+ * otherwise read as "deleted from the repository".
+ *
+ * A discriminated union rather than a bare string so a new blind spot cannot be added without the
+ * `never` arms in its consumers failing to compile — ADR 027's lesson that changing what a scan
+ * sees is never local to scanning, enforced instead of documented.
+ */
+export type ScanBlindSpotReason =
+  /** Carries its own `.git` — worktree, submodule, vendored clone (ADR 027). Opted back in via
+   * `includeNestedCheckouts`. */
+  | { readonly kind: 'nested-checkout' }
+  /** Matched a config `excludes` pattern, which is recorded so the advisory can name the pattern
+   * responsible rather than leaving the user to guess which one hid the path. */
+  | { readonly kind: 'excluded'; readonly pattern: string }
+  /** Matched `DEFAULT_EXCLUDED_DIR_NAMES` (`node_modules`, `dist`, …) at any depth. Latent across
+   * versions: the set has grown, and an entry accepted under an older align can fall behind a name
+   * added later. */
+  | { readonly kind: 'default-excluded-dir'; readonly name: string }
+  /** `readdirSync` threw — permissions, or a directory racing deletion mid-walk. Silent before
+   * ADR 028, and one of the two reproduced severity-zeros. */
+  | { readonly kind: 'unreadable'; readonly error: string }
+  /** Neither a regular file nor a directory: symlink, FIFO, socket. `readdirSync(…, {
+   * withFileTypes: true })` does not follow links, so `isDirectory()` and `isFile()` are BOTH false
+   * for a symlink and it matches neither branch of the walk — an entire symlinked subtree vanishes
+   * with no record. Reproduced against the built scanner; see ADR 028. */
+  | { readonly kind: 'not-regular-file' };
+
+/**
+ * One path the walk declined to enumerate, and why. Matching against a baseline entry is
+ * at-or-under `path` (a directory blind spot covers everything beneath it), through the single
+ * containment test in `baseline/scan-blind-spots.ts` — never re-implemented per consumer.
+ */
+export interface ScanBlindSpot {
+  readonly path: RepoRelativePath;
+  readonly reason: ScanBlindSpotReason;
+}
+
 export interface DependencyGraph {
   readonly nodes: readonly DependencyGraphNode[];
   readonly edges: readonly DependencyGraphEdge[];
@@ -97,12 +137,17 @@ export interface DependencyGraph {
   readonly externalNodes: readonly ExternalPackageNode[];
   readonly externalEdges: readonly ExternalDependencyEdge[];
   readonly uncertain: readonly UncertaintyMarker[];
-  // Task #25 (auto-exclude nested git checkouts): repo-relative paths of directories the walk
-  // skipped because they contain their own `.git` (a worktree/submodule/vendored clone) and are
-  // not the scan root itself. A SEPARATE array from `uncertain` (not another `UncertaintyReason`)
-  // because these are whole skipped subtrees, not per-specifier markers — deliberately visible
-  // (never silent) so a component whose files all lived under one of these paths doesn't read as
-  // an ordinary empty component; see `gates/advisories.ts`'s `buildSkippedNestedCheckoutAdvisories`.
-  readonly skippedNestedCheckouts: readonly RepoRelativePath[];
+  // ADR 028: every path this walk declined to look at, with the reason. Generalizes task #25's
+  // `skippedNestedCheckouts` (now the `nested-checkout` variant) to the other five ways a present
+  // file is absent from `nodes` — three of which were unknown when ADR 027 was written.
+  //
+  // A SEPARATE array from `uncertain` (not another `UncertaintyReason`) for the reason ADR 027
+  // gives: these are whole skipped subtrees, not per-specifier markers, and folding them in would
+  // hide a scan-scope fact among hundreds of unresolved-import markers.
+  //
+  // Required, never optional — ADR 027 records this release's own counter-example, where the
+  // optional form of the identical parameter let a production call site silently keep pre-fix
+  // behaviour with no type error.
+  readonly blindSpots: readonly ScanBlindSpot[];
   readonly scannedAt: number; // epoch ms — the freshness proof underlying ADR 005
 }

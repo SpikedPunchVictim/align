@@ -7,6 +7,7 @@ import type {
   EdgeKind,
   ExternalDependencyEdge,
   ExternalPackageNode,
+  ScanBlindSpot,
   UncertaintyMarker,
   UncertaintyReason,
 } from '../src/types/graph.js';
@@ -78,7 +79,7 @@ export function graph(
     readonly nodes?: ExternalPackageNode[];
     readonly edges?: ExternalDependencyEdge[];
     readonly uncertain?: UncertaintyMarker[];
-    readonly skippedNestedCheckouts?: readonly RepoRelativePath[];
+    readonly blindSpots?: readonly ScanBlindSpot[];
   } = {},
 ): DependencyGraph {
   return {
@@ -87,7 +88,14 @@ export function graph(
     externalNodes: external.nodes ?? [],
     externalEdges: external.edges ?? [],
     uncertain: external.uncertain ?? [],
-    skippedNestedCheckouts: external.skippedNestedCheckouts ?? [],
+    blindSpots: external.blindSpots ?? [],
     scannedAt: Date.now(),
   };
+}
+
+/** A `ScanBlindSpot` for tests. Defaults to the `nested-checkout` reason because that is the
+ * variant every pre-ADR-028 test was written against (they passed bare paths), so re-pointing them
+ * onto this helper keeps them testing the SAME fact rather than a weaker one. */
+export function blindSpot(path: string, reason: ScanBlindSpot['reason'] = { kind: 'nested-checkout' }): ScanBlindSpot {
+  return { path: toRepoRelativePath(path), reason };
 }

@@ -4,7 +4,7 @@ import { InMemoryBaselineStore } from '../src/baseline/store.js';
 import { StaticPluginRegistry, type LanguagePlugin } from '../src/plugin/registry.js';
 import { defineProject } from '../src/dsl/index.js';
 import type { HostPredicate } from '../src/rules/host-rules.js';
-import { edge, graph, node } from './helpers.js';
+import { blindSpot, edge, graph, node } from './helpers.js';
 import type { ScanInput } from '../src/scanner.js';
 import { toRepoRelativePath } from '../src/types/branded.js';
 import type { ManifestInventory, ManifestScanner } from '../src/types/manifest.js';
@@ -493,7 +493,7 @@ describe('GateOrchestrator', () => {
       const registry = new StaticPluginRegistry([
         fakePlugin(() =>
           graph([node('application/api/a.ts', 'api')], [], {
-            skippedNestedCheckouts: [toRepoRelativePath('vendor/submodule')],
+            blindSpots: [blindSpot('vendor/submodule')],
           }),
         ),
       ]);
