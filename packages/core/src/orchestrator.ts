@@ -339,6 +339,19 @@ export class GateOrchestrator {
     // precisely the case FRAGILE #7's move-rescue exists to handle, so passing the architecture
     // gate's blind spots here would suppress a legitimate rescue. Pinned by an executable test
     // (`plugin-typescript/test/manifest.test.ts`), not left as an assertion in this comment.
+    //
+    // AMENDED for ADR 028 Stage 2, because the sentence above was becoming false: the store's
+    // existence probe now blocks the move-rescue for two of those three causes. A de-globbed or
+    // malformed `package.json` is STILL ON DISK, so the orphan is retained rather than offered for
+    // a content match, and only genuine deletion/rename still rescues. That is the correct outcome
+    // — a malformed manifest is corrupt, not absent, which is the discipline BUG #1 established —
+    // but it IS a behaviour change in this domain and it is not what the paragraph above described.
+    // The residual, recorded rather than fixed here: a manifest inside an unreadable directory is
+    // on disk, unobserved, has no blind spot (this domain records none, hence the `[]`), and reads
+    // absent to the probe, so it can still reach the content match. Manifest snippets are
+    // dependency lines that collide freely across workspace packages, so that is a real forged-
+    // transfer window. It is pre-existing, Stage 2 narrows it rather than widening it, and the
+    // manifest walker's own exits are the named next piece of work in ADR 028's out-of-scope list.
     const moves = this.baselineStore.reconcileMoves(allViolations, knownFiles, []);
     const newViolations = allViolations.filter((v) => !this.baselineStore.isBaselined(v.id));
     const baselinedCount = allViolations.length - newViolations.length;

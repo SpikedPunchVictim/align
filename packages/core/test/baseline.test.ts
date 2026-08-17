@@ -4,7 +4,7 @@ import { computeFingerprint } from '../src/baseline/fingerprint.js';
 import { toComponentName, toRepoRelativePath, toRuleId } from '../src/types/branded.js';
 import type { ScanBlindSpotReason } from '../src/types/graph.js';
 import type { Violation } from '../src/types/violation.js';
-import { blindSpot } from './helpers.js';
+import { blindSpot, neverOnDisk, onDisk } from './helpers.js';
 
 function makeViolation(overrides: Partial<Violation> = {}): Violation {
   return {
@@ -43,7 +43,7 @@ describe('fingerprint stability', () => {
 
 describe('InMemoryBaselineStore', () => {
   it('isBaselined reflects accepted violations', () => {
-    const store = new InMemoryBaselineStore();
+    const store = new InMemoryBaselineStore([], neverOnDisk);
     const v = makeViolation();
     expect(store.isBaselined(v.id)).toBe(false);
     store.accept([v], 'manual');
@@ -51,7 +51,7 @@ describe('InMemoryBaselineStore', () => {
   });
 
   it('acceptByRule only accepts violations of the given rule', () => {
-    const store = new InMemoryBaselineStore();
+    const store = new InMemoryBaselineStore([], neverOnDisk);
     const v1 = makeViolation({ ruleId: toRuleId('r1'), id: computeFingerprint(['a']) });
     const v2 = makeViolation({ ruleId: toRuleId('r2'), id: computeFingerprint(['b']) });
     store.acceptByRule(toRuleId('r1'), [v1, v2]);
@@ -60,7 +60,7 @@ describe('InMemoryBaselineStore', () => {
   });
 
   it('show filters by ruleId', () => {
-    const store = new InMemoryBaselineStore();
+    const store = new InMemoryBaselineStore([], neverOnDisk);
     const v1 = makeViolation({ ruleId: toRuleId('r1'), id: computeFingerprint(['a']) });
     const v2 = makeViolation({ ruleId: toRuleId('r2'), id: computeFingerprint(['b']) });
     store.accept([v1, v2], 'manual');
@@ -69,7 +69,7 @@ describe('InMemoryBaselineStore', () => {
   });
 
   it('prune removes entries no longer present in the current violation set', () => {
-    const store = new InMemoryBaselineStore();
+    const store = new InMemoryBaselineStore([], neverOnDisk);
     const v1 = makeViolation({ id: computeFingerprint(['a']) });
     store.accept([v1], 'manual');
     const result = store.prune([], new Set());
@@ -78,11 +78,11 @@ describe('InMemoryBaselineStore', () => {
   });
 
   it('snapshot round-trips through a fresh store (persistence contract for the CLI)', () => {
-    const store = new InMemoryBaselineStore();
+    const store = new InMemoryBaselineStore([], neverOnDisk);
     const v1 = makeViolation({ id: computeFingerprint(['a']) });
     store.accept([v1], 'init-seed');
     const snapshot = store.snapshot();
-    const reloaded = new InMemoryBaselineStore(snapshot);
+    const reloaded = new InMemoryBaselineStore(snapshot, neverOnDisk);
     expect(reloaded.isBaselined(v1.id)).toBe(true);
   });
 
@@ -90,7 +90,7 @@ describe('InMemoryBaselineStore', () => {
   // but ONLY for kinds that carry one — never invented for kinds that have none.
   describe('acceptedValue (FRAGILE #8 growth-advisory support)', () => {
     it('records acceptedValue from a metric-kind violation', () => {
-      const store = new InMemoryBaselineStore();
+      const store = new InMemoryBaselineStore([], neverOnDisk);
       const v = makeViolation({
         id: computeFingerprint(['metric', 'r1', 'api/big.ts']),
         kind: 'metric',
@@ -105,14 +105,14 @@ describe('InMemoryBaselineStore', () => {
     });
 
     it('does not record acceptedValue for a non-metric violation', () => {
-      const store = new InMemoryBaselineStore();
+      const store = new InMemoryBaselineStore([], neverOnDisk);
       const v = makeViolation(); // default kind: 'no-dependency', which has no `value` field
       store.accept([v], 'manual');
       expect(store.show()[0]?.acceptedValue).toBeUndefined();
     });
 
     it('carries acceptedValue forward across a move-transfer (renamed file, same accepted debt)', () => {
-      const store = new InMemoryBaselineStore();
+      const store = new InMemoryBaselineStore([], neverOnDisk);
       const original = makeViolation({
         id: computeFingerprint(['metric', 'r1', 'api/big.ts']),
         kind: 'metric',
@@ -146,7 +146,7 @@ describe('InMemoryBaselineStore', () => {
 
 describe('baseline move-transfer (ADR 006)', () => {
   it('reconcileMoves transfers an orphaned entry to a same-snippet violation in a different file', () => {
-    const store = new InMemoryBaselineStore();
+    const store = new InMemoryBaselineStore([], neverOnDisk);
     const original = makeViolation({
       id: computeFingerprint(['no-dependency', 'r1', 'a.ts', 'b.ts', './b']),
       file: toRepoRelativePath('a.ts'),
@@ -171,7 +171,7 @@ describe('baseline move-transfer (ADR 006)', () => {
   });
 
   it('prune transfers moves and removes only genuinely-fixed entries in the same pass', () => {
-    const store = new InMemoryBaselineStore();
+    const store = new InMemoryBaselineStore([], neverOnDisk);
     const original = makeViolation({
       id: computeFingerprint(['no-dependency', 'r1', 'a.ts', 'b.ts', './b']),
       file: toRepoRelativePath('a.ts'),
@@ -201,7 +201,7 @@ describe('baseline move-transfer (ADR 006)', () => {
   });
 
   it('does NOT swallow a genuinely new identical-snippet violation while the original still exists', () => {
-    const store = new InMemoryBaselineStore();
+    const store = new InMemoryBaselineStore([], neverOnDisk);
     const original = makeViolation({
       id: computeFingerprint(['no-dependency', 'r1', 'a.ts', 'b.ts', './b']),
       file: toRepoRelativePath('a.ts'),
@@ -227,7 +227,7 @@ describe('baseline move-transfer (ADR 006)', () => {
   });
 
   it('an entry with no content-fingerprint match on prune is removed, not silently kept', () => {
-    const store = new InMemoryBaselineStore();
+    const store = new InMemoryBaselineStore([], neverOnDisk);
     const original = makeViolation({ id: computeFingerprint(['a']), snippet: 'unique-a' });
     store.accept([original], 'manual');
     const result = store.prune([], new Set());
@@ -240,7 +240,7 @@ describe('baseline move-transfer (ADR 006)', () => {
   // elsewhere. The fix: transfer only when the orphan's OWN file is no longer in the current scan.
   describe('FRAGILE #7 fix: file-existence gating', () => {
     it('does NOT transfer when the orphan\'s own file still exists (violation there was fixed, not moved)', () => {
-      const store = new InMemoryBaselineStore();
+      const store = new InMemoryBaselineStore([], neverOnDisk);
       const original = makeViolation({
         id: computeFingerprint(['no-dependency', 'r1', 'a.ts', 'target.ts', './target']),
         file: toRepoRelativePath('a.ts'),
@@ -266,7 +266,7 @@ describe('baseline move-transfer (ADR 006)', () => {
     });
 
     it('the rename case still transfers (ADR 006 unaffected): orphan file absent, identical content elsewhere', () => {
-      const store = new InMemoryBaselineStore();
+      const store = new InMemoryBaselineStore([], neverOnDisk);
       const original = makeViolation({
         id: computeFingerprint(['no-dependency', 'r1', 'a.ts', 'target.ts', './target']),
         file: toRepoRelativePath('a.ts'),
@@ -288,7 +288,7 @@ describe('baseline move-transfer (ADR 006)', () => {
     });
 
     it('an orphan whose file is gone but has no matching candidate stays an unmatched orphan (unchanged)', () => {
-      const store = new InMemoryBaselineStore();
+      const store = new InMemoryBaselineStore([], neverOnDisk);
       const original = makeViolation({
         id: computeFingerprint(['a']),
         file: toRepoRelativePath('a.ts'),
@@ -313,7 +313,7 @@ describe('baseline move-transfer (ADR 006)', () => {
     // live, never-accepted violation elsewhere.
     describe('F1 fix: an orphan under a scan blind spot is never mistaken for a move', () => {
       it('reconcileMoves leaves a checkout-resident orphan in place instead of transferring it onto a colliding, never-accepted violation', () => {
-        const store = new InMemoryBaselineStore();
+        const store = new InMemoryBaselineStore([], neverOnDisk);
         const original = makeViolation({
           id: computeFingerprint(['no-dependency', 'r1', 'vendor/submodule/service.ts', 'target.ts', './target']),
           file: toRepoRelativePath('vendor/submodule/service.ts'),
@@ -343,7 +343,7 @@ describe('baseline move-transfer (ADR 006)', () => {
       });
 
       it('prune classifies the checkout-resident orphan as removed, not moved — the arm the CLI\'s retention partition protects', () => {
-        const store = new InMemoryBaselineStore();
+        const store = new InMemoryBaselineStore([], neverOnDisk);
         const original = makeViolation({
           id: computeFingerprint(['no-dependency', 'r1', 'vendor/submodule/service.ts', 'target.ts', './target']),
           file: toRepoRelativePath('vendor/submodule/service.ts'),
@@ -368,7 +368,7 @@ describe('baseline move-transfer (ADR 006)', () => {
       });
 
       it('a genuine rename outside any skipped checkout still transfers (no regression of FRAGILE #7)', () => {
-        const store = new InMemoryBaselineStore();
+        const store = new InMemoryBaselineStore([], neverOnDisk);
         const original = makeViolation({
           id: computeFingerprint(['no-dependency', 'r1', 'a.ts', 'target.ts', './target']),
           file: toRepoRelativePath('a.ts'),
@@ -409,7 +409,7 @@ describe('baseline move-transfer (ADR 006)', () => {
 
       for (const [kind, reason] of Object.entries(REASONS)) {
         it(`reason '${kind}': the orphan is retained, never forged onto a colliding live violation`, () => {
-          const store = new InMemoryBaselineStore();
+          const store = new InMemoryBaselineStore([], neverOnDisk);
           const original = makeViolation({
             id: computeFingerprint(['no-dependency', 'r1', 'vendor/submodule/service.ts', 'target.ts', './target']),
             file: toRepoRelativePath('vendor/submodule/service.ts'),
@@ -436,7 +436,7 @@ describe('baseline move-transfer (ADR 006)', () => {
       // over `''` must cover the whole repository — otherwise the one case where align saw NOTHING
       // is the one case where it protects nothing, and `prune` empties the baseline at exit 0.
       it("a blind spot at the repo root ('') covers every path", () => {
-        const store = new InMemoryBaselineStore();
+        const store = new InMemoryBaselineStore([], neverOnDisk);
         const original = makeViolation({
           id: computeFingerprint(['no-dependency', 'r1', 'src/a.ts', 'target.ts', './target']),
           file: toRepoRelativePath('src/a.ts'),
@@ -452,7 +452,7 @@ describe('baseline move-transfer (ADR 006)', () => {
     });
 
     it('two orphans competing for one content-matching candidate: only one is consumed (existing splice behaviour)', () => {
-      const store = new InMemoryBaselineStore();
+      const store = new InMemoryBaselineStore([], neverOnDisk);
       const original1 = makeViolation({
         id: computeFingerprint(['no-dependency', 'r1', 'a.ts', 'target.ts', './target']),
         file: toRepoRelativePath('a.ts'),
@@ -516,7 +516,7 @@ describe('move-transfer depends on contentFingerprint — the two arms of the in
   const knownFilesAfterRename = new Set([toRepoRelativePath(RENAMED_FILE)]);
 
   it('WITH contentFingerprint (an entry written by `baseline accept`): the rename is rescued', () => {
-    const store = new InMemoryBaselineStore();
+    const store = new InMemoryBaselineStore([], neverOnDisk);
     store.accept(
       [makeViolation({ id: originalId, file: toRepoRelativePath(ORIGINAL_FILE), snippet: SNIPPET })],
       'manual',
@@ -541,7 +541,7 @@ describe('move-transfer depends on contentFingerprint — the two arms of the in
         acceptedAt: 1_700_000_000_000,
         acceptedBy: 'manual',
       },
-    ]);
+    ], neverOnDisk);
 
     const moved = renamedViolation();
     const result = store.prune([moved], knownFilesAfterRename);

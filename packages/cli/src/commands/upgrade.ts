@@ -5,6 +5,7 @@ import { readBaseline, readVersionFile, recordBaselineReconciled } from '../alig
 import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
 import { partitionBlindSpotCandidates } from '../scan-blind-spot-retention.js';
+import { createFileExistenceProbe } from '../file-existence.js';
 import { defaultConfirm } from '../prompt.js';
 import { compareVersions } from '../version-skew.js';
 import { ALIGN_VERSION } from '../telemetry/process-context.js';
@@ -187,7 +188,7 @@ export async function runUpgrade(rootDir: string, options: UpgradeOptions): Prom
     return reportCliError('align upgrade', err);
   }
 
-  const { orchestrator, baselineStore } = createOrchestrator(ruleset, previousBaseline, hostRules);
+  const { orchestrator, baselineStore } = createOrchestrator(rootDir, ruleset, previousBaseline, hostRules);
   const run: CheckRun = await orchestrator.check({ rootDir, excludes, includeNestedCheckouts });
   try {
     // Same unconditional move-transfer persistence a plain `align check` performs
@@ -238,11 +239,11 @@ export async function runUpgrade(rootDir: string, options: UpgradeOptions): Prom
     // current scan" — fed the REAL-baseline run's filtered set, every entry that is STILL correctly
     // tolerated would look orphaned too (its violation is filtered OUT of `run.gates[].violations`
     // precisely because it IS baselined). `baselinePrune`/`baselineAccept` themselves avoid this by
-    // scanning with an EMPTY baseline (`commands/baseline.ts`'s `createOrchestrator(ruleset, [],
+    // scanning with an EMPTY baseline (`commands/baseline.ts`'s `createOrchestrator(rootDir, ruleset, [],
     // hostRules)`) so nothing is filtered — reused here via a second scan for the same reason, so
     // the preview agrees exactly with what those commands will actually do when invoked.
     const acceptAtRisk = run.gates.flatMap((g) => g.violations).length;
-    const { orchestrator: fullOrchestrator } = createOrchestrator(ruleset, [], hostRules);
+    const { orchestrator: fullOrchestrator } = createOrchestrator(rootDir, ruleset, [], hostRules);
     const fullRun = await fullOrchestrator.check({ rootDir, excludes, includeNestedCheckouts });
     const allViolations = fullRun.gates.flatMap((g) => g.violations);
 
@@ -334,7 +335,10 @@ async function reconcilePrune(
   yes: boolean,
   confirmFn: (question: string) => Promise<boolean>,
 ): Promise<ActionOutcome> {
-  const previewStore = new InMemoryBaselineStore(previousBaseline);
+  // The PREVIEW must reason exactly as `baselinePrune` will, or the count it asks consent for is
+  // not the count that happens. Same probe, same root — see the 2026-08-13 note below for what a
+  // preview/outcome divergence cost last time.
+  const previewStore = new InMemoryBaselineStore(previousBaseline, createFileExistenceProbe(rootDir));
   // Step 1, `baselinePrune`'s `store.prune(allViolations, knownFiles, run.blindSpots)`. Passing the
   // blind spots (ADR 027's F1 fix, generalized by ADR 028) keeps an orphan the walk never looked at
   // out of `applyMoves`'s content-fingerprint search, so it lands in `removed` instead of being
@@ -353,7 +357,7 @@ async function reconcilePrune(
   // by exactly the retained entries, which made the prompt ask consent for a deletion that could not
   // happen ("Prune 1 orphaned baseline entry?" against a prune that forfeits 0 and retains 1) and made
   // the tier-2 guard below refuse on incomplete runs `baselinePrune`'s own tier 2 would have allowed.
-  const pruneAtRisk = partitionBlindSpotCandidates(removedEntries, blindSpots).forfeited.length;
+  const pruneAtRisk = partitionBlindSpotCandidates(removedEntries, blindSpots, knownFiles, createFileExistenceProbe(rootDir)).forfeited.length;
   if (pruneAtRisk === 0) return { actionable: false, reconciled: true };
 
   const incompleteRefusal = refuseIfRunIncomplete('align upgrade', run, pruneAtRisk, options.allowIncomplete ?? false);

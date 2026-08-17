@@ -53,7 +53,7 @@ function buildEffects(
   return {
     fixProvider,
     runCheck: async () => {
-      const { orchestrator } = createOrchestrator(ruleset, readBaseline(rootDir), hostRules);
+      const { orchestrator } = createOrchestrator(rootDir, ruleset, readBaseline(rootDir), hostRules);
       return orchestrator.check({ rootDir, excludes, includeNestedCheckouts });
     },
     scanGraph: () => plugin.scanner.scan({ rootDir, components: ruleset.components, excludes, includeNestedCheckouts }),

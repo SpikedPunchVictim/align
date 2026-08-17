@@ -4,7 +4,7 @@ import { InMemoryBaselineStore } from '../src/baseline/store.js';
 import { StaticPluginRegistry, type LanguagePlugin } from '../src/plugin/registry.js';
 import { defineProject } from '../src/dsl/index.js';
 import type { HostPredicate } from '../src/rules/host-rules.js';
-import { blindSpot, edge, graph, node } from './helpers.js';
+import { blindSpot, edge, graph, neverOnDisk, node } from './helpers.js';
 import type { ScanInput } from '../src/scanner.js';
 import { toRepoRelativePath } from '../src/types/branded.js';
 import type { ManifestInventory, ManifestScanner } from '../src/types/manifest.js';
@@ -30,7 +30,7 @@ describe('GateOrchestrator', () => {
     const registry = new StaticPluginRegistry([
       fakePlugin(() => graph([node('application/api/a.ts', 'api'), node('application/ui/b.ts', 'ui')], [])),
     ]);
-    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
     const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     expect(run.verdict).toBe('green');
     expect(run.gates.map((g) => g.gate)).toEqual(['parse', 'architecture', 'security']);
@@ -49,7 +49,7 @@ describe('GateOrchestrator', () => {
         ),
       ),
     ]);
-    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
     const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     expect(run.verdict).toBe('red');
     const archGate = run.gates.find((g) => g.gate === 'architecture');
@@ -66,7 +66,7 @@ describe('GateOrchestrator', () => {
       [edge('application/api/a.ts', 'application/ui/b.ts', { specifier: '../ui/b', line: 3 })],
     );
     const registry = new StaticPluginRegistry([fakePlugin(() => scanGraph)]);
-    const baseline = new InMemoryBaselineStore();
+    const baseline = new InMemoryBaselineStore([], neverOnDisk);
     // seed baseline by evaluating once, out of band, then accepting
     const seedOrchestrator = new GateOrchestrator(registry, ruleset, baseline);
     const seedRun = await seedOrchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -87,7 +87,7 @@ describe('GateOrchestrator', () => {
         throw new Error('scanner crashed');
       }),
     ]);
-    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
     const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     expect(run.verdict).toBe('error');
     const parseGate = run.gates.find((g) => g.gate === 'parse');
@@ -112,7 +112,7 @@ describe('GateOrchestrator', () => {
     const registry = new StaticPluginRegistry([
       fakePlugin(() => graph([node('application/api/a.ts', 'api'), node('application/ui/b.ts', 'ui')], [])),
     ]);
-    const orchestrator = new GateOrchestrator(registry, staleRuleset, new InMemoryBaselineStore());
+    const orchestrator = new GateOrchestrator(registry, staleRuleset, new InMemoryBaselineStore([], neverOnDisk));
     const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     expect(run.verdict).toBe('error');
     const archGate = run.gates.find((g) => g.gate === 'architecture');
@@ -136,7 +136,7 @@ describe('GateOrchestrator', () => {
     const registry = new StaticPluginRegistry([
       fakePlugin(() => graph([node('application/api/a.ts', 'api')], [])),
     ]);
-    const orchestrator = new GateOrchestrator(registry, hostRuleset, new InMemoryBaselineStore());
+    const orchestrator = new GateOrchestrator(registry, hostRuleset, new InMemoryBaselineStore([], neverOnDisk));
     const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     expect(run.verdict).toBe('error');
     const archGate = run.gates.find((g) => g.gate === 'architecture');
@@ -159,7 +159,7 @@ describe('GateOrchestrator', () => {
       // selector-based validation cannot see.
       fakePlugin(() => graph([node('application/api/a.ts', 'api')], [])),
     ]);
-    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
     const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     expect(run.verdict).toBe('error');
     const archGate = run.gates.find((g) => g.gate === 'architecture');
@@ -177,7 +177,7 @@ describe('GateOrchestrator', () => {
     const registry = new StaticPluginRegistry([
       fakePlugin(() => graph([node('application/api/a.ts', 'api')], [])),
     ]);
-    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
     const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     expect(run.verdict).toBe('green');
   });
@@ -189,7 +189,7 @@ describe('GateOrchestrator', () => {
         rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
       });
       const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       expect(run.verdict).toBe('error');
       expect(run.ungroundedComponents).toEqual([]);
@@ -201,7 +201,7 @@ describe('GateOrchestrator', () => {
         rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
       });
       const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       expect(run.verdict).toBe('green');
       expect(run.ungroundedComponents).toEqual([{ name: 'ui', selector: 'application/ui/**', policy: 'allow' }]);
@@ -213,7 +213,7 @@ describe('GateOrchestrator', () => {
         rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
       });
       const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       expect(run.verdict).toBe('green');
       expect(run.ungroundedComponents).toEqual([{ name: 'ui', selector: 'application/ui/**', policy: 'until-populated' }]);
@@ -232,7 +232,7 @@ describe('GateOrchestrator', () => {
           ),
         ),
       ]);
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       // Populated -> the empty-check never fires, so the forbidden edge is evaluated normally and
       // fires red — the exact auto-arm behavior R2 requires, with zero extra state to track.
@@ -248,7 +248,7 @@ describe('GateOrchestrator', () => {
       const registry = new StaticPluginRegistry([
         fakePlugin(() => graph([node('application/api/a.ts', 'api'), node('application/ui/b.ts', 'ui')], [])),
       ]);
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       expect(run.verdict).toBe('green');
       expect(run.ungroundedComponents).toEqual([]);
@@ -271,7 +271,7 @@ describe('GateOrchestrator', () => {
           : graph([node('application/api/a.ts', 'api'), node('application/ui/b.ts', 'ui')], []),
       ),
     ]);
-    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
     const redRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     expect(redRun.verdict).toBe('red');
 
@@ -294,7 +294,7 @@ describe('GateOrchestrator', () => {
         ),
       ),
     ]);
-    const baseline = new InMemoryBaselineStore();
+    const baseline = new InMemoryBaselineStore([], neverOnDisk);
     const orchestrator = new GateOrchestrator(registry, ruleset, baseline);
 
     const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -325,7 +325,7 @@ describe('GateOrchestrator', () => {
       const registry = new StaticPluginRegistry([
         fakePlugin(() => graph([node('application/api/routes.ts', 'api')], [])),
       ]);
-      const baseline = new InMemoryBaselineStore();
+      const baseline = new InMemoryBaselineStore([], neverOnDisk);
       const orchestrator = new GateOrchestrator(registry, ruleset, baseline, new Map([['route-thinness', predicate]]));
 
       const redRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -369,7 +369,7 @@ describe('GateOrchestrator', () => {
       const orchestrator = new GateOrchestrator(
         registry,
         ruleset,
-        new InMemoryBaselineStore(),
+        new InMemoryBaselineStore([], neverOnDisk),
         new Map([['some-other-predicate', (): [] => []]]),
       );
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -391,7 +391,7 @@ describe('GateOrchestrator', () => {
       const orchestrator = new GateOrchestrator(
         registry,
         ruleset,
-        new InMemoryBaselineStore(),
+        new InMemoryBaselineStore([], neverOnDisk),
         new Map([['route-thinness', buggyPredicate]]),
       );
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -416,7 +416,7 @@ describe('GateOrchestrator', () => {
         ),
       ),
     ]);
-    const baseline = new InMemoryBaselineStore();
+    const baseline = new InMemoryBaselineStore([], neverOnDisk);
     const orchestrator = new GateOrchestrator(registry, ruleset, baseline);
     const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     baseline.accept(seedRun.gates.find((g) => g.gate === 'architecture')?.violations ?? [], 'init-seed');
@@ -457,7 +457,7 @@ describe('GateOrchestrator', () => {
         ),
       ),
     ]);
-    const baseline = new InMemoryBaselineStore();
+    const baseline = new InMemoryBaselineStore([], neverOnDisk);
     const orchestrator = new GateOrchestrator(registry, ruleset, baseline);
     const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     baseline.accept(seedRun.gates.find((g) => g.gate === 'architecture')?.violations ?? [], 'init-seed');
@@ -497,7 +497,7 @@ describe('GateOrchestrator', () => {
           }),
         ),
       ]);
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       expect(run.verdict).toBe('green'); // a skip is advisory, never a failure
       const advisory = run.advisories.find((a) => a.kind === 'nested-checkout-skipped');
@@ -510,7 +510,7 @@ describe('GateOrchestrator', () => {
         rules: (c) => [c.arch.noCycles()],
       });
       const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       expect(run.advisories.find((a) => a.kind === 'nested-checkout-skipped')).toBeUndefined();
     });
@@ -524,7 +524,7 @@ describe('GateOrchestrator', () => {
       });
       let loc = 900;
       const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/big.ts', 'api', loc)], []))]);
-      const baseline = new InMemoryBaselineStore();
+      const baseline = new InMemoryBaselineStore([], neverOnDisk);
       const orchestrator = new GateOrchestrator(registry, ruleset, baseline);
 
       const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -557,7 +557,7 @@ describe('GateOrchestrator', () => {
       });
       let loc = 900;
       const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/big.ts', 'api', loc)], []))]);
-      const baseline = new InMemoryBaselineStore();
+      const baseline = new InMemoryBaselineStore([], neverOnDisk);
       const orchestrator = new GateOrchestrator(registry, ruleset, baseline);
 
       const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -580,7 +580,7 @@ describe('GateOrchestrator', () => {
       // for this file — then a legacy entry is constructed by hand (no `acceptedValue` field at
       // all, not even `undefined`), the exact shape a `.align/baseline.json` written before this
       // field existed would deserialize to (schema.test.ts covers the parse side).
-      const probe = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+      const probe = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
       const probeRun = await probe.check({ rootDir: '/repo', excludes: [] });
       const violation = probeRun.gates.find((g) => g.gate === 'architecture')?.violations[0];
       expect(violation).toBeDefined();
@@ -588,7 +588,7 @@ describe('GateOrchestrator', () => {
 
       const legacyBaseline = new InMemoryBaselineStore([
         { fingerprint: violation.id, ruleId: violation.ruleId, file: violation.file, acceptedAt: 0, acceptedBy: 'init-seed' },
-      ]);
+      ], neverOnDisk);
       const orchestrator = new GateOrchestrator(registry, ruleset, legacyBaseline);
 
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -601,7 +601,7 @@ describe('GateOrchestrator', () => {
     it('is green with 0 manifests when no manifest scanner is injected (default, back-compat for every pre-existing caller)', async () => {
       const ruleset = defineProject({ components: { api: 'application/api/**' } });
       const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore());
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       expect(run.gates.map((g) => g.gate)).toEqual(['parse', 'architecture', 'security']);
       const securityGate = run.gates.find((g) => g.gate === 'security');
@@ -625,7 +625,7 @@ describe('GateOrchestrator', () => {
         ],
         lockfilePresent: true,
       });
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore(), new Map(), manifestScanner);
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk), new Map(), manifestScanner);
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       expect(run.verdict).toBe('red');
       const securityGate = run.gates.find((g) => g.gate === 'security');
@@ -646,7 +646,7 @@ describe('GateOrchestrator', () => {
       const manifestScanner: ManifestScanner = {
         scan: () => ({ manifests: [{ file: toRepoRelativePath('package.json'), raw: '{}', dependencies: deps }], lockfilePresent: true }),
       };
-      const baseline = new InMemoryBaselineStore();
+      const baseline = new InMemoryBaselineStore([], neverOnDisk);
       const orchestrator = new GateOrchestrator(registry, ruleset, baseline, new Map(), manifestScanner);
 
       const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -684,7 +684,7 @@ describe('GateOrchestrator', () => {
         ],
         lockfilePresent: true,
       });
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore(), new Map(), manifestScanner);
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk), new Map(), manifestScanner);
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       expect(run.verdict).toBe('error'); // parse gate still errors — verdict reflects the worst gate
       const securityGate = run.gates.find((g) => g.gate === 'security');
@@ -703,7 +703,7 @@ describe('GateOrchestrator', () => {
           throw new Error('manifest scan blew up');
         },
       };
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore(), new Map(), brokenScanner);
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk), new Map(), brokenScanner);
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       const securityGate = run.gates.find((g) => g.gate === 'security');
       expect(securityGate?.status).toBe('error');
@@ -728,7 +728,7 @@ describe('GateOrchestrator', () => {
         manifests: [{ file: toRepoRelativePath('package.json'), raw: '{}', dependencies: [{ name: 'xlsx', specifier: 'https://cdn.sheetjs.com/xlsx.tgz', field: 'dependencies' }] }],
         lockfilePresent: true,
       });
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore(), new Map(), manifestScanner);
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk), new Map(), manifestScanner);
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       const archGate = run.gates.find((g) => g.gate === 'architecture');
       const securityGate = run.gates.find((g) => g.gate === 'security');
@@ -745,7 +745,7 @@ describe('GateOrchestrator', () => {
           rules: (c) => [c.security.manifest.sourceHygiene()],
         });
         const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
-        const baseline = new InMemoryBaselineStore();
+        const baseline = new InMemoryBaselineStore([], neverOnDisk);
         const manifestScanner1 = fakeManifestScanner({
           manifests: [
             {
@@ -791,7 +791,7 @@ describe('GateOrchestrator', () => {
           rules: (c) => [c.security.manifest.sourceHygiene()],
         });
         const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
-        const baseline = new InMemoryBaselineStore();
+        const baseline = new InMemoryBaselineStore([], neverOnDisk);
         const manifestScanner1 = fakeManifestScanner({
           manifests: [
             {

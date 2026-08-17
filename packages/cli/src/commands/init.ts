@@ -15,7 +15,8 @@ import { CONFIG_FILENAME, loadConfig } from '../config.js';
 import { writeBaseline, readBaseline, recordBaselineReconciled } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
-import { describeRetainedEntries, partitionBlindSpotCandidates } from '../scan-blind-spot-retention.js';
+import { describeRetainedEntries, partitionBlindSpotCandidates, retainedEntries } from '../scan-blind-spot-retention.js';
+import { createFileExistenceProbe } from '../file-existence.js';
 import { defaultConfirm } from '../prompt.js';
 
 export interface InitOptions {
@@ -93,13 +94,25 @@ export interface InitOptions {
  * never actually at risk once retention puts it back into what gets written.
  */
 function partitionAndRefuseIfBaselineWriteAtRisk(
+  rootDir: string,
   run: CheckRun,
   existing: readonly BaselineEntry[],
   persistedFingerprints: ReadonlySet<ViolationId>,
   allowIncomplete: boolean,
-): { readonly refusal: number | undefined; readonly retained: readonly BaselineEntry[] } {
+): { readonly refusal: number | undefined; readonly retained: ReturnType<typeof partitionBlindSpotCandidates<BaselineEntry>>['retained'] } {
   const dropped = existing.filter((entry) => !persistedFingerprints.has(entry.fingerprint));
-  const { retained, forfeited } = partitionBlindSpotCandidates(dropped, run.blindSpots);
+  // ADR 028 Stage 2: the probe applies HERE too, not only in `baseline prune`. This path never
+  // touches `store.prune`, so a guard living only in the baseline store would have protected
+  // `prune` and left both of `init`'s write paths exposed — the same fix-one-arm-miss-the-other
+  // shape ADR 027's F1 was.
+  // The union of both scan domains, deliberately, and NOT the per-gate split ADR 028 §5 requires
+  // for move-transfer. Those answer different questions: §5 forbids judging a `package.json` by the
+  // source walker's vocabulary when deciding whether a violation MOVED. Here the question is only
+  // "did any part of this scan observe this path", and a file observed by either domain was
+  // observed — narrowing it per-domain would call a manifest "unobserved" by the source walker and
+  // retain it forever.
+  const observedFiles = new Set([...run.observedFiles.source, ...run.observedFiles.manifest]);
+  const { retained, forfeited } = partitionBlindSpotCandidates(dropped, run.blindSpots, observedFiles, createFileExistenceProbe(rootDir));
   return { refusal: refuseIfRunIncomplete('align init', run, forfeited.length, allowIncomplete), retained };
 }
 
@@ -221,7 +234,7 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     return reportCliError('align init', new Error(`${message} Repair or delete the file, then re-run \`align init\`.`));
   }
 
-  const { orchestrator } = createOrchestrator(ruleset, [], hostRules);
+  const { orchestrator } = createOrchestrator(rootDir, ruleset, [], hostRules);
   const run = await orchestrator.check({ rootDir, excludes, includeNestedCheckouts });
   // `align init` is re-runnable on a repo that already has a baseline ("align.config.ts already
   // exists — leaving it as-is", above), and the zero-violations branch below writes `[]` over it.
@@ -260,7 +273,7 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     // nothing to refuse. Returned directly, not routed through `finish()` — matching every other
     // refusal in this command. `retained` (see that function's doc comment) is what actually gets
     // persisted below instead of a bare `[]`.
-    const atRisk = partitionAndRefuseIfBaselineWriteAtRisk(run, existingBaseline, new Set<ViolationId>(), options.allowIncomplete ?? false);
+    const atRisk = partitionAndRefuseIfBaselineWriteAtRisk(rootDir, run, existingBaseline, new Set<ViolationId>(), options.allowIncomplete ?? false);
     if (atRisk.refusal !== undefined) return atRisk.refusal;
 
     // `writeBaseline` (a `.align/` artifact writer, `align-dir.ts`) stamps `alignVersion` on its
@@ -270,13 +283,13 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     // corrupted `.align/version.json` (same corrupt-≠-absent discipline as every other artifact
     // reader), caught here the same way every other refusal in this command is.
     try {
-      writeBaseline(rootDir, atRisk.retained);
+      writeBaseline(rootDir, retainedEntries(atRisk.retained));
       recordBaselineReconciled(rootDir);
     } catch (err) {
       return reportCliError('align init', err);
     }
     console.log('Initial check is green — no baseline seeding needed.');
-    if (atRisk.retained.length > 0) console.log(describeRetainedEntries(atRisk.retained, run.blindSpots));
+    if (atRisk.retained.length > 0) console.log(describeRetainedEntries(atRisk.retained));
     return finish(0);
   }
 
@@ -298,6 +311,7 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   // `yes` would be exactly that disagreement. Runs before `writeBaseline`/`recordBaselineReconciled`
   // either way, so a refusal leaves `.align/baseline.json` untouched.
   const seedAtRisk = partitionAndRefuseIfBaselineWriteAtRisk(
+    rootDir,
     run,
     existingBaseline,
     new Set(violations.map((v) => v.id)),
@@ -378,7 +392,7 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
             ...(prior?.acceptedValue === undefined ? {} : { acceptedValue: prior.acceptedValue }),
           };
         }),
-        ...seedAtRisk.retained,
+        ...retainedEntries(seedAtRisk.retained),
       ],
     );
     recordBaselineReconciled(rootDir);
@@ -386,6 +400,6 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     return reportCliError('align init', err);
   }
   console.log(`Seeded baseline with ${violations.length} pre-existing violation(s) — run \`align baseline show\` to review.`);
-  if (seedAtRisk.retained.length > 0) console.log(describeRetainedEntries(seedAtRisk.retained, run.blindSpots));
+  if (seedAtRisk.retained.length > 0) console.log(describeRetainedEntries(seedAtRisk.retained));
   return finish(0);
 }

@@ -1,4 +1,5 @@
 import type { RepoRelativePath, RuleId, ViolationId } from '../types/branded.js';
+import type { FileExistenceProbe } from '../types/file-existence.js';
 import type { ScanBlindSpot } from '../types/graph.js';
 import type { Violation } from '../types/violation.js';
 import { computeContentFingerprint } from './fingerprint.js';
@@ -132,7 +133,22 @@ interface MoveResult {
 export class InMemoryBaselineStore implements BaselineStore {
   private readonly entries = new Map<ViolationId, BaselineEntry>();
 
-  constructor(initial: readonly BaselineEntry[] = []) {
+  constructor(
+    initial: readonly BaselineEntry[] = [],
+    /**
+     * ADR 028 mechanism 2 — REQUIRED, with no default, and that is the whole point. A default of
+     * `() => false` would compile everywhere and silently restore pre-ADR-028 behaviour at any site
+     * that forgot to pass one, which is precisely the counter-example ADR 027 records against
+     * optional safety parameters and precisely what happened to `reconcileMoves`'
+     * `skippedNestedCheckouts` (review 2026-08-13: it was optional, and a production call site
+     * omitted it). A default of `() => true` is no better — it would make `prune` a permanent no-op.
+     * There is no safe default, so there is no default: every construction site states its answer.
+     *
+     * Core never constructs this (no `node:fs` under `core/src`, ever): the CLI injects the one real
+     * `fs`-backed probe from `cli/src/file-existence.ts`, and tests inject a fake.
+     */
+    private readonly fileExists: FileExistenceProbe,
+  ) {
     for (const entry of initial) this.entries.set(entry.fingerprint, entry);
   }
 
@@ -236,7 +252,15 @@ export class InMemoryBaselineStore implements BaselineStore {
       // `unmatchedOrphans`, the exact arm `baseline prune`'s retention
       // (`cli/src/scan-blind-spot-retention.ts`) already protects from deletion — so this composes
       // with that retention instead of needing a second mechanism.
-      if (knownFiles.has(entry.file) || isUnderBlindSpot(entry.file, blindSpots)) {
+      //
+      // ADR 028 mechanism 2, the third disjunct: the file is STILL ON DISK even though this scan
+      // produced no node for it and recorded no blind spot covering it. That combination means the
+      // scan was narrower than the repository for a reason nobody has enumerated — which is the
+      // normal case, historically, since ADR 027's enumeration missed five. Whatever the cause, a
+      // file that exists was not renamed, so offering it for a content-fingerprint match could only
+      // forge consent. `fileExists` is evaluated LAST of the three because it is the only one that
+      // touches a filesystem; the two in-memory tests short-circuit it for every ordinary orphan.
+      if (knownFiles.has(entry.file) || isUnderBlindSpot(entry.file, blindSpots) || this.fileExists(entry.file)) {
         unmatchedOrphans.push(entry.fingerprint);
         continue;
       }

@@ -4,7 +4,8 @@ import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, writeBaseline } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
-import { describeRetainedEntries, partitionBlindSpotCandidates } from '../scan-blind-spot-retention.js';
+import { describeRetainedEntries, partitionBlindSpotCandidates, retainedEntries } from '../scan-blind-spot-retention.js';
+import { createFileExistenceProbe } from '../file-existence.js';
 import { describeUnverifiablePrunes, selectUnverifiablePrunes } from '../unverified-prune.js';
 import { computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
 
@@ -29,7 +30,7 @@ async function currentViolations(rootDir: string) {
   const { ruleset, excludes, includeNestedCheckouts, hostRules, telemetry } = await loadConfig(rootDir);
   // An empty baseline store surfaces every violation as "red" regardless of what's actually
   // baselined on disk — exactly the full current violation set `prune`/`accept` need.
-  const { orchestrator } = createOrchestrator(ruleset, [], hostRules);
+  const { orchestrator } = createOrchestrator(rootDir, ruleset, [], hostRules);
   const run = await orchestrator.check({ rootDir, excludes, includeNestedCheckouts });
   return { violations: run.gates.flatMap((g) => g.violations), ruleset, telemetry };
 }
@@ -48,7 +49,11 @@ export async function baselineAccept(rootDir: string, ruleId?: string, telemetry
   const targeted = ruleId === undefined ? violations : violations.filter((v) => v.ruleId === toRuleId(ruleId));
   const previous = tryReadBaseline(rootDir, 'align baseline accept');
   if (!previous.ok) return previous.code;
-  const store = new InMemoryBaselineStore(previous.entries);
+  // Add-only (CLAUDE.md rule 4's exemption): `accept` never deletes and never transfers, so the
+  // probe is never consulted on this path. The real one is passed anyway rather than a stub — a
+  // `() => false` here would be a false statement about the working tree that merely happens not to
+  // matter today, and the exemption is pinned by a test rather than by this comment.
+  const store = new InMemoryBaselineStore(previous.entries, createFileExistenceProbe(rootDir));
   store.accept(targeted, 'manual');
   // `writeBaseline` stamps `alignVersion` (ADR 022's write discipline, `align-dir.ts`) and can
   // throw on a corrupted `.align/version.json` — same corrupt-≠-absent discipline as `tryReadBaseline`
@@ -132,8 +137,8 @@ export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, 
   const { ruleset, excludes, includeNestedCheckouts, hostRules, telemetry } = loaded;
   const previous = tryReadBaseline(rootDir, 'align baseline prune');
   if (!previous.ok) return previous.code;
-  const store = new InMemoryBaselineStore(previous.entries);
-  const { orchestrator } = createOrchestrator(ruleset, [], hostRules);
+  const store = new InMemoryBaselineStore(previous.entries, createFileExistenceProbe(rootDir));
+  const { orchestrator } = createOrchestrator(rootDir, ruleset, [], hostRules);
   const run = await orchestrator.check({ rootDir, excludes, includeNestedCheckouts });
   // Tier 1, BEFORE the store is consulted and before anything is written (see this function's doc
   // comment). No override — an errored scan evaluated no rules at all.
@@ -165,7 +170,7 @@ export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, 
   const removedEntries = result.removed
     .map((fingerprint) => previousByFingerprint.get(fingerprint))
     .filter((entry): entry is BaselineEntry => entry !== undefined);
-  const { retained, forfeited } = partitionBlindSpotCandidates(removedEntries, run.blindSpots);
+  const { retained, forfeited } = partitionBlindSpotCandidates(removedEntries, run.blindSpots, knownFiles, createFileExistenceProbe(rootDir));
   // Tier 2 — see this function's doc comment for why this runs here (after `store.prune`, before
   // `writeBaseline`) and why deferring on refusal loses nothing. Evaluated against FORFEITED only:
   // a retained entry is being put back below, so it was never actually at risk of deletion.
@@ -174,7 +179,7 @@ export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, 
   // Retained entries are re-added to what gets persisted — `store.prune` already deleted them from
   // the store itself, so the store's own snapshot no longer has them; this is the CLI's flat
   // persistence boundary composing the two sets, not a second core API for "undelete".
-  const finalEntries = retained.length === 0 ? store.snapshot() : [...store.snapshot(), ...retained];
+  const finalEntries = retained.length === 0 ? store.snapshot() : [...store.snapshot(), ...retainedEntries(retained)];
   // Same corrupt-≠-absent throw risk as `baselineAccept` above (`writeBaseline`'s internal
   // `alignVersion` stamp, ADR 022) — caught here rather than left as a raw Node stack trace.
   try {
@@ -194,7 +199,7 @@ export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, 
     console.log(describeUnverifiablePrunes(unverifiable));
   }
   if (retained.length > 0) {
-    console.log(describeRetainedEntries(retained, run.blindSpots));
+    console.log(describeRetainedEntries(retained));
   }
 
   const recorder = createTelemetryRecorder(rootDir, 'baseline prune', telemetryPreConfig, telemetry);
@@ -208,7 +213,9 @@ export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, 
 export async function baselineShow(rootDir: string, ruleId?: string): Promise<number> {
   const previous = tryReadBaseline(rootDir, 'align baseline show');
   if (!previous.ok) return previous.code;
-  const store = new InMemoryBaselineStore(previous.entries);
+  // Read-only: `show` never mutates, so the probe is never consulted here either. Same reasoning as
+  // `baselineAccept` above for why it is the real one rather than a stub.
+  const store = new InMemoryBaselineStore(previous.entries, createFileExistenceProbe(rootDir));
   const entries = store.show(ruleId === undefined ? undefined : { ruleId: toRuleId(ruleId) });
   if (entries.length === 0) {
     console.log('Baseline is empty.');

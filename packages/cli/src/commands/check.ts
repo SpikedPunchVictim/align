@@ -98,7 +98,7 @@ async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<
     // unattributed Node stack trace.
     return reportCliError('align check', err);
   }
-  const { orchestrator, baselineStore } = createOrchestrator(ruleset, previousBaseline, hostRules);
+  const { orchestrator, baselineStore } = createOrchestrator(rootDir, ruleset, previousBaseline, hostRules);
 
   const recorder = createTelemetryRecorder(rootDir, 'check', options.telemetryPreConfig, telemetry);
   const rulesetIrHash = computeRulesetIrHash(ruleset);
@@ -245,7 +245,7 @@ async function runUntrustedCheck(rootDir: string, options: CheckOptions): Promis
     recorder.record({ kind: 'error', errorKind: 'untrusted-refusal', message: shortMessage(message), command: 'check --untrusted' });
     return 1;
   }
-  const { orchestrator, baselineStore } = createOrchestrator(exported.ruleset, previousBaseline, new Map());
+  const { orchestrator, baselineStore } = createOrchestrator(rootDir, exported.ruleset, previousBaseline, new Map());
   const wallStart = performance.now();
   const run = await orchestrator.check({ rootDir, excludes: exported.excludes, includeNestedCheckouts: exported.includeNestedCheckouts });
   const wallMs = performance.now() - wallStart;

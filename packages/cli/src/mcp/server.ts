@@ -41,7 +41,7 @@ import { decideMcpBaselineWrite } from './baseline-gate.js';
 async function freshCheck(rootDir: string): Promise<{ readonly run: CheckRun; readonly baselineDebt: BaselineDebt }> {
   const { ruleset, excludes, includeNestedCheckouts, hostRules } = await loadConfig(rootDir);
   const previousBaseline = readBaseline(rootDir);
-  const { orchestrator, baselineStore } = createOrchestrator(ruleset, previousBaseline, hostRules);
+  const { orchestrator, baselineStore } = createOrchestrator(rootDir, ruleset, previousBaseline, hostRules);
   const run = withVersionSkew(await orchestrator.check({ rootDir, excludes, includeNestedCheckouts }), rootDir);
   if (run.advisories.some((a) => a.kind === 'baseline-moved')) {
     writeBaseline(rootDir, baselineStore.snapshot());

@@ -1,5 +1,6 @@
 import { toComponentName, toRepoRelativePath } from '../src/types/branded.js';
 import type { RepoRelativePath } from '../src/types/branded.js';
+import type { FileExistenceProbe } from '../src/types/file-existence.js';
 import type {
   DependencyGraph,
   DependencyGraphEdge,
@@ -98,4 +99,25 @@ export function graph(
  * onto this helper keeps them testing the SAME fact rather than a weaker one. */
 export function blindSpot(path: string, reason: ScanBlindSpot['reason'] = { kind: 'nested-checkout' }): ScanBlindSpot {
   return { path: toRepoRelativePath(path), reason };
+}
+
+/**
+ * A `FileExistenceProbe` (ADR 028 mechanism 2) that reports every path as absent — "the scan saw
+ * the whole repository, so absence really does mean gone."
+ *
+ * This is the BEHAVIOUR-PRESERVING answer for the tests written before the probe existed: each of
+ * them models a world where `knownFiles` is complete, and under that assumption "not scanned" and
+ * "not on disk" genuinely coincide. Passing it explicitly is the point — the store deliberately has
+ * no default probe, because a `() => false` default would compile at a production call site too and
+ * silently restore pre-ADR-028 behaviour there, which is exactly the counter-example ADR 027
+ * records. Here the same value is a stated assumption rather than an invisible one.
+ */
+export const neverOnDisk: FileExistenceProbe = () => false;
+
+/** A `FileExistenceProbe` over an explicit set of paths — for the tests that need the probe to
+ * actually fire (a file present on disk but absent from the scan). Constructs no filesystem;
+ * core tests never touch one. */
+export function onDisk(...files: readonly string[]): FileExistenceProbe {
+  const present = new Set(files);
+  return (file) => present.has(file);
 }

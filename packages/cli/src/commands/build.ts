@@ -30,6 +30,7 @@ import { loadConfig, CONFIG_FILENAME } from '../config.js';
 import { assertGeneratedRulesNoteWellFormed, writeGeneratedRulesNote } from '../init/config-comment.js';
 import { printDryRunReport, renderBuildReport } from './build-report.js';
 import { reportCliError } from '../cli-error.js';
+import { createFileExistenceProbe } from '../file-existence.js';
 import { defaultConfirm } from '../prompt.js';
 import {
   readBaseline,
@@ -282,7 +283,10 @@ export function writeBuildArtifacts(
   writeGeneratedRulesNote(path.join(rootDir, CONFIG_FILENAME));
 
   if (options.acceptNewIntoBaseline && result.impact.addedNew.length > 0) {
-    const store = new InMemoryBaselineStore(readBaseline(rootDir));
+    // Add-only (CLAUDE.md rule 4's exemption): this path only ever calls `accept` + `snapshot`, so
+    // the probe is never consulted. Passed for real anyway — see `commands/baseline.ts`'s
+    // `baselineAccept` for why a stub would be a false statement rather than a harmless one.
+    const store = new InMemoryBaselineStore(readBaseline(rootDir), createFileExistenceProbe(rootDir));
     store.accept(result.impact.addedNew, 'manual');
     writeBaseline(rootDir, store.snapshot());
   }

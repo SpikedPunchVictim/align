@@ -8,7 +8,12 @@ import { baselineAccept, baselinePrune } from '../src/commands/baseline.js';
 import { persistMovedBaseline, runCheck } from '../src/commands/check.js';
 import { runInit } from '../src/commands/init.js';
 import { refuseIfRunIncomplete } from '../src/errored-run.js';
-import { InMemoryBaselineStore, toRuleId, toRepoRelativePath, toViolationId, type CheckRun } from '@spikedpunch/align-core';
+import { InMemoryBaselineStore, toRuleId, toRepoRelativePath, toViolationId, type CheckRun, type FileExistenceProbe } from '@spikedpunch/align-core';
+/** ADR 028 mechanism 2's probe, answering "absent" for everything — this test's world is exactly
+ * the scan it stages, so nothing exists on disk beyond it. Declared locally rather than imported:
+ * `packages/core`'s test helpers are not published, and inventing a cross-package test-only export
+ * to share a one-line lambda would widen core's surface for no benefit. */
+const neverOnDisk: FileExistenceProbe = () => false;
 
 // Bug hunt 2026-08-08, BUG #18: an errored gate reports `violations: []` WITHOUT having evaluated
 // anything (orchestrator.ts returns an `errorGate` before rule evaluation), so on `verdict: 'error'`
@@ -261,7 +266,7 @@ describe('the other mutating consumers of a run’s violations', () => {
           acceptedAt: 1,
           acceptedBy: 'manual',
         },
-      ]);
+      ], neverOnDisk);
       const erroredRunWithMove: CheckRun = {
         verdict: 'error',
         gates: [
