@@ -332,6 +332,26 @@ ADR 027-style consequence analysis.
   remaining multi-walk commands (`upgrade`, notably) are untouched this release and remain as
   documented-fragile as they are today.
 - **Case-only renames (#8) are not addressed** and remain a known gap, recorded rather than fixed.
+- **Reasons do not compose: the first exit to fire is the reason recorded, and `excluded` precedes
+  `nested-checkout`.** The exclude test runs at the top of `visit`, before the `.git` test, so a
+  nested checkout underneath an excluded ancestor is classified `excluded` at the ancestor and is
+  *never* classified `nested-checkout` at all. Consequences, in order of who cares:
+  - `nestedCheckoutPaths()` does not see it, so the 0.2.0 migration validator
+    (`baseline-entries-in-skipped-checkouts.ts`) stays silent for entries under it. That is correct
+    and is **not a change**: measured by replaying the pre-ADR-028 walk against a checkout at
+    `vendor/lib` under `excludes: ['vendor/**']`, the old code returned at the same exclude test and
+    produced `skippedNestedCheckouts: []`. Validator coverage was bounded by `excludes` before this
+    ADR and is bounded by `excludes` after it. The Stage 1 review asserted a coverage regression
+    here; the replay refutes it. What *did* change is that align now records `excluded: vendor`
+    where it previously recorded nothing at all — strictly more information.
+  - Retention is unaffected either way, because it tests at-or-under containment over the recorded
+    path and does not branch on the reason. An entry under `vendor/lib` is retained by the
+    `vendor` record exactly as it would have been by a `vendor/lib` one. This is the property that
+    makes reason-ordering a reporting concern rather than a safety one.
+  - The remediation sentence is the one place it is visible to a user: only the `nested-checkout`
+    reason earns the `includeNestedCheckouts` hint, so a checkout hidden behind an `excludes`
+    pattern is reported without it. That is right — `includeNestedCheckouts` would not resurrect it;
+    removing the exclude is what would.
 - **The payload rename is free exactly once, and this is that release.** `CheckPayload.skippedNestedCheckouts`
   becomes `blindSpots`. Verified no published version emits it (`v0.1.4`'s `payload/builder.ts` has
   zero occurrences; added in `b38a56f` for unreleased task #25), the MCP tools declare no
