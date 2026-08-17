@@ -232,8 +232,13 @@ describe('align check — stale generated-rules.json false-green guard (RULESET_
     const archGate = payload.gates.find((g) => g.gate === 'architecture');
     expect(archGate?.status).toBe('red');
     expect(archGate?.violationCount).toBe(1);
-    expect(payload.violations).toHaveLength(1);
-    expect(payload.violations[0]).toMatchObject({
+    // Narrowed rather than asserted-away: `violations` is optional on the parsed payload shape, and
+    // this test's whole point is that the violation IS present and carries the predicate's detail —
+    // so an absent array must fail here, loudly, not silently skip the toMatchObject below.
+    const violations = payload.violations;
+    if (violations === undefined) throw new Error('expected the payload to carry violations');
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({
       kind: 'custom',
       ruleId: 'custom.host:flag-a',
       hostRuleName: 'flag-a',

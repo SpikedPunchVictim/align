@@ -16,9 +16,10 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { toRepoRelativePath, type CheckRun, type RulesetIR } from '@spikedpunch/align-core';
+import { toRepoRelativePath, type CheckRun, type RepoRelativePath, type RulesetIR } from '@spikedpunch/align-core';
 import { createNodeGitEffects } from '../src/git.js';
-import { runAgentLoop, defaultWorkBranchName, type AgentEffects, type AgentRunOptions } from '../src/run.js';
+import { runAgentLoop, defaultWorkBranchName, type AgentRunOptions } from '../src/run.js';
+import type { AgentEffects } from '../src/effects.js';
 import { FakeFixProvider } from './fakeFixProvider.js';
 import { checkRun, violation } from './helpers.js';
 
@@ -103,8 +104,8 @@ describe('E2E — real git repo, scripted violations, FakeFixProvider', () => {
       fixProvider: fake,
       runCheck,
       scanGraph: async () => ({ nodes: [], edges: [], externalNodes: [], externalEdges: [], uncertain: [], blindSpots: [], scannedAt: 0 }),
-      readFile: async (p) => fs.readFileSync(path.join(tmpDir, p), 'utf8'),
-      writeFile: async (p, content) => fs.writeFileSync(path.join(tmpDir, p), content, 'utf8'),
+      readFile: async (p: RepoRelativePath) => fs.readFileSync(path.join(tmpDir, p), 'utf8'),
+      writeFile: async (p: RepoRelativePath, content: string) => fs.writeFileSync(path.join(tmpDir, p), content, 'utf8'),
       formatIfAvailable: async () => undefined,
       git,
       now: () => Date.now(),
@@ -153,8 +154,8 @@ describe('E2E — real git repo, scripted violations, FakeFixProvider', () => {
       fixProvider: fake,
       runCheck: scriptedRunCheck([checkRun([])]),
       scanGraph: async () => ({ nodes: [], edges: [], externalNodes: [], externalEdges: [], uncertain: [], blindSpots: [], scannedAt: 0 }),
-      readFile: async (p) => fs.readFileSync(path.join(tmpDir, p), 'utf8'),
-      writeFile: async (p, content) => fs.writeFileSync(path.join(tmpDir, p), content, 'utf8'),
+      readFile: async (p: RepoRelativePath) => fs.readFileSync(path.join(tmpDir, p), 'utf8'),
+      writeFile: async (p: RepoRelativePath, content: string) => fs.writeFileSync(path.join(tmpDir, p), content, 'utf8'),
       formatIfAvailable: async () => undefined,
       git: createNodeGitEffects(tmpDir),
       now: () => Date.now(),

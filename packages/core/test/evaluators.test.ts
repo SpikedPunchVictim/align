@@ -3,6 +3,7 @@ import { evaluateLayers, evaluateMetric, evaluateNoCycles, evaluateNoDependency,
 import { UnknownHostRuleError } from '../src/rules/host-rules.js';
 import type { HostPredicate } from '../src/rules/host-rules.js';
 import type { ArchLayersRule, ArchMetricRule, ArchNoCyclesRule, ArchNoDependencyRule, CustomHostRule } from '../src/types/ir.js';
+import { toRepoRelativePath } from '../src/types/branded.js';
 import { edge, externalEdge, externalNode, graph, node } from './helpers.js';
 
 describe('evaluateNoDependency', () => {
@@ -375,7 +376,7 @@ describe('evaluateMetric', () => {
       expect(v.metric).toBe('loc');
       expect(v.value).toBe(900);
       expect(v.threshold).toBe(800);
-      expect(v.fixHint).toEqual({ code: 'split-file', file: 'api/big.ts' });
+      expect(v.fixHint).toEqual({ code: 'split-file', file: toRepoRelativePath('api/big.ts') });
     }
   });
 
@@ -445,7 +446,7 @@ describe('evaluateRule — custom.host dispatch', () => {
 
   it('dispatches to the registered predicate and returns kind: "custom" violations', () => {
     const g = graph([node('api/routes.ts', 'api')], []);
-    const predicate: HostPredicate = () => [{ file: 'api/routes.ts', message: 'route handler is not thin' }];
+    const predicate: HostPredicate = () => [{ file: toRepoRelativePath('api/routes.ts'), message: 'route handler is not thin' }];
     const violations = evaluateRule(rule, g, {}, new Map([['route-thinness', predicate]]));
     expect(violations).toHaveLength(1);
     expect(violations[0]?.kind).toBe('custom');

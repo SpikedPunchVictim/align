@@ -20,6 +20,10 @@ describe('addAlignScript', () => {
   it('no-ops when an "align" script already exists, whatever it runs — never overwritten', () => {
     const original = { name: 'my-app', scripts: { align: 'echo custom' } };
     const result = addAlignScript(original);
+    // `expect(...).toBe(false)` does not narrow the discriminated union, so `reason` was previously
+    // read off a type that may not have it. Narrowing on the discriminant makes the union's own
+    // contract part of the assertion: only the `changed: false` arm carries a reason at all.
+    if (result.changed) throw new Error('expected addAlignScript to no-op on an existing script');
     expect(result.changed).toBe(false);
     expect(result.reason).toBe('already-present');
     expect(result.packageJson).toBe(original); // untouched, same reference

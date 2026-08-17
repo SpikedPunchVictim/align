@@ -402,7 +402,10 @@ describe(
             file: toRepoRelativePath('vendor/submodule/service.ts'),
             acceptedAt: 1111,
             acceptedBy: 'manual',
-            contentFingerprint,
+            // `!` is honest here: `expect(contentFingerprint).toBeDefined()` above is the
+            // precondition this whole regression rests on — an undefined fingerprint would make the
+            // collision this test stages impossible, and the test vacuous. Same idiom as `ruleId!`.
+            contentFingerprint: contentFingerprint!,
           },
         ]);
 
@@ -448,7 +451,10 @@ describe(
             file: toRepoRelativePath('vendor/submodule/service.ts'),
             acceptedAt: 2222,
             acceptedBy: 'manual',
-            contentFingerprint,
+            // `!` is honest here: `expect(contentFingerprint).toBeDefined()` above is the
+            // precondition this whole regression rests on — an undefined fingerprint would make the
+            // collision this test stages impossible, and the test vacuous. Same idiom as `ruleId!`.
+            contentFingerprint: contentFingerprint!,
           },
         ]);
 

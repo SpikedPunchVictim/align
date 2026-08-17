@@ -10,6 +10,7 @@ import {
   type HostPredicateRegistry,
 } from '../../src/rules/host-rules.js';
 import type { CustomHostRule, RuleIR } from '../../src/types/ir.js';
+import { toRepoRelativePath } from '../../src/types/branded.js';
 import { edge, graph, node } from '../helpers.js';
 
 const NONE: ReadonlySet<string> = new Set();
@@ -110,8 +111,8 @@ describe('evaluateCustomHost', () => {
     const g = graph([node('api/routes.ts', 'api', 50)], []);
     const predicate: HostPredicate = (ctx) => {
       expect(ctx.files).toEqual(['api/routes.ts']);
-      expect(ctx.componentOf('api/routes.ts')).toBe('api');
-      return [{ file: 'api/routes.ts', range: { startLine: 3, endLine: 3 }, snippet: 'export function handler() {}', message: 'route handler is not thin' }];
+      expect(ctx.componentOf(toRepoRelativePath('api/routes.ts'))).toBe('api');
+      return [{ file: toRepoRelativePath('api/routes.ts'), range: { startLine: 3, endLine: 3 }, snippet: 'export function handler() {}', message: 'route handler is not thin' }];
     };
     const violations = evaluateCustomHost(ROUTE_THINNESS_RULE, g, registryOf('route-thinness', predicate));
     expect(violations).toHaveLength(1);
@@ -131,7 +132,7 @@ describe('evaluateCustomHost', () => {
 
   it('defaults range to line 1 and snippet to the scanned node snippet when a HostViolation omits them', () => {
     const g = graph([node('api/routes.ts', 'api', 50, "// first line of routes.ts")], []);
-    const predicate: HostPredicate = () => [{ file: 'api/routes.ts', message: 'file-level finding' }];
+    const predicate: HostPredicate = () => [{ file: toRepoRelativePath('api/routes.ts'), message: 'file-level finding' }];
     const violations = evaluateCustomHost(ROUTE_THINNESS_RULE, g, registryOf('route-thinness', predicate));
     expect(violations[0]?.range).toEqual({ startLine: 1, endLine: 1 });
     expect(violations[0]?.snippet).toBe('// first line of routes.ts');
@@ -140,13 +141,13 @@ describe('evaluateCustomHost', () => {
   it('hoists the rule\'s .because() onto every violation, like every other evaluator', () => {
     const g = graph([node('api/routes.ts', 'api')], []);
     const rule: CustomHostRule = { ...ROUTE_THINNESS_RULE, provenance: { because: 'Route handlers stay thin.' } };
-    const predicate: HostPredicate = () => [{ file: 'api/routes.ts', message: 'too fat' }];
+    const predicate: HostPredicate = () => [{ file: toRepoRelativePath('api/routes.ts'), message: 'too fat' }];
     const violations = evaluateCustomHost(rule, g, registryOf('route-thinness', predicate));
     expect(violations[0]?.because).toBe('Route handlers stay thin.');
   });
 
   it('produces a stable fingerprint for the same finding, unaffected by unrelated graph state', () => {
-    const predicate: HostPredicate = () => [{ file: 'api/routes.ts', range: { startLine: 3, endLine: 3 }, message: 'too fat' }];
+    const predicate: HostPredicate = () => [{ file: toRepoRelativePath('api/routes.ts'), range: { startLine: 3, endLine: 3 }, message: 'too fat' }];
     const g1 = graph([node('api/routes.ts', 'api')], []);
     const g2 = graph([node('api/routes.ts', 'api'), node('ui/other.ts', 'ui')], [edge('ui/other.ts', 'api/routes.ts')]);
     const id1 = evaluateCustomHost(ROUTE_THINNESS_RULE, g1, registryOf('route-thinness', predicate))[0]?.id;
@@ -158,7 +159,7 @@ describe('evaluateCustomHost', () => {
   it('produces a stable fingerprint across a line shift — same file, same message, only range.startLine differs (BUG #3 regression)', () => {
     const g = graph([node('api/routes.ts', 'api')], []);
     const predicateAt = (startLine: number): HostPredicate => () => [
-      { file: 'api/routes.ts', range: { startLine, endLine: startLine }, message: 'too fat' },
+      { file: toRepoRelativePath('api/routes.ts'), range: { startLine, endLine: startLine }, message: 'too fat' },
     ];
     // Simulates inserting a comment/import above the violation, shifting it from line 5 to line 6.
     // The fingerprint must not fold in the line number (fingerprint.ts:8-9, "never line numbers")
@@ -177,8 +178,8 @@ describe('evaluateCustomHost', () => {
     // distinguishing detail in `message` — see the HostViolation doc comment in host-rules.ts.
     const g = graph([node('api/routes.ts', 'api')], []);
     const predicate: HostPredicate = () => [
-      { file: 'api/routes.ts', range: { startLine: 3, endLine: 3 }, message: 'too fat' },
-      { file: 'api/routes.ts', range: { startLine: 30, endLine: 30 }, message: 'too fat' },
+      { file: toRepoRelativePath('api/routes.ts'), range: { startLine: 3, endLine: 3 }, message: 'too fat' },
+      { file: toRepoRelativePath('api/routes.ts'), range: { startLine: 30, endLine: 30 }, message: 'too fat' },
     ];
     const violations = evaluateCustomHost(ROUTE_THINNESS_RULE, g, registryOf('route-thinness', predicate));
     expect(violations).toHaveLength(2);
@@ -190,9 +191,9 @@ describe('evaluateCustomHost', () => {
     const base = { range: { startLine: 5, endLine: 5 }, message: 'too fat' };
     const otherRule: CustomHostRule = { ...ROUTE_THINNESS_RULE, id: 'custom.host:other-rule', hostRuleName: 'route-thinness' };
 
-    const byFile: HostPredicate = () => [{ file: 'api/routes.ts', ...base }];
-    const byOtherFile: HostPredicate = () => [{ file: 'api/other.ts', ...base }];
-    const byMessage: HostPredicate = () => [{ file: 'api/routes.ts', ...base, message: 'different message' }];
+    const byFile: HostPredicate = () => [{ file: toRepoRelativePath('api/routes.ts'), ...base }];
+    const byOtherFile: HostPredicate = () => [{ file: toRepoRelativePath('api/other.ts'), ...base }];
+    const byMessage: HostPredicate = () => [{ file: toRepoRelativePath('api/routes.ts'), ...base, message: 'different message' }];
 
     const idBase = evaluateCustomHost(ROUTE_THINNESS_RULE, g, registryOf('route-thinness', byFile))[0]?.id;
     const idDiffFile = evaluateCustomHost(ROUTE_THINNESS_RULE, g, registryOf('route-thinness', byOtherFile))[0]?.id;

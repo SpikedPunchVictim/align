@@ -11,7 +11,7 @@ function makeValidator(id: string): Validator {
 }
 
 function makeTransform(id: string): Transform {
-  return { id, description: id, idempotent: true, preview: () => ({ description: id, filesAffected: [] }), apply: () => {} };
+  return { id, description: id, idempotent: true, preview: () => ({ status: 'ready', description: id, filesAffected: [] }), apply: () => {} };
 }
 
 describe('allValidatorsForEntry', () => {

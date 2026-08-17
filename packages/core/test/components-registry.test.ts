@@ -213,7 +213,7 @@ describe('validateComponents (selector-based, TypeScript scanner-facing)', () =>
   it('falls back to the generic message when a skipped checkout exists but does not overlap the selector', () => {
     const components = { [toComponentName('empty')]: glob(['nowhere/**']) };
     try {
-      validateComponents(components, [toRepoRelativePath('a.ts')], new Map(), [toRepoRelativePath('unrelated/checkout')]);
+      validateComponents(components, [toRepoRelativePath('a.ts')], new Map(), [blindSpot('unrelated/checkout')]);
       expect.fail('expected throw');
     } catch (err) {
       expect(err).toBeInstanceOf(ComponentValidationError);
@@ -226,7 +226,7 @@ describe('validateComponents (selector-based, TypeScript scanner-facing)', () =>
   it("'allow'/'until-populated' components are unaffected by skipped checkouts — they never throw regardless", () => {
     const components = { [toComponentName('vendor')]: glob(['vendor/submodule/**'], 'allow') };
     expect(() =>
-      validateComponents(components, [toRepoRelativePath('a.ts')], new Map(), [toRepoRelativePath('vendor/submodule')]),
+      validateComponents(components, [toRepoRelativePath('a.ts')], new Map(), [blindSpot('vendor/submodule')]),
     ).not.toThrow();
   });
 });

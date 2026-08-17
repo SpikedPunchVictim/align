@@ -212,10 +212,11 @@ describe('align check --untrusted — custom.host is unavailable', () => {
     const exported = {
       irVersion: '1' as const,
       exportedAt: Date.now(),
-      excludes: [],
+      excludes: [] as string[],
+      includeNestedCheckouts: [] as string[],
       ruleset: {
         irVersion: '1' as const,
-        components: { app: { name: 'app', selector: { kind: 'glob' as const, patterns: ['src/**'] }, empty: 'fail' } },
+        components: { app: { name: 'app', selector: { kind: 'glob' as const, patterns: ['src/**'] }, empty: 'fail' as const } },
         rules: [{ kind: 'custom.host' as const, id: 'custom.host:route-thinness', hostRuleName: 'route-thinness', portable: false as const, provenance: {} }],
       },
     };

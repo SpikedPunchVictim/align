@@ -1,7 +1,7 @@
 import { toComponentName, toRepoRelativePath, toRuleId, toViolationId, type CheckRun, type DependencyGraph, type DependencyGraphEdge, type DependencyGraphNode, type EdgeKind, type GateResult, type Violation } from '@spikedpunch/align-core';
 
-export function node(file: string, component: string, exports: string[] = [], loc = 10): DependencyGraphNode {
-  return { file: toRepoRelativePath(file), component: toComponentName(component), loc, exports };
+export function node(file: string, component: string, exports: string[] = [], loc = 10, snippet?: string): DependencyGraphNode {
+  return { file: toRepoRelativePath(file), component: toComponentName(component), loc, exports, snippet: snippet ?? `// ${file}` };
 }
 
 export function edge(
@@ -24,13 +24,12 @@ export function graph(nodes: DependencyGraphNode[], edges: DependencyGraphEdge[]
   return { nodes, edges, externalNodes: [], externalEdges: [], uncertain: [], blindSpots: [], scannedAt: Date.now() };
 }
 
-export function violation(overrides: Partial<Violation> & { id: string; ruleId: string; file: string }): Violation {
+export function violation(
+  overrides: Omit<Partial<Violation>, 'id' | 'ruleId' | 'file'> & { id: string; ruleId: string; file: string },
+): Violation {
   return {
-    id: toViolationId(overrides.id),
-    ruleId: toRuleId(overrides.ruleId),
     category: 'architecture',
     severity: 'error',
-    file: toRepoRelativePath(overrides.file),
     range: overrides.range ?? { startLine: 1, endLine: 1 },
     snippet: overrides.snippet ?? 'import x from "./y.js";',
     fixHint: overrides.fixHint ?? { code: 'manual-review' },
@@ -42,6 +41,14 @@ export function violation(overrides: Partial<Violation> & { id: string; ruleId: 
     specifier: './other.js',
     line: 1,
     ...overrides,
+    // Re-applied after the spread: `overrides.id`/`ruleId`/`file` are plain strings (that's the
+    // whole point of this helper — callers pass raw ids/paths and get them branded). Spreading
+    // `overrides` last used to silently overwrite these branded values with the raw ones
+    // (TS2783), which for `file` also meant losing `toRepoRelativePath`'s backslash
+    // normalization at runtime, not just the type brand.
+    id: toViolationId(overrides.id),
+    ruleId: toRuleId(overrides.ruleId),
+    file: toRepoRelativePath(overrides.file),
   } as Violation;
 }
 
