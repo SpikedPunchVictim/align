@@ -336,6 +336,219 @@ export function useSingleComponentTree(workingDir) {
  * correctly decline to retain — which is why mechanism 3, the missing-DIRECTORY test, has to catch
  * it. (An earlier version of this comment named a "whole-run floor"; that guard was removed on
  * 2026-08-17 for missing this very case. See docs/adr/defects/D001-floor-missed-partial-checkout.md.) */
+/** The subtree ADR 028 Stage 5's three retention scenarios hide, and the directory they stash it
+ * in when the hiding mechanism is a symlink. Named here so the mutation that CREATES the world, the
+ * three that HIDE it, and every scenario write-set read one spelling. */
+export const HARNESS_HIDEABLE_DIRNAME = 'hidden';
+export const HARNESS_STASH_DIRNAME = 'harness-stash';
+export const HARNESS_BAIT_DIRNAME = 'bait';
+export const HARNESS_FORBIDDEN_DIRNAME = 'harness-forbidden';
+
+/**
+ * ADR 028 Stage 5. Builds the world the symlink / unreadable-directory / excludes-shrink scenarios
+ * share: a self-owned tree whose scan is `complete: true`, so `prune` reaches the destructive path
+ * and the exit-0 form of the defect is reachable — nest's own scan is `complete: false` at the
+ * pinned commit, which makes ADR 023 tier 2 refuse first and hides the very behaviour under test
+ * (`partial-checkout-retains.mjs` documents that displacement in detail).
+ *
+ * The shape is chosen so each of ADR 028's mechanisms is exercised in isolation:
+ *
+ * - `harness-tree/keep.ts` is never hidden, so the component stays grounded and the run stays
+ *   complete. Without it, hiding the subtree would make every component ungrounded and the ADR 023
+ *   tier-2 refusal added in Stage 4 would be what stops the deletion — a real guard, but not the
+ *   one these scenarios exist to pin.
+ * - `harness-tree/hidden/{c,d}.ts` carry the accepted entries. They live one directory DOWN so that
+ *   hiding them leaves their parent observed: mechanism 3 (the missing-DIRECTORY test) therefore
+ *   cannot be what retains them, and the assertion is about mechanism 1 (the blind-spot record).
+ * - A dependency-direction rule, not `noCycles`: a cycle needs two mutually-importing files, so no
+ *   single added file can reproduce one, and these scenarios need a THIRD file whose violation is
+ *   byte-identical to an accepted one (`add-transfer-bait`) to make the forged-transfer assertion
+ *   non-vacuous.
+ */
+export function useHideableSubtreeWorld(workingDir) {
+  writeText(
+    path.join(workingDir, HARNESS_FORBIDDEN_DIRNAME, 'target.ts'),
+    "// Written by the integration harness's 'use-hideable-subtree-world' mutation (ADR 028 Stage 5).\n" +
+      "export const forbiddenValue = 'forbidden';\n",
+  );
+  writeText(
+    path.join(workingDir, HARNESS_TREE_DIRNAME, 'keep.ts'),
+    "// Written by the integration harness's 'use-hideable-subtree-world' mutation (ADR 028 Stage 5).\n" +
+      '// Deliberately clean, and deliberately never hidden: it is what keeps the component grounded\n' +
+      '// so an ADR 023 tier-2 refusal cannot stand in for the retention being tested.\n' +
+      "export const keep = 'keep';\n",
+  );
+  for (const name of ['c', 'd']) {
+    writeText(
+      path.join(workingDir, HARNESS_TREE_DIRNAME, HARNESS_HIDEABLE_DIRNAME, `${name}.ts`),
+      violatingSource(name),
+    );
+  }
+  writeText(
+    configPath(workingDir),
+    "// Written by the integration harness's 'use-hideable-subtree-world' mutation (ADR 028 Stage 5).\n" +
+      "import { defineProject } from '@spikedpunch/align-core/dsl';\n\n" +
+      'export default defineProject({\n' +
+      '  components: {\n' +
+      `    app: '${HARNESS_TREE_DIRNAME}/**',\n` +
+      `    forbidden: '${HARNESS_FORBIDDEN_DIRNAME}/**',\n` +
+      '  },\n' +
+      // No `empty:` policy, deliberately: `keep.ts` and `target.ts` are never hidden, so neither
+      // component is ever empty and the default `'fail'` policy is never reached. That keeps the
+      // config to vocabulary every published version understands, which is what lets these
+      // scenarios be installed with `install: 'target'` and calibrated with `expectFailOn`.
+      '  rules: (c) => [c.arch.layer(c.app).cannotDependOn(c.forbidden)],\n' +
+      '});\n',
+  );
+}
+
+/** One violating file's source. `name` appears only in the exported symbol, never in the import
+ * line, so `bait.ts` below can be byte-identical to `c.ts` in the construct the fingerprint is
+ * taken over — which is the whole point of the bait. */
+function violatingSource(name) {
+  return (
+    "// Written by the integration harness (ADR 028 Stage 5): a real forbidden cross-component import.\n" +
+    `import { forbiddenValue } from '../../${HARNESS_FORBIDDEN_DIRNAME}/target.js';\n\n` +
+    `export const uses${name.toUpperCase()} = forbiddenValue;\n`
+  );
+}
+
+/**
+ * ADR 028 Stage 5. Adds an UNACCEPTED violation whose content fingerprint matches an accepted
+ * entry's, at a path the scan can still see.
+ *
+ * This is what makes "`align check` did not forge a transfer" a real assertion rather than a
+ * tautology. `reconcileMoves` runs on every plain `align check` and matches an orphaned entry to a
+ * live violation by content fingerprint (FRAGILE #7); with no fingerprint-identical candidate on
+ * disk there is nothing for it to match, so a scenario that omits this step would assert that a
+ * transfer did not happen in a world where none could — shape S-05, an assertion that passes
+ * whether or not the property holds (LEDGER D006 is the same shape).
+ *
+ * Must run AFTER the baseline is seeded: the point is that this violation was never reviewed, so a
+ * transfer onto it forges consent (LEDGER D010, D015).
+ */
+export function addTransferBait(workingDir) {
+  const dir = path.join(workingDir, HARNESS_TREE_DIRNAME);
+  if (!fs.existsSync(dir)) {
+    throw new Error(`mutation 'add-transfer-bait': ${dir} does not exist — run 'use-hideable-subtree-world' first`);
+  }
+  // Depth matters, and it is not cosmetic: the violating import is written relative
+  // (`../../harness-forbidden/target.js`), so the bait only resolves — and only produces a
+  // violation whose fingerprint matches — when it sits at the SAME depth as the accepted entries.
+  // At `harness-tree/bait.ts` the specifier escapes the repo root, resolves to nothing, and the
+  // scenario silently loses its whole point (measured: `align check` went green at step 7).
+  writeText(path.join(dir, HARNESS_BAIT_DIRNAME, 'bait.ts'), violatingSource('bait'));
+}
+
+function hideableDir(workingDir) {
+  const dir = path.join(workingDir, HARNESS_TREE_DIRNAME, HARNESS_HIDEABLE_DIRNAME);
+  if (!fs.existsSync(dir)) {
+    throw new Error(
+      `mutation: ${dir} does not exist — run 'use-hideable-subtree-world' first`,
+    );
+  }
+  return dir;
+}
+
+/**
+ * ADR 028 Stage 5, blind-spot reason `not-regular-file`. Moves the subtree aside and leaves a
+ * SYMLINK where it was.
+ *
+ * `readdirSync(…, { withFileTypes: true })` does not follow links, so a symlinked directory answers
+ * false to both `isDirectory()` and `isFile()` and matches neither branch of the walk — an entire
+ * subtree disappears from the scan while every one of its files is still readable at its old path.
+ * That gap between "align did not look" and "the file is gone" is the whole of ADR 028.
+ *
+ * The stash is a real directory inside the working copy rather than a dangling link, because a
+ * dangling link is the degenerate case: with a real target the file-existence probe (mechanism 2)
+ * DOES resolve `harness-tree/hidden/c.ts` through the link, so this scenario also pins that the
+ * blind-spot record is consulted first and its reason is the one reported.
+ */
+export function hideSubtreeAsSymlink(workingDir) {
+  const dir = hideableDir(workingDir);
+  // Stashed one level DOWN (`harness-stash/hidden/`), not at `harness-stash/`, so the moved files'
+  // relative import still resolves. A stash at depth 1 makes `../../harness-forbidden/target.js`
+  // escape the repo root, which turns two resolvable specifiers into uncertainty markers and the
+  // run from `complete: true` into `complete: false` — at which point ADR 023 tier 2 refuses the
+  // prune and this scenario would be pinning the wrong guard.
+  const stash = path.join(workingDir, HARNESS_STASH_DIRNAME, HARNESS_HIDEABLE_DIRNAME);
+  fs.mkdirSync(path.dirname(stash), { recursive: true });
+  fs.renameSync(dir, stash);
+  fs.symlinkSync(path.join('..', HARNESS_STASH_DIRNAME, HARNESS_HIDEABLE_DIRNAME), dir);
+}
+
+/**
+ * ADR 028 Stage 5, blind-spot reason `unreadable`. `chmod 000` on the directory, so `readdirSync`
+ * throws EACCES and the walk records the path instead of crashing or, worse, silently continuing.
+ *
+ * **Verifies its own precondition, loudly.** `chmod` does not stop `root`, and the Dockerfile's
+ * `node:24-slim` runs as root by default, so under `docker run` this mutation would leave the
+ * directory perfectly readable and the scenario would fail with a confusing retention assertion
+ * instead of an honest "this cannot be tested here". The release gate that matters runs
+ * non-root (`.github/workflows/ci.yml` runs `node integration/run.mjs` directly on the GitHub
+ * runner), so the check below is what keeps the Docker path honest rather than silently vacuous —
+ * LEDGER D012's lesson: a scenario the gate does not really execute is not calibration.
+ */
+export function hideSubtreeUnreadable(workingDir) {
+  const dir = hideableDir(workingDir);
+  fs.chmodSync(dir, 0o000);
+  try {
+    fs.readdirSync(dir);
+  } catch {
+    return; // EACCES: the blind spot exists, which is what this mutation is for.
+  }
+  fs.chmodSync(dir, 0o755); // leave the working copy usable for the post-mortem
+  throw new Error(
+    "mutation 'hide-subtree-unreadable': the directory is still readable after chmod 000 — this " +
+      'process is almost certainly running as root (the integration Dockerfile does not set USER). ' +
+      'Run the harness as a non-root user; this scenario cannot produce an `unreadable` blind spot ' +
+      'as root, and passing it vacuously would be worse than failing.',
+  );
+}
+
+/**
+ * ADR 028 Stage 5. Puts the mode back, and it is not optional bookkeeping.
+ *
+ * ADR 026's write-set check walks the WHOLE working copy after the last step to prove nothing
+ * outside the declared set changed. A `chmod 000` directory makes that walk throw EACCES, so a
+ * scenario that hides a subtree this way and does not restore it ends in a harness ERROR after every
+ * one of its steps has already passed (measured 2026-08-18, before this mutation existed).
+ *
+ * Restoring is the honest fix rather than teaching the write-set walk to skip unreadable
+ * directories: a directory the harness cannot read is a directory whose contents it cannot verify,
+ * and silently passing over it would reproduce, inside the invariant, the very inference ADR 028
+ * exists to refuse.
+ */
+export function restoreSubtreeReadable(workingDir) {
+  const dir = path.join(workingDir, HARNESS_TREE_DIRNAME, HARNESS_HIDEABLE_DIRNAME);
+  if (!fs.existsSync(dir)) {
+    throw new Error(`mutation 'restore-subtree-readable': ${dir} does not exist`);
+  }
+  fs.chmodSync(dir, 0o755);
+}
+
+/**
+ * ADR 028 Stage 5, blind-spot reason `excluded` — the excludes-shrink case. Appends an `excludes`
+ * export naming the subtree, so the scan's scope shrinks under a baseline that was accepted when it
+ * was wider. Nothing about the files changes; only align's view of them does.
+ *
+ * Distinct from `exclude-vendored-subtree` (Stage 4) in the property it supports rather than the
+ * mechanism it triggers: that one pins `prune` retention plus the `--forget-unscanned` hatch against
+ * nest's `complete: false` scan, where tier 2 refuses first. This one runs against a complete scan,
+ * so the deletion is reachable at exit 0, and it pins the `align check` transfer arm that scenario
+ * never exercises.
+ */
+export function shrinkScanWithExcludes(workingDir) {
+  const { file } = readConfig(workingDir);
+  const subtree = `${HARNESS_TREE_DIRNAME}/${HARNESS_HIDEABLE_DIRNAME}`;
+  fs.appendFileSync(
+    file,
+    `\n// Appended by the integration harness's 'shrink-scan-with-excludes' mutation (ADR 028 Stage 5).\n` +
+      `export const excludes = ['${subtree}/**'];\n`,
+    'utf8',
+  );
+}
+
 export function deleteSingleComponentTree(workingDir) {
   const dir = path.join(workingDir, HARNESS_TREE_DIRNAME);
   if (!fs.existsSync(dir)) {
@@ -348,6 +561,12 @@ export const MUTATIONS = {
   'shadow-component': (ctx) => shadowComponent(ctx.workingDir),
   'use-single-component-tree': (ctx) => useSingleComponentTree(ctx.workingDir),
   'delete-single-component-tree': (ctx) => deleteSingleComponentTree(ctx.workingDir),
+  'use-hideable-subtree-world': (ctx) => useHideableSubtreeWorld(ctx.workingDir),
+  'add-transfer-bait': (ctx) => addTransferBait(ctx.workingDir),
+  'hide-subtree-as-symlink': (ctx) => hideSubtreeAsSymlink(ctx.workingDir),
+  'hide-subtree-unreadable': (ctx) => hideSubtreeUnreadable(ctx.workingDir),
+  'restore-subtree-readable': (ctx) => restoreSubtreeReadable(ctx.workingDir),
+  'shrink-scan-with-excludes': (ctx) => shrinkScanWithExcludes(ctx.workingDir),
   'add-vendored-violation': (ctx) => addVendoredViolation(ctx.workingDir, ctx.project),
   'exclude-vendored-subtree': (ctx) => excludeVendoredSubtree(ctx.workingDir, ctx.project),
   'introduce-arch-violation': (ctx) => introduceArchViolation(ctx.workingDir, ctx.project),
