@@ -11,11 +11,11 @@
 // `migration-notes-drift.test.ts` fails if UPGRADING_MD_CONTENT_HASH below no longer matches
 // the doc's current content — that is the drift detector, not a suggestion.
 //
-// Generated at: 2026-08-14T07:40:21.951Z
+// Generated at: 2026-08-18T07:38:41.692Z
 import type { MigrationNote } from './types.js';
 
 /** sha256Hex (16-char) of UPGRADING.md's full text at compile time. */
-export const UPGRADING_MD_CONTENT_HASH = "03bb9829ac0bce0c";
+export const UPGRADING_MD_CONTENT_HASH = "1fc0dbf694980628";
 
 /** Migration notes compiled from UPGRADING.md, keyed by the exact version heading text
  * ("## <version>") it was compiled from. */
@@ -44,6 +44,10 @@ export const COMPILED_NOTES: Readonly<Record<string, readonly MigrationNote[]>> 
     {
       heading: "Baseline move-transfer no longer treats a skipped checkout's file as a rename",
       body: "Move-transfer is the mechanism that keeps a renamed file's accepted debt accepted: when a violation\ndisappears from one file and an identical one appears in another, align transfers the baseline entry\nrather than reporting the old one fixed and the new one new. An earlier change in this release\ntightened it so a transfer requires the original file to have genuinely disappeared from the scan\n(see \"Baseline move-transfer only fires on a real move\" below).\n\nAuto-excluding a nested checkout makes a file disappear from the scan in exactly that way, for an\nentirely different reason — the file did not move, align simply stopped looking at it. Without the\nfix described here, that would be enough to make a checkout-resident baseline entry eligible for\ntransfer, and the entry would then be re-homed onto any live violation sharing its rule and its\nsource line. For a vendored copy of the same code that is the expected case, not a rare coincidence.\nThe result would be a violation nobody had ever reviewed carrying a real person's acceptance\ntimestamp and name, on a plain `align check` with no destructive command involved, reported as a\ngreen verdict and exit 0.\n\nalign treats a file inside a skipped checkout as still known rather than as gone, so it is never\noffered as a transfer candidate. A genuine rename still transfers exactly as before. If you have a\nbaseline written by an earlier version, nothing in it needs repair — the defect was in what a scan\nwould do next, not in anything already stored.",
+    },
+    {
+      heading: "`align baseline prune` now asks before it deletes",
+      body: "**Breaking for non-interactive use.** Every entry `prune` removes is an accepted consent decision — a\nhuman's recorded judgement that a violation is tolerated — so removing one now requires consent (ADR\n006, \"silence is never consent\"). Interactively `prune` prompts. **Without a terminal it refuses and\nexits non-zero**, naming `--yes`.\n\nIf you run `align baseline prune` in CI or a pre-commit hook, add `--yes`:\n\n```\nalign baseline prune --yes\n```\n\nA run that deletes nothing is never gated — a pure move-transfer, or a run where every candidate was\nretained, proceeds silently as before. So a hook that prunes only when there is something to prune\nwill now stop and ask exactly once, at the moment it would have destroyed something.\n\n**Why now.** ADR 028 made `prune` retain any entry whose absence it cannot explain, including the\ncommon case of deleting dead code (align cannot distinguish that from a directory missing out of the\ncheckout). Without a gate that safety costs a second command every time; with one it costs a\nkeystroke.",
     },
     {
       heading: "Deleting baseline entries from a scan align cannot trust is now refused",

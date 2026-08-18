@@ -3,7 +3,7 @@ import type { FileExistenceProbe } from '../types/file-existence.js';
 import type { ScanBlindSpot } from '../types/graph.js';
 import type { Violation } from '../types/violation.js';
 import { computeContentFingerprint } from './fingerprint.js';
-import { isUnderBlindSpot } from './scan-blind-spots.js';
+import { isUnderAbsentDirectory, isUnderBlindSpot } from './scan-blind-spots.js';
 
 export interface BaselineEntry {
   readonly fingerprint: ViolationId; // snippet-hash, not line-based (ADR 006)
@@ -28,8 +28,10 @@ export interface BaselineEntry {
 
 export interface PruneResult {
   readonly removed: readonly ViolationId[]; // no longer present in the graph — fixed
-  readonly moved: readonly { readonly from: ViolationId; readonly to: ViolationId }[]; // same
-  // content fingerprint (ruleId+snippet), different file — the entry transferred, not was re-accepted
+  // Same content fingerprint (ruleId+snippet), different file — the entry transferred rather than
+  // being re-accepted. Carries the full `MovedEntry` so `prune` can REPORT each transfer rather than
+  // only counting it; see `describeMovedEntries` for why a count is unreviewable (LEDGER D015).
+  readonly moved: readonly MovedEntry[];
 }
 
 export interface BaselineStore {
@@ -89,7 +91,7 @@ export interface BaselineStore {
     currentViolations: readonly Violation[],
     knownFiles: ReadonlySet<RepoRelativePath>,
     blindSpots: readonly ScanBlindSpot[],
-  ): readonly { readonly from: ViolationId; readonly to: ViolationId }[];
+  ): readonly MovedEntry[];
   show(filter?: { readonly ruleId?: RuleId }): readonly BaselineEntry[];
   /** Not part of docs/core-interfaces.md's contract — the CLI's persistence boundary needs a
    * flat snapshot to serialize to `.align/baseline.json`; core stays fs-free (functional core /
@@ -97,8 +99,23 @@ export interface BaselineStore {
   snapshot(): readonly BaselineEntry[];
 }
 
+/** What a transfer carries, for the report that makes it reviewable (LEDGER D015, 2026-08-18).
+ * Fingerprints alone were enough to COUNT transfers; they are not enough to review one. A transfer
+ * moves a human's recorded acceptance onto a different file, and align cannot prove the violation
+ * moved rather than the old file being deleted while an identical one already existed — so the two
+ * paths and the consent being carried are the minimum a reader needs to spot a forgery. */
+export interface MovedEntry {
+  readonly from: ViolationId;
+  readonly to: ViolationId;
+  readonly fromFile: RepoRelativePath;
+  readonly toFile: RepoRelativePath;
+  readonly ruleId: RuleId;
+  readonly acceptedAt: number;
+  readonly acceptedBy: BaselineEntry['acceptedBy'];
+}
+
 interface MoveResult {
-  readonly moved: { readonly from: ViolationId; readonly to: ViolationId }[];
+  readonly moved: MovedEntry[];
   readonly unmatchedOrphans: readonly ViolationId[];
 }
 
@@ -192,7 +209,7 @@ export class InMemoryBaselineStore implements BaselineStore {
     currentViolations: readonly Violation[],
     knownFiles: ReadonlySet<RepoRelativePath>,
     blindSpots: readonly ScanBlindSpot[] = [],
-  ): readonly { readonly from: ViolationId; readonly to: ViolationId }[] {
+  ): readonly MovedEntry[] {
     return this.applyMoves(currentViolations, knownFiles, blindSpots).moved;
   }
 
@@ -231,7 +248,7 @@ export class InMemoryBaselineStore implements BaselineStore {
       else list.push(v);
     }
 
-    const moved: { from: ViolationId; to: ViolationId }[] = [];
+    const moved: MovedEntry[] = [];
     const unmatchedOrphans: ViolationId[] = [];
 
     for (const entry of orphaned) {
@@ -260,7 +277,17 @@ export class InMemoryBaselineStore implements BaselineStore {
       // file that exists was not renamed, so offering it for a content-fingerprint match could only
       // forge consent. `fileExists` is evaluated LAST of the three because it is the only one that
       // touches a filesystem; the two in-memory tests short-circuit it for every ordinary orphan.
-      if (knownFiles.has(entry.file) || isUnderBlindSpot(entry.file, blindSpots) || this.fileExists(entry.file)) {
+      // ADR 028 mechanism 3, the fourth disjunct (added 2026-08-17, LEDGER D010): the file is gone
+      // AND so is its directory. Mechanisms 1-2 both answer "nothing explains this" for a missing
+      // tree, so without this an orphan from a partial checkout was offered for a content match and
+      // transferred — forging consent onto a never-reviewed violation, from a plain `align check`,
+      // at exit 0. Same predicate as the CLI's retention partition, imported rather than restated.
+      if (
+        knownFiles.has(entry.file) ||
+        isUnderBlindSpot(entry.file, blindSpots) ||
+        this.fileExists(entry.file) ||
+        isUnderAbsentDirectory(entry.file, knownFiles, this.fileExists)
+      ) {
         unmatchedOrphans.push(entry.fingerprint);
         continue;
       }
@@ -288,7 +315,15 @@ export class InMemoryBaselineStore implements BaselineStore {
         // recorded value forward the same way contentFingerprint is carried forward above.
         ...(entry.acceptedValue === undefined ? {} : { acceptedValue: entry.acceptedValue }),
       });
-      moved.push({ from: entry.fingerprint, to: matched.id });
+      moved.push({
+        from: entry.fingerprint,
+        to: matched.id,
+        fromFile: entry.file,
+        toFile: matched.file,
+        ruleId: entry.ruleId,
+        acceptedAt: entry.acceptedAt,
+        acceptedBy: entry.acceptedBy,
+      });
     }
 
     return { moved, unmatchedOrphans };

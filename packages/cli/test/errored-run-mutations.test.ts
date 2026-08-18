@@ -133,7 +133,7 @@ describe('`align baseline prune` on an error-verdict run (the data-loss regressi
     expect(checkLogs.join('\n')).toMatch(/verdict: error/);
 
     const before = fs.readFileSync(baselinePath(tmpDir), 'utf8');
-    const { result: code, logs } = await withCapturedConsole(() => baselinePrune(tmpDir));
+    const { result: code, logs } = await withCapturedConsole(() => baselinePrune(tmpDir, { yes: true }));
 
     expect(code).not.toBe(0);
     // Byte-identical, not merely "still one entry" — the entries carry irreplaceable acceptedAt/by.
@@ -144,7 +144,7 @@ describe('`align baseline prune` on an error-verdict run (the data-loss regressi
   it('names the underlying gate error, not a generic refusal string', async () => {
     tmpDir = copyErroredFixture();
 
-    const { errors } = await withCapturedConsole(() => baselinePrune(tmpDir));
+    const { errors } = await withCapturedConsole(() => baselinePrune(tmpDir, { yes: true }));
     const message = errors.join('\n');
     expect(message).toContain('align baseline prune');
     expect(message).toMatch(/architecture gate/);
@@ -167,7 +167,7 @@ describe('`align baseline prune` on an error-verdict run (the data-loss regressi
     ]);
     expect(await runCheck(tmpDir, { json: false })).toBe(0);
 
-    const { result: code, logs } = await withCapturedConsole(() => baselinePrune(tmpDir));
+    const { result: code, logs } = await withCapturedConsole(() => baselinePrune(tmpDir, { yes: true }));
     expect(code).toBe(0);
     expect(logs.join('\n')).toMatch(/Pruned 1 fixed violation/);
     expect(readBaseline(tmpDir)).toHaveLength(0);
@@ -190,7 +190,7 @@ describe('`align baseline prune` on an error-verdict run (the data-loss regressi
       },
     ]);
 
-    const { result: code, logs } = await withCapturedConsole(() => baselinePrune(tmpDir));
+    const { result: code, logs } = await withCapturedConsole(() => baselinePrune(tmpDir, { yes: true }));
     expect(code).toBe(0);
     expect(logs.join('\n')).toMatch(/Pruned 1 fixed violation/);
     const after = readBaseline(tmpDir);
@@ -370,7 +370,7 @@ describe('`align baseline prune` on an incomplete (complete: false) run — ADR 
     ]);
 
     const before = fs.readFileSync(baselinePath(tmpDir), 'utf8');
-    const { result: code, errors, logs } = await withCapturedConsole(() => baselinePrune(tmpDir));
+    const { result: code, errors, logs } = await withCapturedConsole(() => baselinePrune(tmpDir, { yes: true }));
 
     expect(code).not.toBe(0);
     expect(fs.readFileSync(baselinePath(tmpDir), 'utf8')).toBe(before);
@@ -396,7 +396,7 @@ describe('`align baseline prune` on an incomplete (complete: false) run — ADR 
       },
     ]);
 
-    const { result: code, logs } = await withCapturedConsole(() => baselinePrune(tmpDir, true));
+    const { result: code, logs } = await withCapturedConsole(() => baselinePrune(tmpDir, { allowIncomplete: true, yes: true }));
     expect(code).toBe(0);
     expect(logs.join('\n')).toMatch(/Pruned 1 fixed violation/);
     const after = readBaseline(tmpDir);
@@ -414,9 +414,12 @@ describe('`align baseline prune` on an incomplete (complete: false) run — ADR 
     await withCapturedConsole(() => baselineAccept(tmpDir, undefined));
 
     // Passing allowIncomplete: true on a complete scan is a no-op — nothing to override.
-    const { result: code, logs } = await withCapturedConsole(() => baselinePrune(tmpDir, true));
+    const { result: code, logs } = await withCapturedConsole(() => baselinePrune(tmpDir, { allowIncomplete: true, yes: true }));
     expect(code).toBe(0);
-    expect(logs.join('\n')).toMatch(/Pruned 0 fixed violation/);
+    // ADR 028 Stage 4 split the old "Pruned 0 fixed violation(s)" headline in two, because it read
+    // identically for "nothing was orphaned" and "everything was retained" (`prune-report.ts`). This
+    // fixture is the first of those: nothing was ever a candidate.
+    expect(logs.join('\n')).toMatch(/Nothing to prune/);
   });
 
   it('never refuses a pure move-transfer on an incomplete scan — nothing is actually at risk of deletion', async () => {
@@ -430,7 +433,7 @@ describe('`align baseline prune` on an incomplete (complete: false) run — ADR 
     // complete: false.
     fs.renameSync(path.join(tmpDir, 'src', 'api', 'service.ts'), path.join(tmpDir, 'src', 'api', 'service-renamed.ts'));
 
-    const { result: code, logs } = await withCapturedConsole(() => baselinePrune(tmpDir));
+    const { result: code, logs } = await withCapturedConsole(() => baselinePrune(tmpDir, { yes: true }));
     expect(code).toBe(0); // not blocked — nothing was actually at risk of deletion
     expect(logs.join('\n')).toMatch(/1 entry transferred/);
     const after = readBaseline(tmpDir);
@@ -449,7 +452,7 @@ describe('`align baseline prune` on an incomplete (complete: false) run — ADR 
     tmpDir = copyErroredFixture();
     const before = fs.readFileSync(baselinePath(tmpDir), 'utf8');
 
-    const { result: code, errors } = await withCapturedConsole(() => baselinePrune(tmpDir, true));
+    const { result: code, errors } = await withCapturedConsole(() => baselinePrune(tmpDir, { allowIncomplete: true, yes: true }));
 
     expect(code).not.toBe(0);
     expect(fs.readFileSync(baselinePath(tmpDir), 'utf8')).toBe(before);

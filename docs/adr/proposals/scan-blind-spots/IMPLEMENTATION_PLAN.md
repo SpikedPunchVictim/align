@@ -1,7 +1,7 @@
 # ADR 028 — scan blind spots: staged plan
 
 Transient. Delete this file when every stage is Complete. The permanent record is
-[`docs/adr/028-scan-blind-spots-and-the-absence-inference.md`](docs/adr/028-scan-blind-spots-and-the-absence-inference.md);
+[`docs/adr/028-2026-08-16-scan-blind-spots-and-the-absence-inference.md`](docs/adr/028-2026-08-16-scan-blind-spots-and-the-absence-inference.md);
 `IMPLEMENTATION_PLAN.md` is the long-lived rules track and is **not** to be edited for this work.
 
 **Scope decision (2026-08-16):** the middle option. Blind-spot record, existence probe, and the
@@ -291,7 +291,9 @@ TypeScript ones.
   write-set, and a required explicit prefix (no bare form that forfeits everything).
 - Advisory output distinguishes "nothing to prune" from "everything retained, here is why".
 
-**Success Criteria**
+**Success Criteria** — *as originally written; NOT met as stated, and deliberately so. The floor
+this criterion describes was built, reviewed, and removed on 2026-08-17. Read the Status section
+below before treating any of this sub-section as a description of shipped behaviour.*
 - The floor fires on the configuration `align init` itself generates — `components/registry.ts:162`
   skips the zero-match check for anything not `empty: 'fail'`, and `commands/init.ts:146-152` sets
   `until-populated` on every zero-file component (`--greenfield`: on all).
@@ -304,9 +306,82 @@ TypeScript ones.
 - Escape hatch: refuses on an errored run, respects `--allow-incomplete`, writes only its declared
   set, and refuses without a prefix.
 
-**Status**: Not Started
+**Status**: Complete (2026-08-17), **redesigned the same day after adversarial review** — see below.
 
----
+Measured at completion: typecheck 0 errors across all five packages (src and tests), **1308 passing
++ 1 skipped**, `align check` green with 29 baselined, `doctor` exit 0, `--targets local` 17/17 PASS.
+Not yet measured for flakiness; Stage 5's "15x on the new suites" applies to all three Stage 4
+scenarios.
+
+### What shipped is NOT what this stage originally specified
+
+The plan called for a **floor**: refuse the whole run when the scan observed nothing. That shipped,
+was reviewed, and was removed the same day. Recording why, because the reasoning is the reusable
+part:
+
+1. **The literal predicate was dead code.** `run.observedFiles.source.size === 0` is unreachable —
+   `align.config.ts` is a root-level `.ts` file and becomes a graph node, so the observed set is
+   never empty (measured: `observed.source: ['align.config.ts']`).
+2. **The replacement predicate — every declared component ungrounded — missed the case the stage
+   existed for.** Two independent reviewers reproduced it against the built binary: with one
+   component's directory absent and another still grounded, `align baseline prune` printed
+   `Pruned 1 fixed violation(s)`, exited 0, and emptied the baseline. Verified again by hand. That is
+   CLAUDE.md rule 6's severity-zero class, and this plan asserted the opposite as measured fact.
+3. **It trapped legitimate repositories.** Non-overridable and evaluated before the partition, it
+   blocked a manifest-only greenfield repo from pruning OR re-running `init`, with no way out —
+   reintroducing the one-way ratchet the escape hatch was built to remove.
+
+The shape of the mistake, worth carrying forward: **a whole-run guard placed against per-entry
+damage**. It is a sibling of ADR 027's F1 (fixed one arm, missed the other) and of ADR 028's own
+premise (absence treated as evidence).
+
+### What replaced it
+
+**Mechanism 3 — the missing-directory test** (`cli/src/scan-blind-spot-retention.ts`). An entry whose
+file is absent from disk AND whose directory produced no observed file at all is RETAINED, not
+forfeited. A real deletion leaves its siblings behind; a missing tree takes them all with it. It sits
+beside mechanisms 1 (blind-spot record) and 2 (existence probe) at the granularity the damage
+actually has, needs no classification and no workspace index, and covers both routes reviewers found
+— including the catch-all-selector route that a per-component fix would have missed.
+
+Root-level entries test against `''`, whose observed set is everything the scan saw, so
+manifest-domain entries are never retained by this arm on a healthy scan. That is deliberate: it is
+what prevents mechanism 3 from re-creating the greenfield block the floor caused.
+
+**The honest limit**: mechanism 3 cannot distinguish "this checkout lacks the directory" from "I
+deleted the directory to pay down the debt". It moves the ambiguity from the file to the directory
+rather than removing it. The sound distinguisher is external state — git's index (`git ls-files`
+lists a sparse-checkout file but not a deleted one), or a persisted record of the last successful
+scan. Both are ADR-sized decisions about a new dependency and are deferred; recorded here so the
+limit is known rather than discovered.
+
+**The consent gate (ADR 006)** is what makes that limit affordable. Because deleting dead code is the
+commonest way baselined debt is paid down, and mechanism 3 retains on exactly that path, every
+deletion `prune` performs now asks: interactive prompts, non-interactive refuses without `--yes`
+("silence is never consent"). A run that deletes nothing is never gated, so `prune` stays safe in a
+pre-commit hook, and `upgrade` forwards the consent it already obtained rather than asking twice.
+
+### Also fixed from the same review
+
+- `describePruneOutcome` was fed the POST-split retained count, so forfeiting the only retained entry
+  printed `Nothing to prune — no baseline entry is orphaned` above `Forgot 1 retained entry ... is
+  deleted`. The exact false-headline class that function exists to prevent, reintroduced by the
+  commit that added the flag. Found independently by both reviewers.
+- `mutations.mjs` claimed `align init` writes `empty: 'allow'`; it writes `until-populated`, and
+  `'allow'` exists only in init's throwaway in-memory probe ruleset (rule 5).
+- The `--forget-unscanned` test named "and only those" ended in `toEqual([])`, an assertion identical
+  whether the hatch is scoped or forfeits everything. It now keeps a surviving entry the prefix must
+  not reach.
+
+### Scenario coverage for the findings
+
+- `partial-checkout-retains` (new) — the severity-zero pin, **verified red-before-green in that
+  order**: with mechanism 3 disabled and nothing else changed it fails at three steps. Its header
+  records that on nest's `complete: false` scan the direct prune is caught by tier 2 first and the
+  data loss surfaces at the delegated `upgrade` step, so the exit-0 form is pinned at fixture level
+  instead — the scenario does not overclaim what it reproduces.
+- `prune-forget-unscanned-retained` — extended with the consent-gate refusal and a
+  `stdoutNotContains: 'Nothing to prune'` guard on the forfeiting run.
 
 ## Stage 5: Proof, and the release surface
 
@@ -316,6 +391,10 @@ TypeScript ones.
 - Three integration scenarios (ADR 025) with declared write-sets (ADR 026): **symlink**,
   **unreadable directory**, **excludes-shrink**. Each asserts the entry survives, the advisory names
   the reason, and `align check` does **not** forge a transfer.
+- Carried from Stage 4, reporting only: decide whether the floor should suppress or qualify
+  `align upgrade`'s `baselined debt: N → 0` line, which reports a drop the same run then refuses to
+  act on (`upgrade-groundless-scan-preview.mjs` measures it and deliberately leaves it unasserted).
+  The floor's own integration coverage landed in Stage 4, so this is a wording decision, not a gap.
 - `integration/lib/` — new assertion kinds if needed; register in `spec-validate.mjs` (the
   `jsonArrayEveryHasField` precedent).
 - `UPGRADING.md` — 0.2.0 note: retention is a behaviour change users will notice.

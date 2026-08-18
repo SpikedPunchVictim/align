@@ -20,6 +20,12 @@
 // genuinely orphaned because the rule that produced them no longer runs, which `align baseline
 // prune` must refuse to delete anyway while the scan remains incomplete (ADR 023's point precisely:
 // an absent violation on an incomplete scan is unverified, whatever the reason it went absent).
+// `--yes` on the reconciling step (added 2026-08-18): every deletion now passes ADR 006's consent
+// gate, and this harness spawns with piped stdio (`lib/exec.mjs`), so there is no terminal to ask.
+// Without it this scenario went red on a refusal that is correct behaviour — found by review, not by
+// the gate command, because this scenario declares `project: 'nest-incomplete'` and the documented
+// gate (`node integration/run.mjs --targets local`) defaults to `--project nest` and never runs it.
+// See docs/adr/defects/LEDGER.md D012.
 export default {
   id: 'prune-incomplete-scan-requires-allow-incomplete',
   project: 'nest-incomplete',
@@ -56,7 +62,7 @@ export default {
     },
     { assert: { kind: 'fileUnchanged', file: '.align/baseline.json', since: 'after-accept' } },
     {
-      run: 'baseline prune --allow-incomplete',
+      run: 'baseline prune --allow-incomplete --yes',
       expect: { exit: 0, stdoutContains: 'Pruned 371 fixed violation(s)' },
     },
     { assert: { kind: 'fileChanged', file: '.align/baseline.json', since: 'after-accept' } },

@@ -338,12 +338,19 @@ align baseline accept                 # accept everything currently red
 align baseline accept --rule arch.no-cycles:repo   # scope acceptance to one rule
 align baseline show                   # list what's baselined, and why
 align baseline show --rule arch.no-cycles:repo
-align baseline prune                  # drop entries for violations that no longer exist
+align baseline prune                  # drop entries for violations that no longer exist (asks first)
+align baseline prune --yes            # CI/non-interactive: required to delete, or prune exits red
 ```
 
 Baseline entries are fingerprinted on a content snippet hash, not a line number, so moving or
 lightly editing a file doesn't silently un-baseline (or double-count) a violation — `align baseline
 prune` detects and reports moved entries rather than treating them as new.
+
+**Every entry `prune` deletes is an accepted consent decision, so it asks before deleting** (ADR 006:
+silence is never consent). Interactively it prompts; without a terminal it refuses and tells you to
+pass `--yes`. A run that deletes nothing — a pure move-transfer, or one where everything was retained
+— is never gated, so `align baseline prune` remains safe to run unattended when it has nothing to
+destroy.
 
 Baseline acceptance is a **human decision by design**: the MCP server never self-serves it
 (`allowBaselineFromMcp` defaults to `false`) — an agent under pressure to reach green cannot grant
@@ -668,7 +675,7 @@ export default defineProject({
 ```
 
 **Invariant 2** — the transitive barrel re-export case — is not yet a built-in; it is the
-public-surface-leakage rule on align's roadmap ([ADR 016](docs/adr/016-public-surface-inference.md):
+public-surface-leakage rule on align's roadmap ([ADR 016](docs/adr/016-2026-07-20-public-surface-inference.md):
 *"don't publicly re-export X through the barrel,"* with X = *Node-touching* rather than *`@internal`*).
 Until that rule ships, it is the legitimate `custom.host` case — a pure predicate that walks the
 barrel's re-export chain and flags any reached module carrying a builtin external edge. align enforces
@@ -741,7 +748,7 @@ align explain <ruleId>       # kind, .because() rationale, constrained component
 align doctor                 # read-only advisory survey; never fails, exit code always 0
 align doctor --json
 align baseline show [--rule <ruleId>]
-align baseline prune
+align baseline prune --yes   # deleting accepted debt needs consent; without a TTY, --yes or it refuses
 ```
 
 `align explain` is pull-on-demand, not something to run reflexively before every fix — call it when

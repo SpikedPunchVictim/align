@@ -104,7 +104,7 @@ describe('BUG #14 — a corrupt .align/generated-rules.json is a clean non-zero 
   it('align baseline prune', async () => {
     tmpDir = copyFixture('simple-app');
     writeCorruptGeneratedRules(tmpDir);
-    const { result: code, errors } = await withCapturedConsole(() => baselinePrune(tmpDir));
+    const { result: code, errors } = await withCapturedConsole(() => baselinePrune(tmpDir, { yes: true }));
     expect(code).toBe(1);
     expect(errors.join('\n')).toMatch(/generated-rules\.json/);
     expect(looksLikeRawStackTrace(errors.join('\n'))).toBe(false);

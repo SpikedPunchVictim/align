@@ -114,7 +114,7 @@ describe("scan-scope consistency across every CheckRun-producing surface (task #
       // `orchestrator.test.ts`'s "one walk per domain per check".
       const beforePrune = readBaseline(tmpDir);
       expect(beforePrune).toHaveLength(1);
-      expect(await baselinePrune(tmpDir)).toBe(0);
+      expect(await baselinePrune(tmpDir, { yes: true })).toBe(0);
       const afterPrune = readBaseline(tmpDir);
       expect(afterPrune).toHaveLength(1);
     },
@@ -210,7 +210,7 @@ describe(
         // `store.prune` deletes it — while this call still returns 0, because nothing about that
         // path is an error. Checking only the exit code would pass right through that regression;
         // asserting the pair is what catches it.
-        expect(await baselinePrune(tmpDir)).toBe(0);
+        expect(await baselinePrune(tmpDir, { yes: true })).toBe(0);
         const afterPrune = readBaseline(tmpDir);
         expect(afterPrune).toHaveLength(1);
       },
@@ -277,7 +277,7 @@ describe(
         },
       ]);
 
-      const { result: code, logs } = await withCapturedLogs(() => baselinePrune(tmpDir));
+      const { result: code, logs } = await withCapturedLogs(() => baselinePrune(tmpDir, { yes: true }));
 
       expect(code).toBe(0);
       expect(logs).toMatch(/Pruned 1 fixed violation\(s\)/);
@@ -414,7 +414,7 @@ describe(
         // `lib/service.ts`'s violation is live and unaccepted again.
         expect(await runCheck(tmpDir, { json: false })).toBe(1);
 
-        const { result: code, logs } = await withCapturedLogs(() => baselinePrune(tmpDir));
+        const { result: code, logs } = await withCapturedLogs(() => baselinePrune(tmpDir, { yes: true }));
         expect(code).toBe(0);
         expect(logs).toMatch(/Pruned 0 fixed violation\(s\)/);
         expect(logs).toMatch(/0 entries transferred \(file moves\)/); // no bogus move reported

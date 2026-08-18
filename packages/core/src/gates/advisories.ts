@@ -33,7 +33,25 @@ export function areAdvisoriesComplete(advisories: readonly Advisory[]): boolean 
  * this function; neither re-derives it from `run.advisories`.
  */
 export function isRunComplete(run: CheckRun): boolean {
-  return areAdvisoriesComplete(run.advisories);
+  // TWO axes, not one (added 2026-08-17, LEDGER D011). `areAdvisoriesComplete` covers unresolvable
+  // external specifiers. An UNGROUNDED component is the second way a scan can evaluate less than it
+  // was asked to: a declared component matched zero files, so every rule scoped to it evaluated over
+  // nothing and its violations vanish from the run — indistinguishable, downstream, from those
+  // violations being fixed.
+  //
+  // Reproduced 2026-08-17: repoint a component's selector at a path that no longer exists (with
+  // `empty: 'until-populated'`, the policy `align init` writes) and `align baseline prune` printed
+  // `Pruned 1 fixed violation(s)`, exit 0, baseline emptied — while `align check` had just warned
+  // "1 component(s) matched no files (ungrounded, provisionally green)". align knew and deleted
+  // anyway. ADR 028's retention mechanisms structurally cannot see this: the files ARE observed,
+  // they are merely unclassified.
+  //
+  // Routed through ADR 023 tier 2 rather than a fourth guard, deliberately. Tier 2 already means
+  // "this scan evaluated real rules but not all of them, so deletion is refused unless you say
+  // otherwise" — which is exactly the situation — and it is OVERRIDABLE, so an architecture-first
+  // repo that legitimately has empty components can still prune with `--allow-incomplete`. A
+  // non-overridable guard here is what trapped legitimate repositories last time (LEDGER D002).
+  return areAdvisoriesComplete(run.advisories) && run.ungroundedComponents.length === 0;
 }
 
 /**
@@ -48,7 +66,7 @@ export function isRunComplete(run: CheckRun): boolean {
  * (the markers) — NOT a `node_modules` heuristic — so it fires on a partial install too (e.g. align
  * installed but the target repo's own deps absent), which is exactly the false-green case: without the
  * external edges, any external-edge rule would false-green. The one advisory suppresses the wall and
- * warns the check is provisional (docs/proposals/reconciled-build-order.md #1).
+ * warns the check is provisional (docs/adr/proposals/deep-import-provenance/reconciled-build-order.md #1).
  */
 export function buildUncertaintyAdvisories(uncertain: readonly UncertaintyMarker[]): Advisory[] {
   if (uncertain.length === 0) return [];

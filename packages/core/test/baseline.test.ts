@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { InMemoryBaselineStore } from '../src/baseline/store.js';
 import { computeFingerprint } from '../src/baseline/fingerprint.js';
-import { toComponentName, toRepoRelativePath, toRuleId } from '../src/types/branded.js';
+import { describeMovedEntries } from '../src/baseline/scan-blind-spots.js';
+import { toComponentName, toRepoRelativePath, toRuleId, toViolationId } from '../src/types/branded.js';
 import type { ScanBlindSpotReason } from '../src/types/graph.js';
 import type { Violation } from '../src/types/violation.js';
 import { blindSpot, neverOnDisk, onDisk } from './helpers.js';
@@ -164,7 +165,7 @@ describe('baseline move-transfer (ADR 006)', () => {
     });
 
     const result = store.reconcileMoves([moved], new Set([toRepoRelativePath('renamed.ts')]));
-    expect(result).toEqual([{ from: original.id, to: moved.id }]);
+    expect(result).toMatchObject([{ from: original.id, to: moved.id }]);
     expect(store.isBaselined(moved.id)).toBe(true);
     expect(store.isBaselined(original.id)).toBe(false);
     expect(store.show()[0]?.file).toBe('renamed.ts');
@@ -194,7 +195,7 @@ describe('baseline move-transfer (ADR 006)', () => {
     });
 
     const result = store.prune([moved], new Set([toRepoRelativePath('renamed.ts'), toRepoRelativePath('c.ts')]));
-    expect(result.moved).toEqual([{ from: original.id, to: moved.id }]);
+    expect(result.moved).toMatchObject([{ from: original.id, to: moved.id }]);
     expect(result.removed).toEqual([fixedElsewhere.id]);
     expect(store.isBaselined(moved.id)).toBe(true);
     expect(store.isBaselined(fixedElsewhere.id)).toBe(false);
@@ -282,7 +283,7 @@ describe('baseline move-transfer (ADR 006)', () => {
       });
 
       const result = store.reconcileMoves([moved], new Set([toRepoRelativePath('c.ts')]));
-      expect(result).toEqual([{ from: original.id, to: moved.id }]);
+      expect(result).toMatchObject([{ from: original.id, to: moved.id }]);
       expect(store.isBaselined(moved.id)).toBe(true);
       expect(store.isBaselined(original.id)).toBe(false);
     });
@@ -390,7 +391,7 @@ describe('baseline move-transfer (ADR 006)', () => {
           new Set([toRepoRelativePath('renamed.ts')]),
           [blindSpot('vendor/unrelated-checkout')],
         );
-        expect(result).toEqual([{ from: original.id, to: moved.id }]);
+        expect(result).toMatchObject([{ from: original.id, to: moved.id }]);
         expect(store.isBaselined(moved.id)).toBe(true);
         expect(store.isBaselined(original.id)).toBe(false);
       });
@@ -526,7 +527,7 @@ describe('move-transfer depends on contentFingerprint — the two arms of the in
     const moved = renamedViolation();
     const result = store.prune([moved], knownFilesAfterRename);
 
-    expect(result.moved).toEqual([{ from: originalId, to: moved.id }]);
+    expect(result.moved).toMatchObject([{ from: originalId, to: moved.id }]);
     expect(result.removed).toEqual([]);
     expect(store.isBaselined(moved.id)).toBe(true); // debt stays accepted at its new path
     expect(store.show()[0]?.acceptedBy).toBe('manual'); // and the human's consent survives the move
@@ -552,5 +553,48 @@ describe('move-transfer depends on contentFingerprint — the two arms of the in
     expect(result.removed).toEqual([originalId]); // reported to the user as "fixed"
     expect(store.isBaselined(moved.id)).toBe(false); // ...while the violation is still there, now red
     expect(store.show()).toHaveLength(0); // the consent record is gone, unrecoverably
+  });
+});
+
+describe('the transfer report is the only mitigation D015 has (LEDGER D015)', () => {
+  it('names both paths and the consent being carried, not just a count', () => {
+    // Until align keeps a temporal reference it CANNOT tell a rename from "the old file was deleted
+    // while an identical violation already existed elsewhere" — so a transfer can carry a human's
+    // acceptance onto a violation nobody reviewed, from a plain `align check`, at exit 0. There is
+    // no sound fix from one scan. This report is the entire mitigation, which makes its content
+    // load-bearing: a count is unreviewable, two paths plus the acceptor are not.
+    const message = describeMovedEntries([
+      {
+        from: toViolationId('old-fp'),
+        to: toViolationId('new-fp'),
+        fromFile: toRepoRelativePath('src/api/old.ts'),
+        toFile: toRepoRelativePath('src/api/new.ts'),
+        ruleId: toRuleId('arch.no-dependency:api->ui'),
+        acceptedAt: 1,
+        acceptedBy: 'manual',
+      },
+    ]);
+
+    expect(message).toContain('src/api/old.ts → src/api/new.ts');
+    expect(message).toContain('arch.no-dependency:api->ui');
+    expect(message).toContain('accepted by manual');
+    // The limit of align's knowledge is stated, because a reader who does not know the report can be
+    // wrong has no reason to check it.
+    expect(message).toMatch(/cannot tell a renamed file from one that was deleted/);
+  });
+
+  it('caps the list like every other list align prints', () => {
+    const many = Array.from({ length: 8 }, (_, i) => ({
+      from: toViolationId(`f${i}`),
+      to: toViolationId(`t${i}`),
+      fromFile: toRepoRelativePath(`src/old${i}.ts`),
+      toFile: toRepoRelativePath(`src/new${i}.ts`),
+      ruleId: toRuleId('arch.no-cycles'),
+      acceptedAt: 1,
+      acceptedBy: 'manual' as const,
+    }));
+
+    // A bulk directory rename must not paste the whole baseline into an advisory.
+    expect(describeMovedEntries(many)).toContain('+3 more');
   });
 });

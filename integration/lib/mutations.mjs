@@ -11,6 +11,16 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { writeText } from './fs-utils.mjs';
 
+/** The one directory name shared by ADR 028 Stage 4's two mutations and by the scenario's declared
+ * write-set — written once so the mutation that CREATES the subtree and the mutation that EXCLUDES
+ * it cannot drift apart into two spellings. */
+export const HARNESS_VENDORED_DIRNAME = 'harness-vendored';
+
+/** The one directory name shared by ADR 028 Stage 4's partial-checkout mutations and by the scenario's declared
+ * write-set — the mutation that CREATES it, the mutation that DELETES it, and the config that points
+ * a component at it all read this constant, so they cannot drift into three spellings. */
+export const HARNESS_TREE_DIRNAME = 'harness-tree';
+
 function configPath(workingDir) {
   return path.join(workingDir, 'align.config.ts');
 }
@@ -211,8 +221,135 @@ export function enableAllowBaselineFromMcp(workingDir) {
   fs.appendFileSync(file, '\nexport const allowBaselineFromMcp = true;\n', 'utf8');
 }
 
+/**
+ * ADR 028 Stage 4. Adds one NEW file inside the violating component, in a subdirectory of its own,
+ * carrying the same real import the `introduce-arch-violation` rule forbids — so it produces exactly
+ * one extra, real baseline entry at a path this harness controls.
+ *
+ * A new file rather than an existing nest path, deliberately: the scenario needs a subtree it can
+ * later exclude, and excluding any REAL subtree of `packages/core` couples the scenario to nest's
+ * internal layout at the pinned commit (and excluding a whole component would empty it, which
+ * `validateClassifiedComponents` errors on — that is ADR 023 tier 1's path, not the retention path
+ * under test). One synthetic file in a directory nest does not have is layout-independent and still
+ * exercises the real classification, resolution and rule-evaluation pipeline end to end.
+ *
+ * The import is deliberately value-level and decorator-free: it must resolve through the workspace's
+ * real `node_modules` link to `packages/common` (the same mechanism the 371 existing entries use),
+ * without depending on nest's decorator/TS build configuration.
+ */
+export function addVendoredViolation(workingDir, project) {
+  const { fromComponent } = project.violation;
+  const dir = path.join(workingDir, 'packages', fromComponent, HARNESS_VENDORED_DIRNAME);
+  if (!fs.existsSync(path.join(workingDir, 'packages', fromComponent))) {
+    throw new Error(
+      `mutation 'add-vendored-violation': packages/${fromComponent} does not exist in the working copy — ` +
+        "the project's `violation.fromComponent` no longer names a real package directory at the pinned commit.",
+    );
+  }
+  writeText(
+    path.join(dir, 'copy.ts'),
+    "// Written by the integration harness's 'add-vendored-violation' mutation (ADR 028 Stage 4).\n" +
+      "// A real cross-package import, in a directory the scenario later excludes, so `align baseline prune`\n" +
+      '// has exactly one RETAINED entry to report and `--forget-unscanned` has exactly one to forfeit.\n' +
+      "import { Logger } from '@nestjs/common';\n\n" +
+      "export const harnessVendoredLogger = new Logger('align-integration-harness');\n",
+  );
+}
+
+/**
+ * ADR 028 Stage 4. Appends an `excludes` export naming the subtree `add-vendored-violation` created,
+ * which is what makes its baseline entry unobservable WITHOUT it being fixed — a Stage 1 blind spot
+ * of reason `excluded`, and the precise state retention exists for.
+ *
+ * A plain append, not an anchored insert, for the same reason `enableAllowBaselineFromMcp` appends:
+ * `excludes` is a top-level named export with no fixed position in `init`'s generated template
+ * (verified: `render-config.ts` never emits one), read by `config.ts`'s loader wherever it appears.
+ */
+export function excludeVendoredSubtree(workingDir, project) {
+  const { file } = readConfig(workingDir);
+  const subtree = `packages/${project.violation.fromComponent}/${HARNESS_VENDORED_DIRNAME}`;
+  fs.appendFileSync(
+    file,
+    `\n// Appended by the integration harness's 'exclude-vendored-subtree' mutation (ADR 028 Stage 4).\n` +
+      `export const excludes = ['${subtree}/**'];\n`,
+    'utf8',
+  );
+}
+
+/**
+ * ADR 028 Stage 4's partial-checkout case, which needs a state no other mutation here can produce:
+ * baselined files genuinely GONE from disk (not excluded, not unreadable — absent), so neither of
+ * the per-file retention mechanisms saves them and `prune` reaches the mass-delete that two
+ * independent reviewers reproduced on 2026-08-17 as "Pruned N fixed violation(s)", exit 0, baseline
+ * emptied. Mechanism 3 (the missing-DIRECTORY test) is what must now catch it.
+ *
+ * It cannot be built on nest's own tree. Deleting `packages/**` would put thousands of paths in the
+ * before/after delta, which ADR 026's whole-tree write-set would (correctly) reject as undeclared,
+ * and excluding them instead produces a blind spot — which RETAINS the entries, the opposite of what
+ * this needs. Emptying a single nest package leaves the other eight grounded, and the floor requires
+ * ALL of them (see `scan-blind-spot-retention.ts` for why "any" would break the legitimate "I deleted the
+ * legacy directory" prune).
+ *
+ * So this mutation gives the working copy a one-component world it owns end to end: two files with a
+ * real import cycle, and a config declaring exactly one component over them. `empty: 'allow'` is the
+ * load-bearing detail and is NOT contrived — it is a policy `align init` itself writes onto any
+ * zero-file component (`commands/init.ts`, and onto all of them under `--greenfield`), and it is
+ * precisely the policy under which `validateClassifiedComponents` stays silent, so the run reaches
+ * the destructive path instead of erroring out through ADR 023 tier 1.
+ *
+ * Writes the config wholesale rather than editing `init`'s template (the `corrupt-config` precedent)
+ * because the point is to REPLACE nine components with one; there is no anchored edit that expresses
+ * that. A scenario using this therefore never runs `align init`, so no marker block or `CLAUDE.md`
+ * exists to protect — which is why `checkMarkerOwnedRegion` has nothing to say about it.
+ */
+export function useSingleComponentTree(workingDir) {
+  writeText(
+    path.join(workingDir, HARNESS_TREE_DIRNAME, 'a.ts'),
+    "// Written by the integration harness's 'use-single-component-tree' mutation (ADR 028 Stage 4).\n" +
+      "import { fromB } from './b.js';\n\n" +
+      'export function fromA(): string {\n  return `a:${fromB()}`;\n}\n',
+  );
+  writeText(
+    path.join(workingDir, HARNESS_TREE_DIRNAME, 'b.ts'),
+    "// Written by the integration harness's 'use-single-component-tree' mutation (ADR 028 Stage 4).\n" +
+      "import { fromA } from './a.js';\n\n" +
+      "export function fromB(): string {\n  return typeof fromA === 'function' ? 'b' : 'b';\n}\n",
+  );
+  writeText(
+    configPath(workingDir),
+    "// Written by the integration harness's 'use-single-component-tree' mutation (ADR 028 Stage 4).\n" +
+      "import { defineProject } from '@spikedpunch/align-core/dsl';\n\n" +
+      'export default defineProject({\n' +
+      `  components: { app: { pattern: '${HARNESS_TREE_DIRNAME}/**', empty: 'allow' } },\n` +
+      // Scoped to the component, NOT `'repo'`: a repo-wide cycle rule would also report nest's own
+      // 18 real cycles (see upgrade-with-existing-baseline.mjs's measurement), making the seed
+      // count depend on nest's internals and mixing entries the deletion below does not affect into
+      // the very set this scenario is asserting about.
+      '  rules: (c) => [c.arch.noCycles(c.app)],\n' +
+      '});\n',
+  );
+}
+
+/** The other half of `use-single-component-tree`: removes the directory outright, so the accepted
+ * baseline entries point at paths that are simply not there. No blind spot can cover an absent
+ * directory and the file-existence probe answers false, so ADR 028's mechanisms 1 and 2 both
+ * correctly decline to retain — which is why mechanism 3, the missing-DIRECTORY test, has to catch
+ * it. (An earlier version of this comment named a "whole-run floor"; that guard was removed on
+ * 2026-08-17 for missing this very case. See docs/adr/defects/D001-floor-missed-partial-checkout.md.) */
+export function deleteSingleComponentTree(workingDir) {
+  const dir = path.join(workingDir, HARNESS_TREE_DIRNAME);
+  if (!fs.existsSync(dir)) {
+    throw new Error(`mutation 'delete-single-component-tree': ${dir} does not exist — run 'use-single-component-tree' first`);
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 export const MUTATIONS = {
   'shadow-component': (ctx) => shadowComponent(ctx.workingDir),
+  'use-single-component-tree': (ctx) => useSingleComponentTree(ctx.workingDir),
+  'delete-single-component-tree': (ctx) => deleteSingleComponentTree(ctx.workingDir),
+  'add-vendored-violation': (ctx) => addVendoredViolation(ctx.workingDir, ctx.project),
+  'exclude-vendored-subtree': (ctx) => excludeVendoredSubtree(ctx.workingDir, ctx.project),
   'introduce-arch-violation': (ctx) => introduceArchViolation(ctx.workingDir, ctx.project),
   'remove-arch-violation-rule': (ctx) => removeArchViolationRule(ctx.workingDir, ctx.project),
   'corrupt-config': (ctx) => corruptConfig(ctx.workingDir),

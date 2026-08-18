@@ -64,7 +64,7 @@ describe('`align baseline prune` write-set (ADR 026 fast path)', () => {
     // unresolvable — a `missing-dependencies` advisory, `complete: false`. `--allow-incomplete`
     // is the real, documented escape hatch for that (ADR 023 tier 2); it is unrelated to what
     // this test actually checks (the write-set of a successful prune).
-    const code = await baselinePrune(tmpDir, true);
+    const code = await baselinePrune(tmpDir, { allowIncomplete: true, yes: true });
     expect(code).toBe(0);
 
     expectOnlyWrote(before, tmpDir, BASELINE_WRITE_SET);

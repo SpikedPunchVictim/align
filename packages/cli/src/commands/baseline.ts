@@ -1,13 +1,16 @@
-import { InMemoryBaselineStore, toRuleId, type BaselineEntry, type RepoRelativePath } from '@spikedpunch/align-core';
+import { InMemoryBaselineStore, describeMovedEntries, toRuleId, type BaselineEntry, type RepoRelativePath } from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, writeBaseline } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
 import { describeRetainedEntries, partitionBlindSpotCandidates, retainedEntries } from '../scan-blind-spot-retention.js';
+import { parseForgetUnscannedPrefix, splitForgotten } from '../forget-unscanned.js';
+import { describeForgetPrefixMatchedNothing, describeForgottenEntries, describePruneOutcome } from '../prune-report.js';
 import { createFileExistenceProbe } from '../file-existence.js';
 import { describeUnverifiablePrunes, selectUnverifiablePrunes } from '../unverified-prune.js';
 import { computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
+import { defaultConfirm } from '../prompt.js';
 
 /**
  * `readBaseline` throws on a corrupted `.align/baseline.json` (bug hunt 2026-08-03, BUG #1) rather
@@ -79,6 +82,34 @@ export async function baselineAccept(rootDir: string, ruleId?: string, telemetry
 }
 
 /**
+ * An OPTIONS OBJECT rather than positional parameters, changed in ADR 028 Stage 4 when the third
+ * one arrived. `baselinePrune(dir, true, false)` was already hard to read at a call site; adding a
+ * path as a fourth positional beside two booleans is the shape that produces a silently-transposed
+ * argument in the one command in this codebase that deletes accepted consent decisions.
+ */
+export interface PruneOptions {
+  /** ADR 023 tier 2's override. */
+  readonly allowIncomplete?: boolean;
+  /** `-y, --yes`: consent to the deletion without being asked (ADR 006 — "silence is never
+   * consent"). Every removal `prune` performs destroys an accepted consent decision, so the
+   * command asks before it deletes and refuses when it cannot ask. Decided 2026-08-17: retention
+   * alone made the safe direction cost friction on the commonest debt-paydown path (deleting dead
+   * code), and an approval gate pays for that friction with a single keystroke instead of a second
+   * command. */
+  readonly yes?: boolean;
+  /** Test hook, mirroring `InitOptions`/`UpgradeOptions` exactly: supplying it IS the statement
+   * that there is a way to prompt, so it forces the interactive branch independent of stdin. */
+  readonly confirm?: (question: string) => Promise<boolean>;
+  /** Test hook; defaults to `!process.stdin.isTTY`, same as `init`. */
+  readonly nonInteractive?: boolean;
+  /** `--forget-unscanned <prefix>`: forfeit the retained entries at or under this repo-relative
+   * prefix (ADR 028 Stage 4). Validated by `parseForgetUnscannedPrefix` before anything else runs;
+   * absent means retention behaves exactly as it did in Stage 2. */
+  readonly forgetUnscanned?: string;
+  readonly telemetryPreConfig?: boolean;
+}
+
+/**
  * Prune is the only command that DELETES accepted consent decisions, so it is the one place both
  * tiers of ADR 023's completeness invariant are destructive rather than merely wrong:
  *
@@ -124,8 +155,35 @@ export async function baselineAccept(rootDir: string, ruleId?: string, telemetry
  * treats a file under any blind spot as "still known" the same as a file literally present in
  * `knownFiles` — it is routed to `unmatchedOrphans` (this function's `result.removed`) instead of
  * being offered up for a content match, landing it in the exact arm retention already protects.
+ *
+ * ADR 028 Stage 4 closes the two ends that "skip-and-report" leaves open, and they pull in opposite
+ * directions:
+ *
+ *   - **MECHANISM 3, the missing-directory test** (`scan-blind-spot-retention.ts`). Mechanisms 1
+ *     and 2 both answer "nothing explains this absence" for a file whose whole directory is gone,
+ *     so a partial checkout emptied the baseline at exit 0 — reproduced 2026-08-17 by both
+ *     reviewers. An entry whose directory produced no observed file at all is retained instead.
+ *     This REPLACED a whole-run refusal (a "floor") that was tried first and removed the same day:
+ *     it was a per-run guard against per-entry damage, so it missed the partial checkout it was
+ *     written for, and its non-overridable refusal trapped legitimate repositories with no way out.
+ *   - **A WAY BACK OUT** (`--forget-unscanned <prefix>`, `forget-unscanned.ts`). Retention with no
+ *     forfeiture path is a one-way ratchet: entries under a permanently-excluded subtree could never
+ *     be removed by any command. The flag is scoped to an explicit prefix, applied to the retained
+ *     half only, and its entries count as at-risk for tier 2 — a forgotten entry is as deleted as a
+ *     forfeited one, and the ONLY difference is that align never claimed to have verified it.
  */
-export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, telemetryPreConfig?: boolean): Promise<number> {
+export async function baselinePrune(rootDir: string, options: PruneOptions = {}): Promise<number> {
+  const { allowIncomplete, forgetUnscanned, telemetryPreConfig } = options;
+  // Flag validation FIRST, before the scan and before the baseline is even read: a malformed
+  // `--forget-unscanned` value is a mistake in the invocation, not a fact about the repository, and
+  // spending a full scan before reporting it would just delay the message. `reportCliError` prints
+  // it with the command name attached, like every other refusal in this file.
+  let forgetPrefix: RepoRelativePath | undefined;
+  if (forgetUnscanned !== undefined) {
+    const parsed = parseForgetUnscannedPrefix(forgetUnscanned);
+    if (!parsed.ok) return reportCliError('align baseline prune', new Error(parsed.message));
+    forgetPrefix = parsed.prefix;
+  }
   // loadConfig can fail six ways, including a corrupt `.align/generated-rules.json` (bug hunt
   // 2026-08-03, BUG #14) — caught here instead of crashing with a raw Node stack trace.
   let loaded: Awaited<ReturnType<typeof loadConfig>>;
@@ -181,12 +239,60 @@ export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, 
   const removedEntries = result.removed
     .map((fingerprint) => previousByFingerprint.get(fingerprint))
     .filter((entry): entry is BaselineEntry => entry !== undefined);
-  const { retained, forfeited } = partitionBlindSpotCandidates(removedEntries, run.blindSpots, knownFiles, createFileExistenceProbe(rootDir));
+  const partition = partitionBlindSpotCandidates(removedEntries, run.blindSpots, knownFiles, createFileExistenceProbe(rootDir));
+  const forfeited = partition.forfeited;
+  // ADR 028 Stage 4's escape hatch. Applied to the RETAINED half only (`forget-unscanned.ts` says
+  // why), and after the partition rather than before it, so the flag can only ever undo retention —
+  // it cannot change what "fixed" means for an entry retention never touched.
+  const forgetSplit = forgetPrefix === undefined ? undefined : splitForgotten(partition.retained, forgetPrefix);
+  const forgotten = forgetSplit?.forgotten ?? [];
+  const retained = forgetSplit?.retained ?? partition.retained;
   // Tier 2 — see this function's doc comment for why this runs here (after `store.prune`, before
-  // `writeBaseline`) and why deferring on refusal loses nothing. Evaluated against FORFEITED only:
-  // a retained entry is being put back below, so it was never actually at risk of deletion.
-  const incompleteRefusal = refuseIfRunIncomplete('align baseline prune', run, forfeited.length, allowIncomplete ?? false);
+  // `writeBaseline`) and why deferring on refusal loses nothing. Evaluated against the entries that
+  // will actually be DELETED: the forfeited ones, plus any the user forfeited explicitly with
+  // `--forget-unscanned`. A retained entry is being put back below, so it was never at risk; a
+  // forgotten one is as permanently gone as a forfeited one, and tier 2's whole subject is deletion.
+  const incompleteRefusal = refuseIfRunIncomplete('align baseline prune', run, forfeited.length + forgotten.length, allowIncomplete ?? false);
   if (incompleteRefusal !== undefined) return incompleteRefusal;
+  // ADR 006's consent gate, added 2026-08-17. EVERY deletion below destroys an accepted consent
+  // decision, and this command is the only one whose PURPOSE is that deletion — which is exactly
+  // why it asked for nothing until now. Two things changed the calculus: retention (ADR 028) made
+  // `prune` safe-but-frictional on the commonest debt-paydown path (a developer deletes dead code,
+  // and mechanism 3 correctly cannot tell that from a partial checkout), and a gate converts that
+  // friction from "run a second command" into "press y". The gate is on the DELETION, not on the
+  // command: a run that forfeits nothing (a pure move-transfer, a no-op, or an all-retained run)
+  // is never blocked. State that precisely rather than as a reassurance: an unattended `prune` that
+  // finds nothing to delete still succeeds, and one that finds something now FAILS instead of
+  // deleting it. A pre-commit hook or CI step that prunes must pass `--yes` to keep working — that
+  // is a breaking change, and it is documented in UPGRADING.md rather than left for a red build to
+  // explain. (An earlier version of this comment claimed prune "stays a safe thing to put in a
+  // pre-commit hook", which is false for the only case that matters — LEDGER D013.)
+  //
+  // Non-interactive without `--yes` REFUSES rather than proceeding: this is ADR 006's doctrine
+  // verbatim, and the same shape `init`'s seed path and `upgrade`'s reconciliation already use.
+  const deletionCount = forfeited.length + forgotten.length;
+  const isInteractive =
+    options.confirm !== undefined ? true : options.nonInteractive === true ? false : (options.nonInteractive ?? process.stdin.isTTY === true);
+  const confirmFn = options.confirm ?? defaultConfirm;
+  if (deletionCount > 0 && options.yes !== true) {
+    if (!isInteractive) {
+      return reportCliError(
+        'align baseline prune',
+        new Error(
+          `refusing to delete ${deletionCount} accepted consent ${deletionCount === 1 ? 'decision' : 'decisions'} ` +
+            'without consent — this is not an interactive terminal, and silence is never consent (ADR 006). ' +
+            'Re-run with --yes if you have reviewed what is being removed.',
+        ),
+      );
+    }
+    const consented = await confirmFn(
+      `\nDelete ${deletionCount} accepted consent ${deletionCount === 1 ? 'decision' : 'decisions'} from the baseline?`,
+    );
+    if (!consented) {
+      console.log('Not pruning — the baseline is unchanged.');
+      return 1;
+    }
+  }
   // Retained entries are re-added to what gets persisted — `store.prune` already deleted them from
   // the store itself, so the store's own snapshot no longer has them; this is the CLI's flat
   // persistence boundary composing the two sets, not a second core API for "undelete".
@@ -198,10 +304,14 @@ export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, 
   } catch (err) {
     return reportCliError('align baseline prune', err);
   }
-  console.log(
-    `Pruned ${forfeited.length} fixed violation(s) from the baseline; ` +
-      `${result.moved.length} ${result.moved.length === 1 ? 'entry' : 'entries'} transferred (file moves).`,
-  );
+  console.log(describePruneOutcome(forfeited.length, retained.length, result.moved.length, forgotten.length));
+  // The transfers `prune` performed, named rather than counted — same report `align check` prints,
+  // for the same reason: a transfer carries a human's acceptance onto a different file and align
+  // cannot prove the violation moved (LEDGER D015). The headline above still carries the count, so
+  // this adds detail without replacing the summary.
+  if (result.moved.length > 0) {
+    console.log(describeMovedEntries(result.moved));
+  }
   // Not every entry in that "fixed" count was verified to be fixed — see `unverified-prune.ts`.
   // Reported after the headline rather than folded into it: the deletion itself is almost always
   // correct, so this qualifies the claim rather than contradicting it.
@@ -212,10 +322,20 @@ export async function baselinePrune(rootDir: string, allowIncomplete?: boolean, 
   if (retained.length > 0) {
     console.log(describeRetainedEntries(retained));
   }
+  if (forgetPrefix !== undefined) {
+    console.log(forgotten.length > 0 ? describeForgottenEntries(forgotten, forgetPrefix) : describeForgetPrefixMatchedNothing(forgetPrefix));
+  }
 
   const recorder = createTelemetryRecorder(rootDir, 'baseline prune', telemetryPreConfig, telemetry);
   recorder.record(
-    { kind: 'baseline', action: 'prune', counts: { removed: forfeited.length, moved: result.moved.length } },
+    {
+      kind: 'baseline',
+      action: 'prune',
+      // `removed` stays the count align CONCLUDED was fixed; `forgotten` is counted separately
+      // because it is a user instruction, not an inference — collapsing them would make the two
+      // indistinguishable in telemetry exactly where the difference matters.
+      counts: { removed: forfeited.length, moved: result.moved.length, ...(forgotten.length > 0 ? { forgotten: forgotten.length } : {}) },
+    },
     { rulesetIrHash: computeRulesetIrHash(ruleset) },
   );
   return 0;

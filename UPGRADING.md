@@ -136,6 +136,28 @@ offered as a transfer candidate. A genuine rename still transfers exactly as bef
 baseline written by an earlier version, nothing in it needs repair — the defect was in what a scan
 would do next, not in anything already stored.
 
+### `align baseline prune` now asks before it deletes
+
+**Breaking for non-interactive use.** Every entry `prune` removes is an accepted consent decision — a
+human's recorded judgement that a violation is tolerated — so removing one now requires consent (ADR
+006, "silence is never consent"). Interactively `prune` prompts. **Without a terminal it refuses and
+exits non-zero**, naming `--yes`.
+
+If you run `align baseline prune` in CI or a pre-commit hook, add `--yes`:
+
+```
+align baseline prune --yes
+```
+
+A run that deletes nothing is never gated — a pure move-transfer, or a run where every candidate was
+retained, proceeds silently as before. So a hook that prunes only when there is something to prune
+will now stop and ask exactly once, at the moment it would have destroyed something.
+
+**Why now.** ADR 028 made `prune` retain any entry whose absence it cannot explain, including the
+common case of deleting dead code (align cannot distinguish that from a directory missing out of the
+checkout). Without a gate that safety costs a second command every time; with one it costs a
+keystroke.
+
 ### Deleting baseline entries from a scan align cannot trust is now refused
 
 `align baseline prune` and `align init` both delete or overwrite accepted baseline entries. Both

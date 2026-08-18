@@ -153,7 +153,7 @@ describe('align baseline prune — the existence probe retains what the record c
     writeBaseline(tmpDir, [entry]);
     const before = fs.readFileSync(path.join(tmpDir, '.align', 'baseline.json'), 'utf8');
 
-    const { result: code, logs } = await withCapturedLogs(() => baselinePrune(tmpDir!));
+    const { result: code, logs } = await withCapturedLogs(() => baselinePrune(tmpDir!, { yes: true }));
 
     expect(code).toBe(0);
     expect(logs).toMatch(/Pruned 0 fixed violation\(s\)/);
@@ -171,14 +171,18 @@ describe('align baseline prune — the existence probe retains what the record c
       {
         fingerprint: toViolationId('genuinely-gone'),
         ruleId: toRuleId('arch.no-cycles'),
-        file: toRepoRelativePath('notes/deleted.ts'), // never created
+        // `src/` IS observed (src/a.ts survives), so this file's absence is a real deletion and not
+        // a missing tree — ADR 028 mechanism 3 (2026-08-17) retains only when the whole directory
+        // produced nothing. Was `notes/deleted.ts`, whose directory never existed at all; that case
+        // is now retained on purpose and is pinned by `prune-retention-and-consent.test.ts`.
+        file: toRepoRelativePath('src/deleted.ts'), // never created
         acceptedAt: 1,
         acceptedBy: 'manual',
         contentFingerprint: toViolationId('content-xyz'),
       },
     ]);
 
-    const { result: code, logs } = await withCapturedLogs(() => baselinePrune(tmpDir!));
+    const { result: code, logs } = await withCapturedLogs(() => baselinePrune(tmpDir!, { yes: true }));
 
     expect(code).toBe(0);
     expect(logs).toMatch(/Pruned 1 fixed violation\(s\)/);
@@ -201,7 +205,7 @@ describe('align baseline prune — the existence probe retains what the record c
       },
     ]);
 
-    const { result: code, logs } = await withCapturedLogs(() => baselinePrune(tmpDir!));
+    const { result: code, logs } = await withCapturedLogs(() => baselinePrune(tmpDir!, { yes: true }));
 
     expect(code).toBe(0);
     expect(logs).toMatch(/Pruned 1 fixed violation\(s\)/);
@@ -230,7 +234,7 @@ describe('align baseline prune — the existence probe retains what the record c
       },
     ]);
 
-    const { result: code, logs } = await withCapturedLogs(() => baselinePrune(tmpDir!));
+    const { result: code, logs } = await withCapturedLogs(() => baselinePrune(tmpDir!, { yes: true }));
 
     expect(code).toBe(0);
     expect(logs).toMatch(/Pruned 0 fixed violation\(s\)/);
@@ -253,7 +257,7 @@ describe('align baseline prune — the existence probe retains what the record c
     };
     writeBaseline(tmpDir, [entry]);
 
-    const { result: code, logs } = await withCapturedLogs(() => baselinePrune(tmpDir!));
+    const { result: code, logs } = await withCapturedLogs(() => baselinePrune(tmpDir!, { yes: true }));
 
     expect(code).toBe(0);
     expect(logs).toMatch(/Retained 1 entry/);
@@ -308,7 +312,9 @@ describe('align init — the same probe protection as prune (ADR 028 Stage 2, bo
       {
         fingerprint: toViolationId('init-genuinely-gone'),
         ruleId: toRuleId('arch.no-cycles'),
-        file: toRepoRelativePath('notes/never-existed.ts'),
+        // `src/` is observed, so this is a real deletion rather than a missing tree — see the note
+        // on the prune-side twin above for why the path moved out of `notes/` (ADR 028 mechanism 3).
+        file: toRepoRelativePath('src/never-existed.ts'),
         acceptedAt: 1,
         acceptedBy: 'manual',
       },

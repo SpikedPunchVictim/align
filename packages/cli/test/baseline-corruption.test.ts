@@ -153,7 +153,7 @@ describe('a corrupted baseline is never destroyed by `align baseline accept` (th
     writeCorruptBaseline(tmpDir, MERGE_CONFLICT_BASELINE);
     const before = fs.readFileSync(baselinePath(tmpDir), 'utf8');
 
-    const { result: code } = await withCapturedConsole(() => baselinePrune(tmpDir));
+    const { result: code } = await withCapturedConsole(() => baselinePrune(tmpDir, { yes: true }));
     expect(code).toBe(1);
 
     const after = fs.readFileSync(baselinePath(tmpDir), 'utf8');

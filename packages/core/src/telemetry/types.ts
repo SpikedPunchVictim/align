@@ -69,6 +69,11 @@ export interface BaselineEvent {
     readonly accepted?: number;
     readonly removed?: number;
     readonly moved?: number;
+    /** `--forget-unscanned` (ADR 028 Stage 4): entries deleted on the user's explicit instruction
+     * rather than because align concluded they were fixed. Separate from `removed` precisely because
+     * the two are different claims — merging them would make an unverified forfeiture read, in
+     * telemetry, exactly like a verified prune. */
+    readonly forgotten?: number;
   };
 }
 

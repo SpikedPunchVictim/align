@@ -1,4 +1,4 @@
-import { blindSpotsCovering, describeBlindSpotReason, type FileExistenceProbe, type RepoRelativePath, type ScanBlindSpot } from '@spikedpunch/align-core';
+import { blindSpotsCovering, describeBlindSpotReason, directoryOf, isUnderAbsentDirectory, type FileExistenceProbe, type RepoRelativePath, type ScanBlindSpot } from '@spikedpunch/align-core';
 
 /**
  * Shared "unobservable, not fixed" test for the two destructive baseline-write consumers
@@ -47,7 +47,17 @@ export type RetentionReason =
   /** ADR 028 mechanism 2: no blind spot covers this file, but it is still on disk. The scan was
    * narrower than the repository for a reason nobody enumerated — the case the record structurally
    * cannot cover, and the reason the probe exists. */
-  | { readonly kind: 'present-on-disk' };
+  | { readonly kind: 'present-on-disk' }
+  /** ADR 028 mechanism 3: the file is gone, and so is the directory it lived in — a partial
+   * checkout, a sparse clone, a tree that was never fetched. `dir` is the absent directory.
+   *
+   * Renamed from `directory-unobserved` on 2026-08-18. The first version tested only "no file under
+   * this directory was OBSERVED", while both its comment and its user-facing message asserted the
+   * directory was MISSING — a different claim, and one nothing checked. Review reproduced it: delete
+   * the last `.ts` from a directory that still holds a stylesheet, and align retained the entry while
+   * telling the user a directory it could `ls` was gone. That is CLAUDE.md rule 5's class expressed
+   * in OUTPUT rather than in a comment, and it over-retained on an everyday deletion. */
+  | { readonly kind: 'directory-absent'; readonly dir: string };
 
 export interface RetainedCandidate<T> {
   readonly candidate: T;
@@ -76,6 +86,7 @@ export interface BlindSpotRetentionSplit<T> {
  * which is now exactly wrong — a scan can record no blind spot at all and still be narrower than
  * the repository, and that residue is the entire reason mechanism 2 exists.
  */
+
 export function partitionBlindSpotCandidates<T extends { readonly file: RepoRelativePath }>(
   candidates: readonly T[],
   blindSpots: readonly ScanBlindSpot[],
@@ -100,6 +111,31 @@ export function partitionBlindSpotCandidates<T extends { readonly file: RepoRela
     // fixed; that is the one sound deletion and the probe must not veto it.
     if (!observedFiles.has(candidate.file) && fileExists(candidate.file)) {
       retained.push({ candidate, reason: { kind: 'present-on-disk' } });
+      continue;
+    }
+    // MECHANISM 3, and the one that makes the difference between "a developer deleted this file"
+    // and "this checkout does not contain it". Both look identical per-file: absent from the scan,
+    // absent from disk. What separates them is the NEIGHBOURHOOD — a real deletion leaves its
+    // siblings behind, a missing tree takes them all with it. So: if the scan observed no file at
+    // all under this entry's own directory, the directory is not present, and "this violation was
+    // fixed" is an inference about a tree align never saw.
+    //
+    // Added after the 2026-08-17 review reproduced the alternative: two components, `rm -rf b/`,
+    // and `align baseline prune` printed "Pruned 1 fixed violation(s)" and exited 0 with the
+    // baseline emptied — the severity-zero class, in exactly the partial-checkout shape ADR 028
+    // Stage 4 was written to stop.
+    //
+    // Deliberately the IMMEDIATE parent, not any ancestor: the tightest directory that can be shown
+    // to have produced nothing. A root-level entry (`package.json`) tests against `''`, whose
+    // observed set is every file the scan saw, so manifest-domain entries are never retained by this
+    // arm on a healthy scan — the arm cannot re-introduce the greenfield block the review found in
+    // the whole-run floor this replaces.
+    // MECHANISM 3, imported from core so the move-transfer arm (`store.applyMoves`) and this
+    // delete arm cannot drift. They did drift: mechanism 3 was added here only, and an orphan in a
+    // missing directory was still transferred — forging consent onto an unreviewed violation from a
+    // plain `align check` (LEDGER D010). One predicate, two callers.
+    if (!observedFiles.has(candidate.file) && isUnderAbsentDirectory(candidate.file, observedFiles, fileExists)) {
+      retained.push({ candidate, reason: { kind: 'directory-absent', dir: directoryOf(candidate.file) } });
       continue;
     }
     forfeited.push(candidate);
@@ -131,10 +167,16 @@ export function describeRetainedEntries<T extends { readonly file: RepoRelativeP
       retained.flatMap((r) =>
         r.reason.kind === 'blind-spot'
           ? r.reason.spots.map((spot) => `${spot.path} (${describeBlindSpotReason(spot.reason)})`)
-          : // Named per FILE, not per path-prefix: there is no recorded path to blame, and the file
-            // itself is the only fact align has. Saying so plainly is the point — this is the arm
-            // that fires when align cannot explain why its own scan missed something.
-            [`${r.candidate.file} (still on disk, but this scan produced no result for it)`],
+          : r.reason.kind === 'directory-absent'
+            ? [
+                `${r.reason.dir === '' ? '<repo root>' : r.reason.dir} (that whole directory is absent from this working tree, ` +
+                  `so the file's disappearance is not evidence the violation was fixed — restore the tree, or forfeit these ` +
+                  `entries with \`align baseline prune --forget-unscanned ${r.reason.dir === '' ? '<prefix>' : r.reason.dir}\`)`,
+              ]
+            : // Named per FILE, not per path-prefix: there is no recorded path to blame, and the file
+              // itself is the only fact align has. Saying so plainly is the point — this is the arm
+              // that fires when align cannot explain why its own scan missed something.
+              [`${r.candidate.file} (still on disk, but this scan produced no result for it)`],
       ),
     ),
   ].sort((a, b) => a.localeCompare(b));

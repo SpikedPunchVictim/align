@@ -161,12 +161,28 @@ export function buildProgram(): Command {
         'proceed with deletion even though this scan could not resolve all dependencies (ADR 023 tier 2) — ' +
           'an absent violation on an incomplete scan may be unobservable rather than fixed',
         false,
+      )
+      // `<prefix>` (angle brackets) makes the value REQUIRED at the commander level, which is the
+      // first half of ADR 028 Stage 4's "no bare form that forfeits everything"; the second half is
+      // `parseForgetUnscannedPrefix`, which rejects the values that mean the repository root.
+      // ADR 006's consent gate on the deletion itself. `-y` matches `align upgrade`'s short flag.
+      .option('-y, --yes', 'consent to deleting the accepted consent decisions this prune removes, without being asked', false)
+      .option(
+        '--forget-unscanned <prefix>',
+        'forfeit the baseline entries under this repo-relative path that align has been RETAINING because it ' +
+          'could not see them (ADR 028) — for a subtree you have permanently excluded or removed. Deletes ' +
+          'accepted consent decisions: it is scoped to the prefix and is never implied',
       ),
-  ).action(async (opts: { allowIncomplete: boolean; telemetry?: boolean }) => {
+  ).action(async (opts: { allowIncomplete: boolean; yes: boolean; forgetUnscanned?: string; telemetry?: boolean }) => {
     const rootDir = resolveRootOrFail('align baseline prune');
     if (rootDir === undefined) return;
     const telemetryPreConfig = resolveTelemetryPreConfig({ telemetry: opts.telemetry });
-    process.exitCode = await baselinePrune(rootDir, opts.allowIncomplete, telemetryPreConfig);
+    process.exitCode = await baselinePrune(rootDir, {
+      allowIncomplete: opts.allowIncomplete,
+      yes: opts.yes,
+      ...(opts.forgetUnscanned !== undefined ? { forgetUnscanned: opts.forgetUnscanned } : {}),
+      ...(telemetryPreConfig !== undefined ? { telemetryPreConfig } : {}),
+    });
   });
 
   baseline

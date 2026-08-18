@@ -103,7 +103,7 @@ describe('FileExistenceProbe — the transfer arm (reached on every `align check
 
     // The whole point of ADR 006's move-transfer: a rename must not turn CI red for one cycle.
     // Over-retention would break that, so this test is the one that stops the fix overreaching.
-    expect(moves).toEqual([{ from: accepted.id, to: liveUnaccepted.id }]);
+    expect(moves).toMatchObject([{ from: accepted.id, to: liveUnaccepted.id }]);
     expect(store.isBaselined(liveUnaccepted.id)).toBe(true);
     expect(store.show()[0]?.acceptedBy).toBe('manual'); // provenance carried, not re-stamped
   });
@@ -115,7 +115,7 @@ describe('FileExistenceProbe — the transfer arm (reached on every `align check
     const store = new InMemoryBaselineStore([], onDisk('src/real.ts'));
     store.accept([accepted], 'manual');
 
-    expect(store.reconcileMoves([liveUnaccepted], knownFiles, [])).toEqual([
+    expect(store.reconcileMoves([liveUnaccepted], knownFiles, [])).toMatchObject([
       { from: accepted.id, to: liveUnaccepted.id },
     ]);
   });

@@ -90,12 +90,26 @@ export function refuseIfRunErrored(command: string, run: CheckRun, refusal: stri
  */
 export function refuseIfRunIncomplete(command: string, run: CheckRun, atRiskCount: number, allowIncomplete: boolean): number | undefined {
   if (atRiskCount === 0 || isRunComplete(run) || allowIncomplete) return undefined;
+  // `isRunComplete` now has two axes (LEDGER D011), and telling a user to install dependencies when
+  // the real problem is a component selector pointing at a directory that no longer exists sends
+  // them somewhere they cannot fix it. Name the axis that actually fired.
+  const ungrounded = run.ungroundedComponents;
+  const reason =
+    ungrounded.length > 0
+      ? `${ungrounded.length} declared component(s) matched no files (` +
+        `${ungrounded
+          .map((c) => `${c.name} → '${c.selector}'`)
+          .slice(0, 3)
+          .join(', ')}${ungrounded.length > 3 ? `, +${ungrounded.length - 3} more` : ''}), so every rule scoped to ` +
+        'them evaluated over nothing and their violations are unobservable rather than fixed. Check those selectors ' +
+        'against the tree'
+      : 'this scan could not resolve all dependencies (missing-dependencies advisory), so an absent violation may be ' +
+        'unobservable rather than fixed. Re-run with dependencies installed';
   return reportCliError(
     command,
     new Error(
-      `refusing to delete ${atRiskCount} ${atRiskCount === 1 ? 'entry' : 'entries'} — this scan could not resolve ` +
-        'all dependencies (missing-dependencies advisory), so an absent violation may be unobservable rather than ' +
-        'fixed. Re-run with dependencies installed, or pass --allow-incomplete.',
+      `refusing to delete ${atRiskCount} ${atRiskCount === 1 ? 'entry' : 'entries'} — ${reason}, or pass ` +
+        '--allow-incomplete.',
     ),
   );
 }

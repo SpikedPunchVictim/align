@@ -310,7 +310,11 @@ describe('GateOrchestrator', () => {
     expect(gate?.violations).toHaveLength(0);
     expect(gate?.baselinedCount).toBe(1);
     const advisory = run.advisories.find((a) => a.kind === 'baseline-moved');
-    expect(advisory?.message).toBe('1 entry transferred (file moves).');
+    // The message became a reviewable report on 2026-08-18 (LEDGER D015): a bare count cannot be
+    // reviewed, and this advisory is the only signal a human gets that an acceptance moved.
+    expect(advisory?.message).toContain('1 entry transferred (file moves)');
+    expect(advisory?.message).toMatch(/application\/api\/a\.ts → application\/api\/renamed\.ts/);
+    expect(advisory?.message).toContain('accepted by');
   });
 
   describe('custom.host registration surface (docs/proposals/rule-expansion-evaluation.md §B.0)', () => {
@@ -785,7 +789,7 @@ describe('GateOrchestrator', () => {
         expect(run.advisories.find((a) => a.kind === 'baseline-moved')).toBeUndefined();
       });
 
-      it('a manifest that genuinely disappears (workspace member moved) still transfers (ADR 006 unaffected)', async () => {
+      it('a manifest whose whole directory is absent no longer transfers — ADR 006 amended 2026-08-18, LEDGER D010', async () => {
         const ruleset = defineProject({
           components: { api: 'application/api/**' },
           rules: (c) => [c.security.manifest.sourceHygiene()],
@@ -821,11 +825,40 @@ describe('GateOrchestrator', () => {
         });
         const orchestrator2 = new GateOrchestrator(registry, ruleset, baseline, new Map(), manifestScanner2);
         const run = await orchestrator2.check({ rootDir: '/repo', excludes: [] });
-        expect(run.verdict).toBe('green');
+        // AMENDED BEHAVIOUR. This test previously asserted the transfer still happened, on ADR 006's
+        // "a rename must not turn CI red for one cycle". That guarantee now has a documented
+        // exception, and the reason is that align cannot tell these two situations apart from a
+        // single scan:
+        //
+        //   - `packages/old/` was RENAMED to `packages/new/` (this fixture) — transferring is right.
+        //   - `packages/old/` is simply ABSENT from this checkout, and a content-identical violation
+        //     already existed at `packages/new/` — transferring forges a real human's
+        //     `acceptedAt`/`acceptedBy` onto a violation nobody reviewed, turns a red repo green, and
+        //     exits 0 from a plain `align check` (LEDGER D010, reproduced 2026-08-17).
+        //
+        // Both present as "the old directory is gone and a content-identical violation exists
+        // elsewhere". Content fingerprint IS identity (FRAGILE #7), so nothing in one snapshot
+        // separates them. Given the asymmetry — a forged transfer is silent and irreversible, a
+        // missed transfer is loud and one `baseline accept` from resolved — mechanism 3 now gates the
+        // transfer arm too, and the rename pays one red cycle.
+        //
+        // THIS COST IS MEANT TO BE TEMPORARY. `docs/adr/029-2026-08-18-scan-observation-history.md` §6 closes
+        // D010 *without* it: with the previous scan on hand, "the match target was already observed
+        // last run" separates the forgery from the rename exactly, and this test should go back to
+        // asserting a transfer when that lands.
+        expect(run.verdict).toBe('red');
         const gate = run.gates.find((g) => g.gate === 'security');
-        expect(gate?.violations).toHaveLength(0);
-        expect(gate?.baselinedCount).toBe(1);
-        expect(run.advisories.find((a) => a.kind === 'baseline-moved')?.message).toBe('1 entry transferred (file moves).');
+        // The violation at the NEW path is reported as new rather than silently inheriting consent.
+        expect(gate?.violations).toHaveLength(1);
+        expect(gate?.baselinedCount).toBe(0);
+        // And the accepted entry is NOT destroyed — it stays at its original path for the human to
+        // re-accept or prune deliberately. Retention, not deletion, is what the block buys.
+        expect(baseline.show().map((e) => e.file)).toEqual(['packages/old/package.json']);
+        // No `baseline-moved` advisory either — nothing moved, so nothing is persisted by
+        // `persistMovedBaseline`. This is the assertion that pins D010 shut at its widest blast
+        // radius: that advisory is what makes a plain `align check` write the forged transfer to
+        // disk, with no flag, no prompt and exit 0.
+        expect(run.advisories.find((a) => a.kind === 'baseline-moved')).toBeUndefined();
       });
     });
   });

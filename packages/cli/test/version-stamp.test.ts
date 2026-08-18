@@ -104,7 +104,7 @@ describe('align baseline accept / prune — stamp alignVersion, never baselineRe
       'utf8',
     );
     fs.writeFileSync(versionJsonPath(tmpDir), JSON.stringify({ alignVersion: '0.0.1', baselineReconciledBy: '0.0.1' }), 'utf8');
-    await baselinePrune(tmpDir);
+    await baselinePrune(tmpDir, { yes: true });
     expect(readVersionFile(tmpDir)).toEqual({ alignVersion: ALIGN_VERSION, baselineReconciledBy: '0.0.1' });
   });
 });
@@ -218,7 +218,7 @@ describe('align check — the write discipline this slice is most likely to get 
     ]);
     fs.rmSync(versionJsonPath(tmpDir), { force: true });
 
-    const code = await baselinePrune(tmpDir);
+    const code = await baselinePrune(tmpDir, { yes: true });
     expect(code).not.toBe(0);
     expect(fs.existsSync(versionJsonPath(tmpDir))).toBe(false);
   });

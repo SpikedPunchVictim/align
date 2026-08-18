@@ -25,7 +25,11 @@
 // Note the notes are now keyed to `0.2.0`, not `0.1.4` — they describe commits that all postdate
 // the `v0.1.4` tag, and while they were mis-keyed `align upgrade --from 0.1.4` selected nothing at
 // all. This scenario never exercised that route (it passes no `--from`), which is precisely how the
-// mis-keying survived the harness. A scenario covering the explicit `--from` path is still owed.
+// mis-keying survived the harness. The explicit `--from` path is now covered by
+// `upgrade-groundless-scan-preview.mjs` (ADR 028 Stage 4), which passes `--from 0.1.4` against a
+// `local`-only install for a different reason and exercises that route as a side effect — so this
+// note is discharged, though a scenario whose SUBJECT is `--from` range selection is still worth
+// having.
 //
 // **The measurement question, answered honestly (see the increment-2 report for the full
 // writeup).** The churn mechanism this scenario exists to make reproducible is specifically

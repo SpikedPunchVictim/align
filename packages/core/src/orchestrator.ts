@@ -3,7 +3,8 @@ import type { DependencyGraph, ScanBlindSpot } from './types/graph.js';
 import type { RulesetIR } from './types/ir.js';
 import type { Violation } from './types/violation.js';
 import { EMPTY_MANIFEST_INVENTORY, type ManifestScanner } from './types/manifest.js';
-import type { BaselineStore } from './baseline/store.js';
+import type { BaselineStore, MovedEntry } from './baseline/store.js';
+import { describeMovedEntries } from './baseline/scan-blind-spots.js';
 import type { Advisory, CheckRun, GateResult } from './gates/types.js';
 import {
   buildBaselineGrowthAdvisories,
@@ -70,7 +71,7 @@ export class GateOrchestrator {
     // carve-out: `dependsOn: []`, "must always run regardless of what upstream gates report").
     const {
       gateResult: securityGate,
-      movedCount: securityMoves,
+      moved: securityMoves,
       observedFiles: manifestFiles,
       blindSpots: manifestBlindSpots,
     } = await this.runSecurityGate(options);
@@ -223,7 +224,7 @@ export class GateOrchestrator {
     const advisories: Advisory[] = [
       ...buildUncertaintyAdvisories(graph.uncertain),
       ...buildScanBlindSpotAdvisories([...graph.blindSpots, ...manifestBlindSpots]),
-      ...movedAdvisories(moves.length + securityMoves),
+      ...movedAdvisories([...moves, ...securityMoves]),
       // ADR 017 Part A: computed after evaluation succeeds (same "trustworthy ruleset" precondition
       // as `ungroundedComponents` below) — an ungrounded external selector is vacuously green, not
       // a failure, so it never affects `verdict`, only visibility.
@@ -273,7 +274,9 @@ export class GateOrchestrator {
    */
   private async runSecurityGate(options: CheckOptions): Promise<{
     readonly gateResult: GateResult;
-    readonly movedCount: number;
+    /** The security gate's own transfers, carried whole rather than counted, so the advisory can
+     * name what moved onto what (LEDGER D015). */
+    readonly moved: readonly MovedEntry[];
     /** This gate's own observed file set, carried onto `CheckRun.observedFiles.manifest` (ADR 028
      * §5) so `align baseline prune` reads the manifest domain off the run instead of walking it a
      * second time. Empty when the manifest scan threw — an inventory that failed to build observed
@@ -304,7 +307,7 @@ export class GateOrchestrator {
           cacheHits: 0,
           dependsOn: [],
         },
-        movedCount: 0,
+        moved: [],
         observedFiles: new Set<RepoRelativePath>(),
         blindSpots: [],
       };
@@ -352,7 +355,7 @@ export class GateOrchestrator {
         cacheHits: 0,
         dependsOn: [],
       },
-      movedCount: moves.length,
+      moved: moves,
       observedFiles: knownFiles,
       blindSpots: inventory.blindSpots,
     };
@@ -457,14 +460,14 @@ function skippedGate(gate: GateResult['gate'], dependsOn: readonly GateResult['g
   };
 }
 
-/** Shared advisory-shape builder for move-transfer counts (ADR 006) — the architecture gate's own
+/** Shared advisory-shape builder for move transfers (ADR 006) — the architecture gate's own
  * moves and the security gate's own moves are reconciled separately (two independent
  * `reconcileMoves` calls against disjoint violation sets, since a manifest violation's content
  * fingerprint never collides with a graph-based one) but reported as one combined advisory,
  * matching the single `baseline-moved` advisory shape every existing caller already expects. */
-function movedAdvisories(count: number): Advisory[] {
-  if (count === 0) return [];
-  return [{ kind: 'baseline-moved', message: `${count} ${count === 1 ? 'entry' : 'entries'} transferred (file moves).` }];
+function movedAdvisories(moves: readonly MovedEntry[]): Advisory[] {
+  if (moves.length === 0) return [];
+  return [{ kind: 'baseline-moved', message: describeMovedEntries(moves) }];
 }
 
 function deriveVerdict(gates: readonly GateResult[]): CheckRun['verdict'] {

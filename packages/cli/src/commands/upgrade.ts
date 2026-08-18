@@ -381,7 +381,20 @@ async function reconcilePrune(
     return { actionable: true, reconciled: false };
   }
 
-  const pruneCode = await baselinePrune(rootDir, options.allowIncomplete, options.telemetryPreConfig);
+  // No `forgetUnscanned` here, deliberately: `upgrade` reconciles a baseline across an align version
+  // change with the human consenting to a COUNT, and forfeiting retained entries is a separate,
+  // path-scoped decision the user makes by running `baseline prune --forget-unscanned` themselves.
+  const pruneCode = await baselinePrune(rootDir, {
+    ...(options.allowIncomplete !== undefined ? { allowIncomplete: options.allowIncomplete } : {}),
+    ...(options.telemetryPreConfig !== undefined ? { telemetryPreConfig: options.telemetryPreConfig } : {}),
+    // Consent is FORWARDED, not re-asked. `consented` above is this exact deletion's approval —
+    // either `--yes` or the human answering the prompt three lines up, which named the same count
+    // `baselinePrune` is about to act on (the preview repeats its three steps precisely so the two
+    // numbers agree). Letting `prune`'s own ADR 006 gate fire again would ask the identical question
+    // twice interactively, and in CI would refuse a reconciliation the user already authorised with
+    // `--yes` — turning a consent gate into a broken command.
+    yes: true,
+  });
   return { actionable: true, reconciled: pruneCode === 0 }; // a non-zero code already printed its own reason.
 }
 

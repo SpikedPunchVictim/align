@@ -310,7 +310,7 @@ describe('align baseline', () => {
       `export function handleRequest(): string {\n  return 'ok';\n}\n`,
       'utf8',
     );
-    await baselinePrune(tmpDir);
+    await baselinePrune(tmpDir, { yes: true });
     expect(readBaseline(tmpDir)).toHaveLength(0);
   });
 
@@ -358,7 +358,11 @@ describe('align baseline — move detection (ADR 006, carried-over Stage 1 gap)'
     const payload = JSON.parse(logs.join('')) as { verdict: string; advisories: { kind: string; message: string }[] };
     expect(payload.verdict).toBe('green');
     const advisory = payload.advisories.find((a) => a.kind === 'baseline-moved');
-    expect(advisory?.message).toBe('1 entry transferred (file moves).');
+    // Now a reviewable report rather than a bare count (LEDGER D015, 2026-08-18): this advisory is
+    // the only place a human sees that an acceptance moved onto a different file, and a count alone
+    // cannot be reviewed. Asserting the count plus the arrow keeps this test about the transfer.
+    expect(advisory?.message).toContain('1 entry transferred (file moves)');
+    expect(advisory?.message).toContain('→');
 
     // The transfer is persisted: the baseline entry now points at the renamed file under a new
     // fingerprint, and a second check (fresh load from disk) stays green with no further transfer.
@@ -393,7 +397,7 @@ describe('align baseline — move detection (ADR 006, carried-over Stage 1 gap)'
     await baselineAccept(tmpDir, undefined);
     fs.renameSync(path.join(tmpDir, 'src/api/service.ts'), path.join(tmpDir, 'src/api/renamed.ts'));
 
-    await baselinePrune(tmpDir);
+    await baselinePrune(tmpDir, { yes: true });
     const after = readBaseline(tmpDir);
     expect(after).toHaveLength(1);
     expect(after[0]?.file).toBe('src/api/renamed.ts');
@@ -401,7 +405,7 @@ describe('align baseline — move detection (ADR 006, carried-over Stage 1 gap)'
   });
 });
 
-describe('align check — baseline-debt trailer (docs/proposals/reconciled-build-order.md #2)', () => {
+describe('align check — baseline-debt trailer (docs/adr/proposals/deep-import-provenance/reconciled-build-order.md #2)', () => {
   async function readHuman(run: () => Promise<number>): Promise<{ code: number; text: string }> {
     const logs: string[] = [];
     const originalLog = console.log;
