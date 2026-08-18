@@ -52,8 +52,15 @@ describe('computeBaselineDebt — the one guarded computation shared by check/MC
   it('does NOT fabricate a debt drop on an error run (gates report 0 baselined) — reports no change', () => {
     // The bug: summing baselinedCount here yields `3 → 0 (−3)` though nothing was verified. An
     // errored gate ⇒ verdict:'error' (deriveVerdict), and the guard must report no-change instead.
-    const run = runWith('error', [gate({ status: 'error', baselinedCount: 0 })]);
-    expect(computeBaselineDebt(baselineOf(3), run, nothingOnDisk)).toEqual({ previous: 3, current: 3, delta: 0 });
+    //
+    // EVERY FILE IS OBSERVED, and that is load-bearing rather than incidental. With the empty
+    // `observedFiles` this test used to pass, mechanism 3 (`isUnderAbsentDirectory`) retained all
+    // three entries on its own, so deleting the tier-1 guard entirely left this test green — the
+    // D016 fix silently converted a working pin into a vacuous one. Observing the files disables
+    // every retention arm, which is what leaves tier 1 as the only thing that can produce this
+    // result. Verified by mutation: removing tier 1 now fails exactly this test and the one below.
+    const run = runWith('error', [gate({ status: 'error', baselinedCount: 0 })], { observed: ['a.ts', 'b.ts', 'c.ts'] });
+    expect(computeBaselineDebt(entriesAt('a.ts', 'b.ts', 'c.ts'), run, nothingOnDisk)).toEqual({ previous: 3, current: 3, delta: 0 });
   });
 });
 
@@ -81,7 +88,11 @@ describe('computeBaselineDebt — an unobservable entry is still debt, not paid-
 
   it('mechanism 1 — entries under a blind spot are counted as still baselined, not as a drop', () => {
     // The exact D016 repro, at unit scale: both entries hidden, no gate matched anything.
-    const run = runWith('green', [gate({ baselinedCount: 0 })], { blindSpots: hiddenByExcludes, observed: ['app.ts'] });
+    // `vendor/other.ts` is observed so that mechanism 3 cannot fire for this directory, and the
+    // probe reports nothing on disk so mechanism 2 cannot either. That leaves the blind-spot test as
+    // the only arm able to retain these entries — without it the test passed via mechanism 3 and
+    // named the wrong mechanism.
+    const run = runWith('green', [gate({ baselinedCount: 0 })], { blindSpots: hiddenByExcludes, observed: ['app.ts', 'vendor/other.ts'] });
     expect(computeBaselineDebt(entriesAt('vendor/a.ts', 'vendor/b.ts'), run, nothingOnDisk)).toEqual({
       previous: 2,
       current: 2,
@@ -119,7 +130,10 @@ describe('computeBaselineDebt — an unobservable entry is still debt, not paid-
   it('the errored-run guard still wins over the retention arm', () => {
     // Both causes present at once. Tier order matters: an errored run verified nothing at all, so it
     // reports no change regardless of what the blind-spot partition would have said.
-    const run = runWith('error', [gate({ status: 'error', baselinedCount: 0 })], { blindSpots: hiddenByExcludes });
+    // `live.ts` observed, so only `vendor/a.ts` has a retention arm available. Without tier 1 the
+    // answer would be `2 → 1 (-1)`; with it, no change. Previously both files were unobserved and
+    // mechanism 3 retained both, making the two answers identical and the test vacuous.
+    const run = runWith('error', [gate({ status: 'error', baselinedCount: 0 })], { blindSpots: hiddenByExcludes, observed: ['live.ts'] });
     expect(computeBaselineDebt(entriesAt('vendor/a.ts', 'live.ts'), run, nothingOnDisk)).toEqual({ previous: 2, current: 2, delta: 0 });
   });
 });

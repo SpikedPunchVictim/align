@@ -181,12 +181,21 @@ export function scanManifests(rootDir: string, excludes: readonly string[] = [])
 
   for (const pkg of loadWorkspacePackages(rootDir, record)) {
     const relDir = pkg.dir.endsWith('/') ? pkg.dir.slice(0, -1) : pkg.dir;
-    const pattern = matchingExcludePatternForDirectory(relDir, excludes);
+    // TWO tests, because the two domains name paths differently and one test alone leaves a gap
+    // that adversarial review found in the first version of this fix. The source walker matches
+    // FILE paths; this walker enumerates member DIRECTORIES. A pattern like `packages/vendor/*`
+    // matches `packages/vendor/package.json` but not `packages/vendor`, so testing only the
+    // directory excluded a package's sources while keeping its manifest — the exact "one entry,
+    // two meanings" divergence this shared matcher exists to remove.
+    const relManifest = `${relDir}/package.json`;
+    const dirPattern = matchingExcludePatternForDirectory(relDir, excludes);
+    const pattern = dirPattern ?? matchingExcludePatternForDirectory(relManifest, excludes);
     if (pattern !== undefined) {
-      // Recorded against the DIRECTORY, not the manifest path: at-or-under containment then covers
-      // the member's `package.json` and anything else under it, matching how the source walker
-      // records an excluded directory.
-      record(relDir, { kind: 'excluded', pattern });
+      // The DIRECTORY when the directory matched — at-or-under containment then covers the
+      // member's `package.json` and everything beside it, matching how the source walker records an
+      // excluded directory. Only the MANIFEST when only the manifest matched: claiming the whole
+      // directory there would retain baseline entries for files the pattern never mentioned.
+      record(dirPattern !== undefined ? relDir : relManifest, { kind: 'excluded', pattern });
       continue;
     }
     const memberRecord = buildManifestRecord(rootDir, relDir, lock?.importers?.[relDir], record);

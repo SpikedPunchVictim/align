@@ -307,6 +307,25 @@ describe('scanManifests records the absence exits ABOVE the per-manifest read (t
     },
   );
 
+  it('excludes a member whose MANIFEST the pattern matches, even when the directory does not match', () => {
+    dir = workspaceRepo();
+
+    // The residual half of the divergence, found by adversarial review of the first fix and missed
+    // by it. The source walker tests FILE paths; this domain tested only the member DIRECTORY. So
+    // `packages/member/*` — which matches `packages/member/package.json` but NOT `packages/member`
+    // — excluded the package's sources while leaving its manifest in the inventory. That is exactly
+    // the "one entry, two meanings" defect the first fix claimed to close, and the UPGRADING note
+    // shipped `packages/vendor/*` as its worked example, so the documented case was the broken one.
+    const inventory = scanManifests(dir, ['packages/member/*']);
+
+    expect(inventory.manifests.map((m) => m.file)).toEqual(['package.json']);
+    // Recorded against the MANIFEST here, not the directory: the pattern excluded that file, and
+    // claiming containment over the whole directory would over-retain everything beside it.
+    expect(inventory.blindSpots.map((sp) => ({ path: sp.path, kind: sp.reason.kind }))).toEqual([
+      { path: 'packages/member/package.json', kind: 'excluded' },
+    ]);
+  });
+
   it('does NOT record a genuinely absent pnpm-workspace.yaml or lockfile — ENOENT stays sound', () => {
     dir = workspaceRepo();
     fs.rmSync(path.join(dir, 'pnpm-workspace.yaml'));

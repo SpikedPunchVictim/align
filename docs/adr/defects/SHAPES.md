@@ -135,10 +135,16 @@ discovered in production — or, if you are lucky, on a scenario's first run.
 
 ## S-09 — Fixed one arm, missed the other
 
-**Instances**: ADR 027 F1 (S0), D016 (S1), D017 (S1). **Rung**: brief, **plus one executable
-technique** — see below. **Three instances in one day is the highest rate any shape here has, and
-that is the finding**: this repo's fixes are consistently scoped to the code the reproduction
-touched, and consistently stop at the edge of it.
+**Instances**: ADR 027 F1 (S0), **D010 (S0)**, D016 (S1), D017 (S1). **Rung**: brief, **plus one
+executable technique** — see below.
+
+**This register was a sample, not a census, for one day.** It shipped listing three instances while
+the ledger tagged four rows `[S-09]` — D010 was omitted, so D017 was recorded as the "third"
+instance when it is the fourth, and a claim of "three instances in one day" was really two (D016 and
+D017; D010 is older). Found by an adversarial audit that recounted from the ledger's own Shape
+column. CLAUDE.md §1.3 names this exact failure — *a register of exceptions that is actually a
+sample of exceptions is worse than none, because it will be read as exhaustive* — and it happened
+here, in the file that generates review briefs. Recount from `LEDGER.md` before quoting a rate.
 
 A defect class with two call sites. One is fixed; the other has the same shape and is not, because
 the fix was framed as a bug rather than a class. CLAUDE.md rule 6 in one line: *hunt the class, not

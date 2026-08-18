@@ -10,8 +10,11 @@ guessing. Deciding the contract before the code is written is what stops the mec
 
 ### One blind spot with seven faces
 
-`docs/adr/defects/LEDGER.md` holds 19 rows. **Seven of them turn on the same missing fact, and they
-include five of the ledger's seven severity zeros**:
+`docs/adr/defects/LEDGER.md` holds 18 rows (recounted 2026-08-18 at D018; the ledger grows, so treat
+this figure as dated rather than current). **Seven entries turn on the same missing fact, and they
+include four of the ledger's five severity zeros** — every S0 except D018, whose amnesia is about
+concurrent writers rather than about what a scan saw. The first draft said "five of seven", which
+counted ADR 027 F1 as a ledger row; it predates the ledger and is listed below without an ID:
 
 | Row | Sev | The question align could not answer | Direction |
 |---|---|---|---|

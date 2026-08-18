@@ -27,18 +27,6 @@ export interface WorkspacePackage {
 const asStringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((p): p is string => typeof p === 'string') : [];
 
-/**
- * The workspace glob-pattern list, read from whichever package manager's declaration exists:
- * pnpm's `pnpm-workspace.yaml` `packages:` (authoritative for pnpm — package.json `workspaces` is
- * ignored by pnpm, so it wins when both are present), or npm/yarn/bun's `package.json`
- * `workspaces` field (array form, or yarn-classic's `{ packages: [...] }` object form), or, as a
- * last fallback, lerna's `lerna.json` `packages` field — a lerna monorepo (e.g. NestJS) declares
- * its members there and often ships no `workspaces` field at all, so without this its whole
- * `packages/*` tree collapses to a single `app` component. The glob vocabulary is identical across
- * all of them, so `expandPattern` consumes the result unchanged. Deno (`deno.json`'s `workspace`
- * field) is intentionally not read here — see the PM-support notes. Read-only survey posture: a
- * malformed file yields `[]`, never a thrown scan.
- */
 export type BlindSpotSink = (path: string, reason: ScanBlindSpot['reason']) => void;
 
 /**
@@ -61,6 +49,18 @@ function readDeclaration(absPath: string, relPath: string, record: BlindSpotSink
   }
 }
 
+/**
+ * The workspace glob-pattern list, read from whichever package manager's declaration exists:
+ * pnpm's `pnpm-workspace.yaml` `packages:` (authoritative for pnpm — package.json `workspaces` is
+ * ignored by pnpm, so it wins when both are present), or npm/yarn/bun's `package.json`
+ * `workspaces` field (array form, or yarn-classic's `{ packages: [...] }` object form), or, as a
+ * last fallback, lerna's `lerna.json` `packages` field — a lerna monorepo (e.g. NestJS) declares
+ * its members there and often ships no `workspaces` field at all, so without this its whole
+ * `packages/*` tree collapses to a single `app` component. The glob vocabulary is identical across
+ * all of them, so `expandPattern` consumes the result unchanged. Deno (`deno.json`'s `workspace`
+ * field) is intentionally not read here — see the PM-support notes. Read-only survey posture: a
+ * malformed file yields `[]`, never a thrown scan.
+ */
 /**
  * `record` (task #11): the sink `loadWorkspacePackages` already threads for per-member failures,
  * extended to the layer that decides whether that loop runs at ALL.

@@ -26,8 +26,12 @@ agent's guards reduce that risk but do not eliminate it:
 A third bound is on **what the scan saw at all**. A file can be present on disk and still absent
 from align's scan — behind an `excludes` pattern, under a `node_modules`-class directory, inside a
 nested checkout, behind a symlink (the walk does not follow links), in an unreadable directory, or
-in an unparseable manifest. Every such path is reported (`scan-blind-spot` advisories, and
-`CheckRun.blindSpots` structurally), and the agent's `VERIFY` step inherits the same bound its
+in an unparseable manifest. Every such path is on `CheckRun.blindSpots` structurally, which is the
+bound an agent should read. **Not every one produces an advisory**: an `excludes` match and a
+`node_modules`-class directory deliberately produce none (you wrote those patterns), and a nested
+checkout reports under `nested-checkout-skipped` rather than `scan-blind-spot`. An agent filtering
+advisories by `kind === 'scan-blind-spot'` therefore sees less than the full scope gap — read
+`blindSpots`. The agent's `VERIFY` step inherits the same bound its
 oracle has: **green means "nothing the scan looked at is violating", not "nothing is violating".**
 The agent runs no destructive baseline command, and its `runCheck` calls the orchestrator directly
 without `persistMovedBaseline` (`cli/src/commands/agent.ts`) — so a move-transfer computed during a

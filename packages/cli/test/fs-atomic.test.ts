@@ -133,6 +133,43 @@ describe('writeFileAtomic', () => {
     expect(leftoverTempFiles(d)).toEqual([]);
   });
 
+  it('REPLACES the file rather than truncating it — the property the whole module exists for', () => {
+    const d = tmpDir();
+    const file = path.join(d, 'replaced.json');
+    fs.writeFileSync(file, 'OLD');
+    const before = fs.statSync(file).ino;
+
+    writeFileAtomic(file, 'NEW');
+
+    // The discriminator, and it is deterministic in a single-threaded test where a timing race is
+    // not. `writeFileSync` opens the SAME inode with O_TRUNC — the window in which a reader or a
+    // crash sees an empty file. A rename installs a NEW inode and swaps the directory entry, so
+    // there is no such window. Adversarial review showed that replacing this module's body with
+    // `fs.writeFileSync` left all 626 cli tests green: nothing anywhere observed the difference.
+    expect(fs.statSync(file).ino).not.toBe(before);
+    expect(fs.readFileSync(file, 'utf8')).toBe('NEW');
+  });
+
+  it('a reader holding the file open still sees the OLD bytes, never a truncated file', () => {
+    const d = tmpDir();
+    const file = path.join(d, 'held.json');
+    const oldContents = `${'o'.repeat(64_000)}\n`;
+    fs.writeFileSync(file, oldContents);
+
+    // A reader that opened before the write is exactly the case `O_TRUNC` corrupts: with
+    // `writeFileSync` this descriptor would observe the file shrink to zero and refill. With a
+    // rename it keeps the whole original inode, which is the guarantee stated in the doc comment.
+    const reader = fs.openSync(file, 'r');
+    try {
+      writeFileAtomic(file, 'NEW');
+      const seen = fs.readFileSync(reader);
+      expect(seen.toString('utf8')).toBe(oldContents);
+    } finally {
+      fs.closeSync(reader);
+    }
+    expect(fs.readFileSync(file, 'utf8')).toBe('NEW');
+  });
+
   it('a reader never observes a partial file — only the old bytes or the new ones', () => {
     const d = tmpDir();
     const file = path.join(d, 'observed.json');

@@ -182,15 +182,16 @@ prefix. So `excludes: ['packages/vendor/*']` hid a vendored package's **source f
 `package.json` stayed in the scan, and `security.manifest.*` rules kept reporting against it. Both
 domains now use the source walker's matcher.
 
-**What you will see**: if you exclude a directory with a glob (`*`, `**`, or a `{a,b}` brace group)
-and that directory contains a `package.json`, its manifest violations will stop being reported.
+**What you will see**: if a pattern excludes a package — either by matching its directory
+(`packages/vendor`, `packages/*`, `packages/vendor/**`, `packages/{vendor,other}`) or by matching
+its `package.json` (`packages/vendor/*`) — that package's manifest violations stop being reported.
 That is what the exclude asked for. Baseline entries for those violations are **retained, not
 pruned** — they are unobservable now, not fixed — so nothing in `.align/baseline.json` is lost, and
 `align baseline prune` will name the pattern responsible if you ask it to clean up.
 
-If you *want* a package's manifest scanned while its sources are excluded, an exclude pattern can no
-longer express that; exclude the source subdirectory (`packages/vendor/src/**`) instead of the
-package directory.
+If you *want* a package's manifest scanned while its sources are excluded, name the source
+subdirectory (`packages/vendor/src/**`) rather than anything that matches the package directory or
+its `package.json`.
 
 ### align now tells you when it could not read your workspace files
 
@@ -228,10 +229,16 @@ up the current baseline.
 see this in CI, two align invocations are running concurrently against one working copy; serialize
 them.
 
-Every `.align/` file is also written atomically now (temp file + `rename`), so a run interrupted
-mid-write — Ctrl-C, an OOM kill, a cancelled CI job — leaves the previous file intact instead of a
-truncated one. If you ever hit "baseline.json is not valid JSON" after an interrupted run, that is
-the failure this removes.
+Every `.align/` file align rewrites in full is now written atomically (temp file + `rename`), so a
+run interrupted mid-write — Ctrl-C, an OOM kill, a cancelled CI job — leaves the previous file
+intact instead of a truncated one. If you ever hit "baseline.json is not valid JSON" after an
+interrupted run, that is the failure this removes. (`.align/telemetry.jsonl` is appended to rather
+than rewritten, so it is not part of this and never needed to be.)
+
+A concurrent align does **not** fail `align check`. The transfer it could not persist is re-derived
+and re-persisted by the next run, so `check` reports the collision on stderr and still prints its
+results and its usual exit code. Commands whose purpose is the write — `baseline accept`, `baseline
+prune`, `init` — do fail, because for them nothing was recorded.
 
 ### `align baseline prune` now asks before it deletes
 

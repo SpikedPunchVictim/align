@@ -125,7 +125,12 @@ export function validateExpect(expect, context) {
   if (Object.keys(expect).length === 0) {
     throw new Error(`${context}: expect is an empty object — it asserts nothing. Remove the 'expect' block or add a real check.`);
   }
-  for (const key of ['stdoutContains', 'stderrContains', 'stdoutNotContains', 'stderrNotContains']) {
+  // `stdoutMatches` was missing from this list until adversarial review found it (2026-08-18). It is
+  // the one that mattered most: an empty PATTERN is a regex matching everything, so
+  // `stdoutMatches: ''` reads as a real assertion and asserts nothing — shape S-05, in the file
+  // whose job is to prevent shape S-05. The three ADR 028 Stage 5 scenarios lean on `stdoutMatches`
+  // heavily, so the gap was live coverage, not a hypothetical.
+  for (const key of ['stdoutContains', 'stderrContains', 'stdoutNotContains', 'stderrNotContains', 'stdoutMatches']) {
     if (expect[key] === '') {
       throw new Error(`${context}: expect.${key} is an empty string, which matches/fails-to-match trivially — use a real, non-empty substring.`);
     }

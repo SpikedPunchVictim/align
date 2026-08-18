@@ -67,9 +67,16 @@ A destroyed consent decision at exit 0 is CLAUDE.md rule 6's severity zero.
 
 Two mechanisms, and **neither works without the other**:
 
-**A short lock** (`cli/src/align-lock.ts`). An exclusive lockfile at `.align/.lock`, created with
-`open(…, 'wx')` — atomic create-if-absent, no native dependency, which matters for a tool whose
-posture is "read-only, no install required".
+**A short lock** (`cli/src/align-lock.ts`). An exclusive lockfile at `.align/.lock`, published by
+writing a complete holder file to a temp name and `link`ing it into place — `link` creates only if
+the name is free, so acquisition is one atomic step and no partial lock is ever visible. No native
+dependency, which matters for a tool whose posture is "read-only, no install required".
+
+*Amended 2026-08-18, after adversarial review.* The first version acquired in TWO steps —
+`open(…,'wx')` to create an empty lock, then a write to fill it — and a kill in that window left a
+lock nothing could parse. Combined with §4 as originally written, that lock was unbreakable at any
+age: measured, every later align in the repository waited the full timeout and failed until a human
+deleted the file. A lock built to survive crashes had a crash window that bricked the repo.
 
 **A read token** (`readBaselineSnapshot` → `writeBaseline`). The reader takes a content hash of the
 bytes it read; the writer compares it against the file's current bytes and refuses if they differ.
@@ -101,8 +108,16 @@ nothing locally, and `kill(pid, 0)` would answer about an unrelated local proces
 costs a confused user one `rm`; guessing costs them the baseline. Breaking is always announced on
 stderr.
 
-An unreadable or malformed lock file is treated as *held by someone unidentifiable*, never as
-absent. Corrupt is not absent — ADR 028's discipline, applied to the lock itself.
+An unreadable or malformed lock file is treated as *held by someone unidentifiable* rather than as
+absent — it is not evidence that nobody holds the lock — but it IS breakable once its mtime clears
+the same staleness floor.
+
+*Amended 2026-08-18.* The first version refused to break such a lock at any age, on the grounds that
+"corrupt is not absent". That borrowed the right rule from the wrong place. The discipline exists for
+`baseline.json`, which holds irreplaceable human data; `.align/.lock` is a file align creates, owns
+and deletes on every run and which holds nothing. There, never-break is the *unsafe* direction — its
+failure mode is a permanently bricked repository — so age is the recovery, and §2's atomic acquire
+means align itself can no longer produce an unparseable lock in the first place.
 
 ## Consequences
 
@@ -118,7 +133,7 @@ the way this class reproduces itself. This is the same technique D016's fix used
 distinct from "the baseline is empty" — and since both read back as zero entries, nothing downstream
 could tell them apart. A stale `undefined` written over a racing `init`'s empty baseline is refused.
 
-**Tests seed through a helper, not through the guard.** ~65 fixture seeds call `seedBaseline`
+**Tests seed through a helper, not through the guard.** 71 fixture seeds call `seedBaseline`
 (`test/seed-baseline.ts`), which re-reads and writes against current state. Letting each site invent
 a token would have taught the next reader that passing `undefined` is acceptable.
 
@@ -127,6 +142,16 @@ importing `align-dir.ts` for the directory path, while `align-dir.ts` imported t
 rejected by `arch.no-cycles:repo` on this repository. `withAlignDirLock` now takes the `.align`
 directory rather than the repo root: `align-dir` knows align's layout, `align-lock` knows how to
 lock a directory, and the dependency runs one way.
+
+**Three regressions in the first implementation, found by adversarial review after it landed** —
+recorded here because the ADR is what a future reader will trust. (1) Both refusals escaped as plain
+`Error`s, and `align check` routes anything from `persistMovedBaseline` to `reportCliError`, so a
+concurrent align turned a green repo into exit 1 with no results printed. They now throw
+`ConcurrentAlignWriteError`; `check` reports it and carries on, while commands whose purpose is the
+write still fail. (2) The two-step acquire above. (3) `writeFileAtomic` silently widened file modes
+(0600 → 0644) and replaced symlinks with regular files, both of which `writeFileSync` preserved; it
+now carries the previous mode and resolves symlinks. All three were reproduced before being fixed
+and are pinned by mutation-verified tests.
 
 **A second self-caught defect, before it shipped.** Acquisition and execution originally shared one
 `try`, so any error escaping the body was inspected for `EEXIST` — and the body is a filesystem
@@ -144,6 +169,6 @@ while writing the tests, and pinned by one.
   filesystems; NFS is best-effort. The cross-host rule above is the mitigation, not a claim of
   correctness there.
 - **The other `.align/` artifacts get atomicity but no token.** `generated-rules.json`,
-  `rules-lock.json`, `ruleset-ir.json`, `version.json` and the telemetry state are regenerable
+  `rules.lock.json`, `ruleset-ir.json`, `version.json`, `last-build-report.md` and the telemetry state are regenerable
   caches; losing a concurrent write to one costs a rebuild, not a consent decision. Scope the
   expensive guarantee to the irreplaceable file.

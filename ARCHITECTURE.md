@@ -1,6 +1,6 @@
 # align — Architecture (v1 + growth path)
 
-Status: proposed for sign-off (Stage 0). Companion documents: `docs/adr/` (twelve ADRs), `docs/ir-schema.md`,
+Status: proposed for sign-off (Stage 0). Companion documents: `docs/adr/` (30 ADRs), `docs/ir-schema.md`,
 `docs/core-interfaces.md`. Evidence source: `docs/adr/proposals/graph-extraction/kluster-spike/SPIKE_REPORT.md`. Plan source: `IMPLEMENTATION_PLAN.md`.
 
 ## 1. Purpose & product thesis
