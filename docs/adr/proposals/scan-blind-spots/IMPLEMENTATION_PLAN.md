@@ -390,11 +390,35 @@ pre-commit hook, and `upgrade` forwards the consent it already obtained rather t
 **Work**
 - Three integration scenarios (ADR 025) with declared write-sets (ADR 026): **symlink**,
   **unreadable directory**, **excludes-shrink**. Each asserts the entry survives, the advisory names
-  the reason, and `align check` does **not** forge a transfer.
-- Carried from Stage 4, reporting only: decide whether the floor should suppress or qualify
-  `align upgrade`'s `baselined debt: N → 0` line, which reports a drop the same run then refuses to
-  act on (`upgrade-groundless-scan-preview.mjs` measures it and deliberately leaves it unasserted).
-  The floor's own integration coverage landed in Stage 4, so this is a wording decision, not a gap.
+  the reason, and `align check` does **not** forge a transfer. **DONE 2026-08-18** —
+  `blind-spot-{symlink,unreadable,excludes-shrink}-retains.mjs`, red-before-green measured for each
+  (see below). Three corrections to the plan as written, all measured:
+  - **The advisory does not name the reason for the excludes case, by design.**
+    `ADVISORY_BLIND_SPOT_REASONS` omits `excluded` and `default-excluded-dir` because the user
+    authored those patterns. Verified against the built binary: `align check` prints no
+    `scan-blind-spot` advisory in that state, so the reason reaches the user through `prune`'s
+    retention line and nowhere else. The scenario asserts what is true rather than what the plan
+    assumed.
+  - **Only the unreadable case isolates mechanism 1.** With the blind-spot record disabled and
+    nothing else changed, the symlink and excludes scenarios still PASS — a readable directory lets
+    the file-existence probe answer "present" on its own. Both mechanisms must be disabled before
+    those two fail. The redundancy is real and is now documented in each scenario's header rather
+    than implied.
+  - **The `unreadable` scenario cannot run as root** (`chmod` does not stop root, and the
+    Dockerfile's `node:24-slim` sets no `USER`). The mutation verifies its own precondition and
+    throws a named error rather than passing vacuously; the gate that matters
+    (`.github/workflows/ci.yml`) runs non-root. Whether to add `USER node` to the Dockerfile is
+    open.
+- ~~Carried from Stage 4, reporting only: decide whether the floor should suppress or qualify
+  `align upgrade`'s `baselined debt: N → 0` line ... this is a wording decision, not a gap.~~
+  **INVESTIGATED 2026-08-18 — it is a gap, and wider than `upgrade`.** Measured against the built
+  binary on a two-entry world hidden behind one `excludes` pattern: `align check` prints
+  `baselined debt: 2 → 0 (-2)`, `verdict: green`, **exit 0**, with both accepted entries still in
+  `.align/baseline.json` and nothing fixed — while `prune` on the same state correctly reports
+  `Retained 2 entries`. `computeBaselineDebt` already refuses to report a drop on an errored run,
+  with a comment naming this exact hazard; ADR 028 introduced a second cause of the same
+  fabrication and the guard was never extended to it. Filed as **LEDGER D016** with the fix
+  direction; not a wording change, and `check` — not `upgrade` — is the common path.
 - `integration/lib/` — new assertion kinds if needed; register in `spec-validate.mjs` (the
   `jsonArrayEveryHasField` precedent).
 - `UPGRADING.md` — 0.2.0 note: retention is a behaviour change users will notice.
@@ -403,7 +427,10 @@ pre-commit hook, and `upgrade` forwards the consent it already obtained rather t
 - `docs/core-interfaces.md:618-631` — the documented `McpCheckPayload` block is **already stale by
   four fields** (it stops at `advisories`; the real interface continues with `ungroundedComponents`,
   `skippedNestedCheckouts`, `baselineDebt`, `complete`). Bring it to reality, including `blindSpots`.
-- **Enforce that block against the type** so it cannot drift again — this is the mechanism that
+- **Enforce that block against the type** so it cannot drift again. **DONE 2026-08-18** —
+  `packages/core/test/core-interfaces-doc.test.ts`, with a calibration test and a red-before-green
+  check (removing `complete` from the markdown fails it). Measured drift on arrival: the block was
+  four fields behind (`ungroundedComponents`, `blindSpots`, `baselineDebt`, `complete`). — this is the mechanism that
   actually failed here; a payload version field would not have caught it. No existing doc-integrity
   harness to extend (checked: ADR 018's machinery covers doc-built rules, not markdown type blocks),
   so this is new: extract the `ts` block from the markdown and compare its field list against the
@@ -411,9 +438,18 @@ pre-commit hook, and `upgrade` forwards the consent it already obtained rather t
   `plugin-typescript`, and the idiomatic choice here over a runtime key-comparison, which cannot see
   absent optional fields like `pagination?`.
 - `docs/adr/027-*.md` — amend with a pointer to 028 as the generalization of its closing lesson.
-- `ARCHITECTURE.md` — §3's data flow gains the blind-spot record. Also fix the false citation at
-  `orchestrator.ts:248` ("sole owner of scanning, ARCHITECTURE.md §5" — §5 is *Package layout* and
-  says no such thing).
+  **DONE 2026-08-18**: "Amendment (2026-08-18): that enumeration was done, and the answer was worse
+  than this ADR assumed".
+- `ARCHITECTURE.md` — §3's data flow gains the blind-spot record. **DONE 2026-08-18** (step 2b), and
+  written as load-bearing rather than diagnostic: it names the three consumers that infer meaning
+  from absence, which is the fact a reader needs.
+  - ~~Also fix the false citation at `orchestrator.ts:248` ("sole owner of scanning,
+    ARCHITECTURE.md §5")~~ — **STALE, no action needed.** Verified 2026-08-18: the string "sole
+    owner" appears nowhere under `packages/`. `git log -S` puts its removal in `25ccf98` ("delete
+    orchestrator.knownFiles(); prune scans once", Stage 3 of this plan) — the comment went with the
+    method it documented. The remaining `ARCHITECTURE.md §5` citations in `orchestrator.ts` (lines
+    31, and §3 at line 45) were checked against the document and are accurate. Recorded rather than
+    deleted because a plan item that quietly disappears reads, later, as one that was forgotten.
 
 **Success Criteria**
 - `expectFailOn: ['0.1.4']` added **only after** `local` goes green, so a red run distinguishes the
