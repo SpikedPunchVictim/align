@@ -37,6 +37,70 @@ const KNOWN_MCPCALL_STEP_KEYS = new Set(['mcpCall', 'expect', 'keepVersion']);
 const KNOWN_MCPCALL_SPEC_KEYS = new Set(['tool', 'arguments']);
 const KNOWN_MCP_EXPECT_KEYS = new Set(['isError', 'textContains', 'textNotContains']);
 
+/**
+ * Rejects a duplicate key in any object literal in a scenario's SOURCE — shape S-05's third
+ * instance, promoted from a review question to an executable invariant (docs/adr/defects/SHAPES.md).
+ *
+ * **Why this cannot be checked on the scenario object.** Every other validation in this file
+ * inspects the imported value. A duplicate key is invisible there: `{ stdoutContains: 'a',
+ * stdoutContains: 'b' }` is legal JavaScript, and by the time `import()` returns, the engine has
+ * already discarded the first binding. `Object.keys` sees one key, `validateExpect` sees one key,
+ * and the assertion the author wrote FIRST is silently gone. The only place the duplicate still
+ * exists is the text on disk, so that is what this reads.
+ *
+ * **Why it earns an invariant.** Written and caught by hand three times now: LEDGER D006 (an
+ * assertion pinned by the next test rather than itself), and twice while writing ADR 028's
+ * scenarios — once in `partial-checkout-retains`, where a second `stdoutContains` would have
+ * dropped `'Retained 1 entry'` while the scenario still passed. A shape with a second instance has
+ * earned promotion so nobody has to remember it; this is the third.
+ *
+ * The failure mode it prevents is the worst kind this harness has: not a scenario that breaks, but
+ * one that keeps passing while asserting less than it claims.
+ *
+ * Uses the TypeScript compiler's parser (already a devDependency at the repo root, and the same
+ * tool `packages/core/test/core-interfaces-doc.test.ts` uses) rather than a regex — a regex over
+ * nested object literals inside comments and template strings is exactly the kind of check that
+ * appears to work until the day it silently does not, which would make this itself an S-05.
+ *
+ * Computed keys (`[foo]: 1`) and spreads are skipped: their names are not statically known, so
+ * neither a duplicate nor its absence can be established. Scenario files use neither today; if one
+ * ever does, this stays silent about it rather than guessing.
+ */
+export function validateNoDuplicateKeys(sourceText, context, ts) {
+  const source = ts.createSourceFile(context, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const problems = [];
+
+  const visit = (node) => {
+    if (ts.isObjectLiteralExpression(node)) {
+      const seen = new Map();
+      for (const prop of node.properties) {
+        if (!ts.isPropertyAssignment(prop) && !ts.isShorthandPropertyAssignment(prop) && !ts.isMethodDeclaration(prop)) continue;
+        const nameNode = prop.name;
+        if (nameNode === undefined || ts.isComputedPropertyName(nameNode)) continue;
+        const name = ts.isStringLiteral(nameNode) || ts.isNumericLiteral(nameNode) ? nameNode.text : nameNode.getText(source);
+        const previous = seen.get(name);
+        if (previous !== undefined) {
+          const line = (offset) => source.getLineAndCharacterOfPosition(offset).line + 1;
+          problems.push(`'${name}' appears twice in the same object literal (lines ${line(previous)} and ${line(prop.getStart(source))})`);
+        } else {
+          seen.set(name, prop.getStart(source));
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+
+  if (problems.length > 0) {
+    throw new Error(
+      `${context}: duplicate object key(s) — ${problems.join('; ')}. JavaScript keeps only the LAST ` +
+        'one, so the earlier assertion is silently discarded and the scenario passes while checking ' +
+        'less than it appears to (shape S-05). Combine them into a single key — `stdoutMatches` with ' +
+        'one regex covers what two `stdoutContains` keys were reaching for.',
+    );
+  }
+}
+
 function unknownKeys(obj, known) {
   return Object.keys(obj).filter((k) => !known.has(k));
 }

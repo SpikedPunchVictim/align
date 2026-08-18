@@ -18,7 +18,12 @@ import { fileURLToPath } from 'node:url';
 import { prepareProjectBase, materializeWorkingCopy } from './lib/project.mjs';
 import { runScenario } from './lib/scenario-runner.mjs';
 import { ensureDir, removeDir, writeJson } from './lib/fs-utils.mjs';
-import { validateScenario } from './lib/spec-validate.mjs';
+import { validateScenario, validateNoDuplicateKeys } from './lib/spec-validate.mjs';
+// Injected into `validateNoDuplicateKeys` rather than imported inside it, so `spec-validate.mjs`
+// stays a pure, dependency-free module the way the rest of `lib/` is — and so a unit-style check of
+// the validator can drive it without the harness. Resolves from the repo root's devDependencies
+// (the Dockerfile's `pnpm install --frozen-lockfile` provides it, as does CI's).
+import ts from 'typescript';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const alignRepoRoot = path.join(here, '..');
@@ -90,7 +95,13 @@ async function loadScenarios(filterIds, projectId, tagFilter) {
   const knownProjectIds = await loadKnownProjectIds();
   const all = [];
   for (const f of files) {
-    const mod = await import(path.join(dir, f));
+    const abs = path.join(dir, f);
+    // S-05, promoted to an invariant 2026-08-18: read the SOURCE before importing it. A duplicate
+    // object key is legal JavaScript and is gone by the time `import()` resolves — the engine keeps
+    // the last binding — so a second `stdoutContains` silently deletes the first assertion and the
+    // scenario keeps passing while checking less than it claims. Nothing downstream can see it.
+    validateNoDuplicateKeys(fs.readFileSync(abs, 'utf8'), `scenario ${f}`, ts);
+    const mod = await import(abs);
     const scenario = mod.default;
     // F1: reject a malformed spec (unknown expect/assert keys, an expect that asserts nothing, an
     // empty-string content check, ...) at LOAD time, for every scenario file that exists on disk —

@@ -69,13 +69,26 @@ because it feels like the conservative choice.
 ## S-05 — A test that passes for the wrong reason
 
 **Instances**: D006, plus two pre-existing tests that passed because destructuring a string yielded
-`undefined`. **Rung**: brief.
+`undefined`, plus a duplicate `stdoutContains` key written and caught by hand while fixing
+`partial-checkout-retains` (2026-08-17). **Rung**: **executable invariant, partially** — see below.
 
 The assertion holds for a reason unrelated to the property named in the test title. Invisible while
 green.
 
 > **Ask**: revert the implementation this test names and confirm it fails. If the final assertion
 > would be identical under a broken implementation, it is pinning nothing.
+
+**Promoted 2026-08-18, for the one sub-case a machine can decide.** An integration scenario's
+`expect` block is a plain JS object literal, so two `stdoutContains` keys are legal and JavaScript
+keeps only the last — the first assertion vanishes and the scenario still passes.
+`validateNoDuplicateKeys` (`integration/lib/spec-validate.mjs`, called from `run.mjs`'s
+`loadScenarios`) now parses each scenario's SOURCE and refuses to run on any duplicate key in any
+object literal. It has to read the text: by the time `import()` resolves, the duplicate is already
+gone, which is why no check on the loaded object could ever have caught it.
+
+The rest of the shape stays a brief and always will. "This assertion passes for a reason unrelated
+to its title" is not decidable; the duplicate-key case was decidable, so it is now decided
+automatically and nobody has to remember it.
 
 ---
 
