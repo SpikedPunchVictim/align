@@ -455,14 +455,34 @@ pre-commit hook, and `upgrade` forwards the consent it already obtained rather t
 
 **Success Criteria**
 - `expectFailOn: ['0.1.4']` added **only after** `local` goes green, so a red run distinguishes the
-  bug from a scenario that never ran.
-- Full matrix `--targets 0.1.4,local` green, calibration intact.
+  bug from a scenario that never ran. **DONE 2026-08-18**, and the earlier worry that 0.1.4 might
+  fail these for the wrong reason (unable to load the generated config) was a hypothesis and is
+  false: measured against the published 0.1.4 tarballs, it loads the world's config and finds both
+  violations. All three then fail at **step 9 — the pin** — with `align check` going red -> green at
+  exit 0 and one accepted entry re-homed onto the never-reviewed bait (`baselined debt: 2 -> 1 (-1)`).
+- Full matrix `--targets 0.1.4,local` green, calibration intact. **DONE 2026-08-18, BOTH PROJECT
+  LINES** (the D012 trap: `run.mjs` filters by project, so the default `--project nest` alone skips
+  every scenario declared against another one):
+  - `--targets 0.1.4,local` — 20/20 PASS on local, 6 FAIL on 0.1.4, exit 0, no calibration break.
+  - `--targets 0.1.4,local --project nest-incomplete` — 1/1 PASS on local, 1 FAIL on 0.1.4, exit 0.
+- **Audited: every one of the seven `expectFailOn` pins fails on 0.1.4 at the step its own header
+  claims**, not for an incidental reason. `expectFailOn` can only see pass/fail, never which step,
+  so this had to be read out of the logs rather than inferred from the green matrix:
+  the three blind-spot scenarios at step 9; `init-rerun-preserves-content-fingerprint` at step 8
+  (0 of 389 entries kept `contentFingerprint` — its header's "fails at step 8 and NOT earlier" is
+  accurate); `mcp-propose-rules-baseline-gate` at step 4 (no gate at all);
+  `prune-errored-run-destroys-baseline` at step 7 (exits 0 and destroys the baseline);
+  `prune-incomplete-scan-requires-allow-incomplete` at step 8 (no tier-2 refusal — deletes 371
+  entries at exit 0). That last one was the suspect, because its later steps use `--allow-incomplete`
+  and `--yes`, both of which postdate 0.1.4 and would fail as unknown options; they do, at step 10,
+  *after* the real pin has already fired. `prune-forget-unscanned-retained` continues to decline a
+  pin for exactly that reason and is correct to.
 
 **Tests**
 - The three scenarios red before the fix, green after — verified in that order.
-- Flaky confirmation: 15× on the new suites.
+- Flaky confirmation: 15× on the new suites. **Outstanding.**
 
-**Status**: Not Started
+**Status**: In Progress — everything above is done except the 15× flake measurement.
 
 ---
 
