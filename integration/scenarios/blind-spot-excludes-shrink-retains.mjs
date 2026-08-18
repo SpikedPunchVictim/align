@@ -80,7 +80,17 @@ export default {
     // STEP 9 — THE PIN. Still red (the bait is still an unreviewed violation), and — the assertion
     // that matters — the baseline is untouched. No advisory is asserted here: see the header, this
     // reason code deliberately produces none.
-    { run: 'check', expect: { exit: 1 } },
+    //
+    // The debt line is asserted here too, and it is LEDGER D016's release-level pin. This is the
+    // exact world the defect was measured in: before the fix this run printed `baselined debt: 2 →
+    // 0 (-2)` at exit 0 while both entries were still on disk and nothing was fixed — the same
+    // release's `prune` (step 11 below) reporting `Retained 2 entries` about the very same state.
+    // Two outputs contradicting each other is the thing being pinned, so the two assertions are
+    // deliberately in one scenario rather than split.
+    {
+      run: 'check',
+      expect: { exit: 1, stdoutContains: 'baselined debt: 2 → 2 (0)' },
+    },
     { assert: { kind: 'fileUnchanged', file: '.align/baseline.json', since: 'after-accept' } },
     // The one place the user learns which pattern hid their entries.
     {

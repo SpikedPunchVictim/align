@@ -135,13 +135,35 @@ discovered in production — or, if you are lucky, on a scenario's first run.
 
 ## S-09 — Fixed one arm, missed the other
 
-**Instances**: ADR 027 F1 (S0). **Rung**: brief.
+**Instances**: ADR 027 F1 (S0), D016 (S1). **Rung**: brief, **plus one executable technique** —
+see below.
 
 A defect class with two call sites. One is fixed; the other has the same shape and is not, because
 the fix was framed as a bug rather than a class. CLAUDE.md rule 6 in one line: *hunt the class, not
 the instance.*
 
 > **Ask**: grep for every caller of the thing you just fixed. Which of them has the same shape?
+
+**Second instance, 2026-08-18 (D016), and the promotion decision.** `computeBaselineDebt` already
+refused to report a debt drop on an errored run, with a comment naming that exact hazard. ADR 028
+then introduced a second cause of the identical fabrication — an entry the scan could not observe
+also contributes 0 to the sum — and the guard was never extended to it. Note what makes this the
+purest form of the shape: the two arms were not two call sites, they were **two causes of one
+symptom inside a single function**, so "grep for every caller" would not have found it. The Ask
+above is necessary and not sufficient; widen it.
+
+> **Ask (added)**: this guard names one cause of the failure it prevents. Enumerate the other causes
+> of the *same observable symptom*. Which of them reaches this code without passing the guard?
+
+**The general shape cannot be promoted** — "some other arm of this class exists somewhere" is not
+decidable, and a check that tried would be a linter for insight. **One sub-case is, and it was used
+for D016's own fix**: when a shared computation gains a new input in order to close a hazard, thread
+it as a **required** parameter, never an optional one with a default. The compiler then enumerates
+every call site and refuses to build until each has been visited — which is exactly the enumeration
+the human failed to do. D016's fix made `FileExistenceProbe` a required third argument for this
+reason, and the type error it produced named all four consumers (`check` twice, `upgrade`, MCP)
+without anyone having to remember they existed. An optional parameter would have silently left MCP
+on the old path, which is how this shape reproduces itself.
 
 ---
 

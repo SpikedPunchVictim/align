@@ -7,7 +7,9 @@ import {
   type BaselineEntry,
   type CheckRun,
   type ExportedRuleset,
+  type FileExistenceProbe,
   type InMemoryBaselineStore,
+  type RepoRelativePath,
 } from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
@@ -16,6 +18,8 @@ import { reportCliError } from '../cli-error.js';
 import { verifyFrozenRules } from './build.js';
 import { buildCheckEvent, computeAndPersistViolationTransitions, computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
 import { withVersionSkew } from '../version-skew.js';
+import { partitionBlindSpotCandidates } from '../scan-blind-spot-retention.js';
+import { createFileExistenceProbe } from '../file-existence.js';
 
 /** Carried Stage 3 affordance (approved ahead of Stage 4): when generated rules are active
  * (`.align/generated-rules.json` + `.align/rules.lock.json` both present, ADR 011), surface a
@@ -140,7 +144,7 @@ async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<
   } catch (err) {
     return reportCliError('align check', err);
   }
-  return emit(finalRun, options, generatedRulesSummary(rootDir), computeBaselineDebt(previousBaseline, run));
+  return emit(finalRun, options, generatedRulesSummary(rootDir), computeBaselineDebt(previousBaseline, run, createFileExistenceProbe(rootDir)));
 }
 
 /**
@@ -273,7 +277,7 @@ async function runUntrustedCheck(rootDir: string, options: CheckOptions): Promis
     recorder.record({ kind: 'error', errorKind: 'untrusted-refusal', message: shortMessage(message), command: 'check --untrusted' });
     return 1;
   }
-  return emit(finalRun, options, undefined, computeBaselineDebt(previousBaseline, run));
+  return emit(finalRun, options, undefined, computeBaselineDebt(previousBaseline, run, createFileExistenceProbe(rootDir)));
 }
 
 /** Exported so `align upgrade` (`commands/upgrade.ts`, ADR 022) can reuse this exact move-transfer
@@ -292,18 +296,56 @@ export function persistMovedBaseline(rootDir: string, run: CheckRun, baselineSto
 /** The one baseline-debt computation shared by `align check`, MCP `align_check`, and the payload
  * builder's fallback — a single guarded function so the error-run correction (below) can't drift
  * across copies (it did: three inline `Σ baselinedCount` sites, and only two were first fixed).
+ *
+ * `builder.ts`'s `fallbackBaselineDebt` is deliberately NOT a fourth instance of either defect and
+ * needs no change: it has no previous baseline to compare against, sets `previous = current`, and
+ * therefore can never report a drop at all. Checked 2026-08-18 while fixing D016, and recorded so
+ * the next reader auditing this class does not have to check it twice.
  * The same asymmetry has a MUTATING half — commands that delete/overwrite baseline entries from a
  * run's violations (`baseline prune`, `init`) — guarded by `refuseIfRunErrored` (`errored-run.ts`),
  * which is where a new consumer of flattened gate violations should look first. */
-export function computeBaselineDebt(previousBaseline: readonly BaselineEntry[], run: CheckRun): BaselineDebt {
+export function computeBaselineDebt(
+  previousBaseline: readonly BaselineEntry[],
+  run: CheckRun,
+  fileExists: FileExistenceProbe,
+): BaselineDebt {
   const previous = previousBaseline.length;
-  // An errored gate reports `baselinedCount: 0` (orchestrator.ts) though its on-disk baseline
-  // entries still exist, so summing on an error run fabricates a debt DROP (`47 → 0 (−47)`) exactly
-  // when nothing was verified — a false "debt eliminated" ratchet signal in human + JSON + MCP
-  // output. The ratchet only moves on a fully-evaluated scan (any errored gate ⇒ `verdict:'error'`,
-  // deriveVerdict); otherwise report no change (current = previous, delta 0).
+  // TIER 1 — an errored gate reports `baselinedCount: 0` (orchestrator.ts) though its on-disk
+  // baseline entries still exist, so summing on an error run fabricates a debt DROP (`47 → 0
+  // (−47)`) exactly when nothing was verified — a false "debt eliminated" ratchet signal in human +
+  // JSON + MCP output. The ratchet only moves on a fully-evaluated scan (any errored gate ⇒
+  // `verdict:'error'`, deriveVerdict); otherwise report no change (current = previous, delta 0).
+  //
+  // Ordered before tier 2 deliberately: an errored run evaluated no rule anywhere, so there is no
+  // sound per-entry statement to make about it, and the coarser answer is the only honest one.
   if (run.verdict === 'error') return { previous, current: previous, delta: 0 };
-  const current = run.gates.reduce((sum, g) => sum + g.baselinedCount, 0);
+
+  // TIER 2 (LEDGER D016) — the SECOND cause of the identical fabrication, introduced by ADR 028 and
+  // missed when tier 1 was written. Shape S-09, *fixed one arm, missed the other*: an entry whose
+  // file this scan could not observe produces no current violation, so it contributes 0 to the sum
+  // below in exactly the way a genuinely fixed one does. Measured against the built binary before
+  // this fix — two accepted entries behind one `excludes` pattern reported `baselined debt: 2 → 0
+  // (-2)`, verdict green, exit 0, with both entries still on disk and nothing fixed, while `prune`
+  // on the same state correctly reported `Retained 2 entries`.
+  //
+  // COUNTED AS STILL-BASELINED rather than suppressing the line, and that is the whole design.
+  // Suppression (report no change whenever anything is unobservable) is the obvious move and it is
+  // shape S-04, *a guard correct in the unsafe direction and wrong in the safe one*: with 500
+  // entries, 2 hidden and 10 genuinely fixed, it would hide a real 10-entry paydown to avoid a
+  // 2-entry error. An unobservable entry is not paid-off debt; it is debt align could not look at,
+  // which is precisely what `prune` already does with the same entries through the same partition.
+  // Reusing `partitionBlindSpotCandidates` is what keeps this reporting path and that destructive
+  // path from disagreeing again — the disagreement WAS the defect.
+  //
+  // The pre-filter on `!observed.has(...)` guarantees no double counting: every entry added back
+  // here is one no gate could have counted. It is not an optimisation, and removing it would let a
+  // still-violating entry be counted twice.
+  const observed: ReadonlySet<RepoRelativePath> = new Set([...run.observedFiles.source, ...run.observedFiles.manifest]);
+  const unobserved = previousBaseline.filter((entry) => !observed.has(entry.file));
+  const unobservable = partitionBlindSpotCandidates(unobserved, run.blindSpots, observed, fileExists).retained.length;
+
+  const matched = run.gates.reduce((sum, g) => sum + g.baselinedCount, 0);
+  const current = matched + unobservable;
   return { previous, current, delta: current - previous };
 }
 

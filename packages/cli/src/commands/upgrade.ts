@@ -207,7 +207,7 @@ export async function runUpgrade(rootDir: string, options: UpgradeOptions): Prom
   const erroredRefusal = refuseIfRunErrored('align upgrade', run, 'refusing to reconcile the baseline');
   if (erroredRefusal !== undefined) return erroredRefusal;
 
-  const baselineDebt = computeBaselineDebt(previousBaseline, run);
+  const baselineDebt = computeBaselineDebt(previousBaseline, run, createFileExistenceProbe(rootDir));
   const deltaStr = baselineDebt.delta === 0 ? '0' : `${baselineDebt.delta > 0 ? '+' : ''}${baselineDebt.delta}`;
   console.log(`\nbaselined debt: ${baselineDebt.previous} → ${baselineDebt.current} (${deltaStr})`);
 

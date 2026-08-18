@@ -18,6 +18,7 @@ import { createOrchestrator } from '../composition-root.js';
 import { readBaseline, writeBaseline } from '../align-dir.js';
 import { buildExplainPayload } from '../commands/explain.js';
 import { computeBaselineDebt } from '../commands/check.js';
+import { createFileExistenceProbe } from '../file-existence.js';
 import { DEFAULT_DOC_PATH, proposeFromClientSubmission, writeBuildArtifacts, type DryRunResult } from '../commands/build.js';
 import { renderCondensedFixingSkill } from '../skill/condensed.js';
 import { withVersionSkew } from '../version-skew.js';
@@ -48,8 +49,11 @@ async function freshCheck(rootDir: string): Promise<{ readonly run: CheckRun; re
   }
   // Shared, error-run-guarded computation (check.ts) — NOT an inline `Σ baselinedCount`, which
   // fabricates a `−N` debt drop on error runs (gates report 0 baselined then). This was the third
-  // copy the first fix missed (NEW-1).
-  return { run, baselineDebt: computeBaselineDebt(previousBaseline, run) };
+  // copy the first fix missed (NEW-1), and it is now guarded against a SECOND cause of the same
+  // fabrication (LEDGER D016, an entry the scan could not observe) — which is why the probe is a
+  // required argument rather than an optional one: MCP is exactly the consumer that would have been
+  // left behind again.
+  return { run, baselineDebt: computeBaselineDebt(previousBaseline, run, createFileExistenceProbe(rootDir)) };
 }
 
 /** Builds the McpServer with tools registered but no transport attached — split out from
