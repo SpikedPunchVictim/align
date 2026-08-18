@@ -422,13 +422,28 @@ pre-commit hook, and `upgrade` forwards the consent it already obtained rather t
   fabrication and the guard was never extended to it. Filed as **LEDGER D016** with the fix
   direction; not a wording change, and `check` — not `upgrade` — is the common path.
 - `integration/lib/` — new assertion kinds if needed; register in `spec-validate.mjs` (the
-  `jsonArrayEveryHasField` precedent).
-- `UPGRADING.md` — 0.2.0 note: retention is a behaviour change users will notice.
+  `jsonArrayEveryHasField` precedent). **No new kinds were needed** — `fileUnchanged`,
+  `jsonArrayLength` and the `stdoutMatches`/`stdoutNotContains` pair covered all three scenarios.
+  What `spec-validate.mjs` did gain is `validateNoDuplicateKeys`, which is the S-05 promotion rather
+  than an assertion kind.
+- `UPGRADING.md` — 0.2.0 note: retention is a behaviour change users will notice. **DONE 2026-08-18**
+  ("A baselined entry align could not look at is retained, not pruned"). Note for whoever edits that
+  file next: `packages/cli/src/migrations/notes.generated.ts` must be recompiled with
+  `pnpm -F @spikedpunch/align-cli compile-notes` or `migration-notes-drift.test.ts` goes red — which
+  is the drift detector working, and it caught exactly this during Stage 5.
 - `README.md`, `packages/cli/README.md`, `packages/agent/README.md` — carried queue item
-  (auto-exclusion + `includeNestedCheckouts`), now also blind-spot reporting.
+  (auto-exclusion + `includeNestedCheckouts`), now also blind-spot reporting. **PARTIALLY DONE
+  2026-08-18, and the remainder is stated rather than quietly dropped.** Blind-spot reporting and
+  the retention behaviour are now in all three. `includeNestedCheckouts` — the opt-back-in export —
+  is documented in `packages/cli/README.md` only; the root and agent READMEs describe the
+  auto-exclusion but never name the escape hatch. That may well be the right split (a config export
+  belongs in the CLI reference), but it is a judgement nobody has made explicitly, so it is recorded
+  here as open rather than marked complete.
 - `docs/core-interfaces.md:618-631` — the documented `McpCheckPayload` block is **already stale by
   four fields** (it stops at `advisories`; the real interface continues with `ungroundedComponents`,
   `skippedNestedCheckouts`, `baselineDebt`, `complete`). Bring it to reality, including `blindSpots`.
+  **DONE 2026-08-18** — all four added, and the block now carries an `<!-- ENFORCED against ... -->`
+  marker pointing at the test below.
 - **Enforce that block against the type** so it cannot drift again. **DONE 2026-08-18** —
   `packages/core/test/core-interfaces-doc.test.ts`, with a calibration test and a red-before-green
   check (removing `complete` from the markdown fails it). Measured drift on arrival: the block was
@@ -480,9 +495,21 @@ pre-commit hook, and `upgrade` forwards the consent it already obtained rather t
 
 **Tests**
 - The three scenarios red before the fix, green after — verified in that order.
-- Flaky confirmation: 15× on the new suites. **Outstanding.**
+- Flaky confirmation: 15× on the new suites. **DONE 2026-08-18, both halves clean.**
+  - Integration, `--targets local` on the three scenarios, 15 iterations: **45/45 scenario verdicts
+    PASS, 0 non-zero exits.** Wall time per iteration min/median/max 114 / 123 / 129 s, stdev 5.1 s
+    (4.2% of the mean) — recorded because a timing-sensitive flake usually shows as a heavy right
+    tail before it shows as a failure, and there is no tail here.
+  - `packages/core/test/core-interfaces-doc.test.ts`, 15 runs: **15/15, 3 tests each.** Run after
+    the integration loop rather than beside it, so the load did not contaminate the timing above.
+  - **What this does and does not rule out.** 15 clean trials are consistent with a per-run failure
+    probability as high as **18.1%** at 95% confidence (30 trials would be needed for <10%, 50 for
+    <6%). This is evidence against a frequent flake and says little about a rare one; the number is
+    written down so nobody later reads "15× green" as "deterministic".
 
-**Status**: In Progress — everything above is done except the 15× flake measurement.
+**Status**: **Complete** — with two things deliberately carried out of the stage rather than closed
+inside it: LEDGER D016 (the fabricated debt drop, filed with a fix direction, tracked separately),
+and the `includeNestedCheckouts` README judgement noted above.
 
 ---
 
