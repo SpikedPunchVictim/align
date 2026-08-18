@@ -617,6 +617,13 @@ class StaticPluginRegistry implements PluginRegistry {
 
 ## MCP payload shapes (structured-only, ADR 007)
 
+<!-- ENFORCED against `McpCheckPayload` in packages/core/src/payload/builder.ts — see
+     packages/core/test/core-interfaces-doc.test.ts. This block drifted four fields behind the
+     type before that check existed (it stopped at `advisories` while the interface had grown
+     `ungroundedComponents`, `blindSpots`, `baselineDebt` and `complete`), which is why the field
+     list is now compared rather than reviewed. Field ORDER and comments are free; the set of
+     field names and their optionality are not. -->
+
 ```ts
 interface McpCheckPayload {
   readonly verdict: 'green' | 'red' | 'error';
@@ -630,6 +637,10 @@ interface McpCheckPayload {
   readonly violations: readonly Violation[];     // priority-sorted, capped, paginated — failures only
   readonly pagination?: { readonly cursor: string; readonly hasMore: boolean };
   readonly advisories: readonly Advisory[];
+  readonly ungroundedComponents: readonly UngroundedComponent[];  // green only because they matched zero files
+  readonly blindSpots: readonly ScanBlindSpot[];                  // ADR 028: paths this scan declined to look at
+  readonly baselineDebt: BaselineDebt;                            // `47 → 45 (−2)`, structured
+  readonly complete: boolean;                                     // false ⇒ a `green` here is provisional
 }
 
 interface McpExplainRulePayload {
