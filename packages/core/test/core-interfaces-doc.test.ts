@@ -39,6 +39,27 @@ const DOC = path.join(REPO_ROOT, 'docs', 'core-interfaces.md');
 const SOURCE = path.join(REPO_ROOT, 'packages', 'core', 'src', 'payload', 'builder.ts');
 const INTERFACE_NAME = 'McpCheckPayload';
 
+/**
+ * The interfaces this document is CHECKED against, and the source each is declared in.
+ *
+ * Started as `McpCheckPayload` alone, which made the describe below ("stays in step with the
+ * interfaces it documents") an overclaim — the document declares 39 interfaces and one was
+ * enforced. Adversarial review then found four more that had drifted, including
+ * `DependencyGraph.blindSpots`, which `ARCHITECTURE.md` cites by name: a reader following that
+ * citation into this document found no such field.
+ *
+ * Adding a row here is the cheap half. The expensive half is that an unenforced block is worse than
+ * an absent one, because it reads as current — so prefer enforcing a block to documenting it.
+ */
+const ENFORCED: readonly { readonly name: string; readonly source: string }[] = [
+  { name: 'McpCheckPayload', source: 'packages/core/src/payload/builder.ts' },
+  { name: 'CheckRun', source: 'packages/core/src/gates/types.ts' },
+  { name: 'DependencyGraph', source: 'packages/core/src/types/graph.ts' },
+  { name: 'ManifestInventory', source: 'packages/core/src/types/manifest.ts' },
+  { name: 'ScanInput', source: 'packages/core/src/scanner.ts' },
+  { name: 'BaselineEntry', source: 'packages/core/src/baseline/store.ts' },
+];
+
 interface Field {
   readonly name: string;
   readonly optional: boolean;
@@ -96,6 +117,12 @@ function format(fields: readonly Field[]): readonly string[] {
 }
 
 describe('docs/core-interfaces.md stays in step with the interfaces it documents', () => {
+  it.each(ENFORCED)('documents exactly the fields `$name` declares', ({ name, source }) => {
+    const documented = declaredFields(typeScriptBlocks(fs.readFileSync(DOC, 'utf8')), name, 'docs/core-interfaces.md');
+    const declared = declaredFields(fs.readFileSync(path.join(REPO_ROOT, source), 'utf8'), name, source);
+    expect(format(documented)).toEqual(format(declared));
+  });
+
   it(`documents exactly the fields \`${INTERFACE_NAME}\` declares`, () => {
     const documented = declaredFields(typeScriptBlocks(fs.readFileSync(DOC, 'utf8')), INTERFACE_NAME, 'docs/core-interfaces.md');
     const declared = declaredFields(fs.readFileSync(SOURCE, 'utf8'), INTERFACE_NAME, 'packages/core/src/payload/builder.ts');

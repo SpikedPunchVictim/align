@@ -183,6 +183,18 @@ export function loadWorkspacePackages(
         // repo-relative file — see the `WorkspacePackage.dir` doc comment above).
         const dir = rel === '' ? '' : rel.endsWith('/') ? rel : `${rel}/`;
         packages.push({ name: pkg.name, dir });
+      } else {
+        // A `package.json` align could read and parse, but which declares no usable `name`. It was
+        // the last silent exit in this walker after the task #11 sweep, and it is not benign: the
+        // member never enters `ManifestInventory`, so every `security.manifest.*` rule evaluates
+        // vacuously green for that package, and its baseline entries fall through to ADR 028
+        // mechanism 2 — where the user is told "still on disk, but this scan produced no result for
+        // it", i.e. that align cannot explain its own miss. It can: the manifest has no name.
+        //
+        // `unparseable` rather than a new reason kind: from a consumer's point of view the file did
+        // not yield the record it exists to yield, which is what that kind already means, and the
+        // message says exactly which part failed.
+        record?.(relJson, { kind: 'unparseable', error: 'no usable "name" field, so this package cannot be identified as a workspace member' });
       }
     } catch (err) {
       // Malformed, not absent — the corrupt-≠-absent discipline BUG #1 established. Skip this one

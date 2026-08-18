@@ -135,8 +135,8 @@ discovered in production — or, if you are lucky, on a scenario's first run.
 
 ## S-09 — Fixed one arm, missed the other
 
-**Instances**: ADR 027 F1 (S0), **D010 (S0)**, D016 (S1), D017 (S1). **Rung**: brief, **plus one
-executable technique** — see below.
+**Instances**: ADR 027 F1 (S0), **D010 (S0)**, D016 (S1), D017 (S1), **D020 (S2, twice over)**.
+**Rung**: brief, **plus one executable technique** — see below.
 
 **This register was a sample, not a census, for one day.** It shipped listing three instances while
 the ledger tagged four rows `[S-09]` — D010 was omitted, so D017 was recorded as the "third"
@@ -172,6 +172,16 @@ and the reproduction never exercises the layer above.
 
 > **Ask (added)**: what must be true for the code you just fixed to RUN? Whoever decides that is
 > inside the blast radius, and a reproduction that starts below it will never implicate it.
+
+**D020, and the reason this shape now leads the register.** D016 fixed one cause of a fabricated
+debt delta. Within hours, review found two more causes *of the same symptom, in the same function,
+introduced or left by that very fix* — a move-transferred entry counted twice, and duplicate
+baseline rows counted as separate debt. The fix enumerated the cause it had reproduced and stopped
+at the edge of the reproduction, which is what every instance of this shape has in common.
+
+> **Ask (added)**: you reproduced ONE input that triggers this symptom. Before calling it fixed,
+> write down the other inputs that reach the same line — and add a fixture for each, not just for
+> the one you happened to hit.
 
 **The general shape cannot be promoted** — "some other arm of this class exists somewhere" is not
 decidable, and a check that tried would be a linter for insight. **One sub-case is, and it was used

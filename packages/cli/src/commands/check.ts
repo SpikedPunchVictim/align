@@ -335,7 +335,14 @@ export function computeBaselineDebt(
   run: CheckRun,
   fileExists: FileExistenceProbe,
 ): BaselineDebt {
-  const previous = previousBaseline.length;
+  // DISTINCT BY FINGERPRINT, because that is what every other consumer counts.
+  // `InMemoryBaselineStore` keys its entries by fingerprint, so two rows sharing one are a single
+  // entry to the store, to `prune`, and to the matcher — but `previous` counted ROWS. A
+  // hand-edited or merge-mangled `baseline.json` (the schema permits duplicates and `writeBaseline`
+  // does not dedupe) therefore reported a permanent `-1` on every run, for a repository where
+  // nothing was fixed. D016's symptom from a third cause, found by adversarial review.
+  const distinct = [...new Map(previousBaseline.map((entry) => [entry.fingerprint, entry])).values()];
+  const previous = distinct.length;
   // TIER 1 — an errored gate reports `baselinedCount: 0` (orchestrator.ts) though its on-disk
   // baseline entries still exist, so summing on an error run fabricates a debt DROP (`47 → 0
   // (−47)`) exactly when nothing was verified — a false "debt eliminated" ratchet signal in human +
@@ -363,15 +370,26 @@ export function computeBaselineDebt(
   // Reusing `partitionBlindSpotCandidates` is what keeps this reporting path and that destructive
   // path from disagreeing again — the disagreement WAS the defect.
   //
-  // The pre-filter on `!observed.has(...)` guarantees no double counting: every entry added back
-  // here is one no gate could have counted. It is not an optimisation, and removing it would let a
-  // still-violating entry be counted twice.
   const observed: ReadonlySet<RepoRelativePath> = new Set([...run.observedFiles.source, ...run.observedFiles.manifest]);
-  const unobserved = previousBaseline.filter((entry) => !observed.has(entry.file));
+  const unobserved = distinct.filter((entry) => !observed.has(entry.file));
   const unobservable = partitionBlindSpotCandidates(unobserved, run.blindSpots, observed, fileExists).retained.length;
 
   const matched = run.gates.reduce((sum, g) => sum + g.baselinedCount, 0);
-  const current = matched + unobservable;
+  // CLAMPED, and the clamp is a correctness guard rather than defensive noise. An earlier comment
+  // here claimed the `!observed.has(...)` pre-filter made double counting impossible. That was
+  // false, and adversarial review reproduced it: `matched` counts violations under their
+  // POST-transfer paths while the retention partition counts baseline entries under their
+  // PRE-transfer paths, so a move-transferred entry sits in both coordinate systems and the filter
+  // excludes nothing. Measured: `{previous:1, current:2, delta:+1}` — align reporting that debt
+  // GREW on a run where one file was renamed.
+  //
+  // `store.applyMoves` refuses to transfer anything the partition would retain, which is why no
+  // repository state reaches it today. But that lives in another package, is asserted nowhere, and
+  // the two predicate sets read DIFFERENT inputs — `applyMoves` gets one domain's blind spots, this
+  // gets the union of both — so it is incidental safety, not a guarantee. `current` counting live
+  // debt cannot exceed the number of entries that debt is recorded in; treating a violation of that
+  // as an impossibility rather than printing it is the honest reading.
+  const current = Math.min(matched + unobservable, previous);
   return { previous, current, delta: current - previous };
 }
 

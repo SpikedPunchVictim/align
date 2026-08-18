@@ -326,6 +326,21 @@ describe('scanManifests records the absence exits ABOVE the per-manifest read (t
     ]);
   });
 
+  it('records a member whose package.json declares no name, instead of dropping it silently', () => {
+    dir = workspaceRepo();
+    fs.writeFileSync(path.join(dir, 'packages', 'member', 'package.json'), `${JSON.stringify({ version: '1.0.0' })}\n`, 'utf8');
+
+    const inventory = scanManifests(dir, []);
+
+    // The last silent exit in this walker after the task #11 sweep. Without a record the package's
+    // `security.manifest.*` rules evaluate vacuously green and its baseline entries are explained
+    // to the user as "align cannot say why it missed this" — when align knows exactly why.
+    expect(inventory.manifests.map((m) => m.file)).toEqual(['package.json']);
+    expect(inventory.blindSpots.map((sp) => ({ path: sp.path, kind: sp.reason.kind }))).toEqual([
+      { path: 'packages/member/package.json', kind: 'unparseable' },
+    ]);
+  });
+
   it('does NOT record a genuinely absent pnpm-workspace.yaml or lockfile — ENOENT stays sound', () => {
     dir = workspaceRepo();
     fs.rmSync(path.join(dir, 'pnpm-workspace.yaml'));

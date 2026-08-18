@@ -208,6 +208,28 @@ describe('withAlignDirLock', () => {
     expect(fs.existsSync(lockPath(d))).toBe(true);
   });
 
+  it('does not remove a DIFFERENT lock that appeared after the staleness decision', () => {
+    const d = repo();
+    plantLock(d, { pid: DEAD_PID, ageMs: 5_000 });
+    const stale = fs.statSync(lockPath(d));
+
+    // Stand in for the loser of a double-break race: by the time it acts, the lock it judged is gone
+    // and a live one has taken its place. A blind `rm` would delete the winner's lock and let two
+    // bodies run at once — the exact lost update the lock exists to prevent.
+    fs.rmSync(lockPath(d));
+    fs.writeFileSync(lockPath(d), JSON.stringify({ pid: process.pid, host: os.hostname(), command: 'the winner', acquiredAt: new Date().toISOString() }));
+    const successor = fs.statSync(lockPath(d));
+    expect(successor.ino === stale.ino && successor.ctimeMs === stale.ctimeMs).toBe(false);
+
+    // The successor is live and recent, so it is refused rather than broken — and crucially it is
+    // still THERE afterwards.
+    expect(() => withAlignDirLock(d, 'the loser', () => 'never', { staleAfterMs: 1_000, waitTimeoutMs: 100, pollIntervalMs: 5 })).toThrow(
+      /timed out/,
+    );
+    expect(fs.existsSync(lockPath(d))).toBe(true);
+    expect(JSON.parse(fs.readFileSync(lockPath(d), 'utf8')).command).toBe('the winner');
+  });
+
   it('is re-acquirable after a normal release', () => {
     const d = repo();
     expect(withAlignDirLock(d, 'first', () => 1)).toBe(1);

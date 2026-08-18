@@ -100,6 +100,41 @@ function isBreakable(holder: LockHolder | undefined, now: number, staleAfterMs: 
   return !processAlive(holder.pid);
 }
 
+/**
+ * Removes the lock ONLY if it is still the same file we judged stale.
+ *
+ * The race this closes, raised by adversarial review: two waiters A and B both read the same stale
+ * lock and both decide it is breakable. A removes it and acquires. B — still between its decision
+ * and its removal — then deletes **A's live lock**, and both run their bodies at once, which is
+ * precisely the lost update the lock exists to prevent. A blind `rm` cannot tell "the lock I judged"
+ * from "whatever is at that path now".
+ *
+ * Comparing inode + ctime before removing shrinks that window to the gap between `stat` and
+ * `unlink`. It does not eliminate it — POSIX offers no compare-and-delete — so this is a mitigation,
+ * honestly labelled. The residual is far narrower than the decision-to-removal window it replaces,
+ * and the acquire itself is still atomic (`link`), so the worst case is two processes both breaking
+ * and only one acquiring.
+ */
+function breakLock(file: string, identity: string | undefined): void {
+  if (identity === undefined) return; // vanished already; the next acquire attempt just succeeds
+  if (identityOf(file) !== identity) return; // someone else's lock now — never remove it
+  try {
+    fs.rmSync(file, { force: true });
+  } catch {
+    // Lost the race to another breaker. Harmless: the acquire below is create-if-absent.
+  }
+}
+
+/** Identity of the file at `file`, as inode + creation time. `undefined` when it does not exist. */
+function identityOf(file: string): string | undefined {
+  try {
+    const st = fs.statSync(file);
+    return `${st.ino}:${st.ctimeMs}`;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Age from the filesystem, for the one case where the lock cannot speak for itself. */
 function ageOf(file: string, now: number): number {
   try {
@@ -193,7 +228,7 @@ export function withAlignDirLock<T>(alignDir: string, command: string, fn: () =>
         // Named on stderr, never silently: a broken lock means another align died mid-write, which
         // is exactly the moment a user wants to know the file may be mid-history.
         console.error(`align: breaking a stale .align/ lock left by ${describe(holder)} — that process is no longer running.`);
-        fs.rmSync(file, { force: true });
+        breakLock(file, identityOf(file));
         continue;
       }
       if (Date.now() >= deadline) {

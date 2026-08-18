@@ -9,7 +9,14 @@ function baselineOf(n: number): readonly BaselineEntry[] {
 }
 
 function entriesAt(...files: string[]): readonly BaselineEntry[] {
-  return files.map((file) => ({ file }) as BaselineEntry);
+  // Distinct fingerprints unless a test deliberately collides them (see `entriesSharingFingerprint`).
+  return files.map((file) => ({ file, fingerprint: `fp-${file}` }) as BaselineEntry);
+}
+
+/** Two baseline rows carrying ONE fingerprint — a hand-edited or merge-mangled `baseline.json`.
+ * `baselineFileSchema` permits it and `writeBaseline` does not dedupe, so it reaches production. */
+function entriesSharingFingerprint(fingerprint: string, ...files: string[]): readonly BaselineEntry[] {
+  return files.map((file) => ({ file, fingerprint }) as BaselineEntry);
 }
 
 function gate(overrides: Partial<GateResult> = {}): GateResult {
@@ -135,5 +142,51 @@ describe('computeBaselineDebt — an unobservable entry is still debt, not paid-
     // mechanism 3 retained both, making the two answers identical and the test vacuous.
     const run = runWith('error', [gate({ status: 'error', baselinedCount: 0 })], { blindSpots: hiddenByExcludes, observed: ['live.ts'] });
     expect(computeBaselineDebt(entriesAt('vendor/a.ts', 'live.ts'), run, nothingOnDisk)).toEqual({ previous: 2, current: 2, delta: 0 });
+  });
+});
+
+
+/**
+ * Two further causes of the same fabricated delta, found by adversarial review after the D016 fix
+ * shipped. Both are S-09 again — the fix enumerated the cause it reproduced and stopped there.
+ */
+describe('computeBaselineDebt cannot fabricate a delta from double-counting or duplicate rows', () => {
+  it('a move-transferred entry is counted ONCE, not as both matched and unobservable', () => {
+    // Measured against the built binary before this fix: `{previous:1, current:2, delta:+1}`.
+    // `matched` counts violations under their POST-transfer path; the retention partition counts
+    // previous-baseline entries under their PRE-transfer path, so one entry appears in both
+    // coordinate systems and the `!observed.has(entry.file)` pre-filter — which the code's comment
+    // claimed made double counting impossible — excludes nothing.
+    //
+    // `store.applyMoves` does refuse to transfer anything the partition would retain, which is why
+    // no repository state reaches this today. But that safety lives in another package, is stated
+    // nowhere, and the two predicate sets are evaluated over DIFFERENT inputs (`applyMoves` sees one
+    // domain's blind spots; this sees the union), so it is incidental rather than guaranteed.
+    const run = runWith('green', [gate({ baselinedCount: 1 })], { observed: ['new/here.ts'] });
+    expect(computeBaselineDebt(entriesAt('gone/old.ts'), run, nothingOnDisk)).toEqual({ previous: 1, current: 1, delta: 0 });
+  });
+
+  it('duplicate fingerprints in baseline.json do not read as a permanent debt drop', () => {
+    // `InMemoryBaselineStore` keys by fingerprint, so two rows sharing one are ONE entry to every
+    // consumer — but `previous` counted rows. Measured before this fix: `{previous:2, current:1,
+    // delta:-1}` reported on EVERY run, for a repository where nothing was fixed and nothing
+    // changed. D016's symptom from a third cause its fix did not enumerate.
+    const run = runWith('green', [gate({ baselinedCount: 1 })], { observed: ['a.ts', 'b.ts'] });
+    expect(computeBaselineDebt(entriesSharingFingerprint('fp-shared', 'a.ts', 'b.ts'), run, nothingOnDisk)).toEqual({
+      previous: 1,
+      current: 1,
+      delta: 0,
+    });
+  });
+
+  it('is calibrated: distinct fingerprints on the same file still count separately', () => {
+    // Guards the dedupe from over-collapsing. Two DIFFERENT rules violated in one file are two
+    // entries and two units of debt; collapsing by file rather than fingerprint would hide one.
+    const run = runWith('green', [gate({ baselinedCount: 2 })], { observed: ['a.ts'] });
+    const two = [
+      { file: 'a.ts', fingerprint: 'fp-1' },
+      { file: 'a.ts', fingerprint: 'fp-2' },
+    ] as unknown as readonly BaselineEntry[];
+    expect(computeBaselineDebt(two, run, nothingOnDisk)).toEqual({ previous: 2, current: 2, delta: 0 });
   });
 });

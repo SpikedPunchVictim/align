@@ -286,6 +286,9 @@ interface DependencyGraph {
   readonly externalEdges: readonly ExternalDependencyEdge[];
   readonly uncertain: readonly UncertaintyMarker[];
   readonly scannedAt: number;        // epoch ms — the freshness proof underlying ADR 005
+  /** ADR 028: source-domain paths the walk declined to enter, with the reason. Carried onto
+   * `CheckRun.blindSpots` (unioned with the manifest domain's) — `ARCHITECTURE.md` §3 step 2b. */
+  readonly blindSpots: readonly ScanBlindSpot[];
 }
 
 // Name-level (not per-import-site) — one node per distinct external package, dedupe'd across the
@@ -320,6 +323,8 @@ interface ScanInput {
   readonly rootDir: RepoRelativePath;
   readonly components: Readonly<Record<ComponentName, ComponentDefinitionIR>>;
   readonly excludes: readonly string[];   // configurable build-output excludes (ADR 004)
+  /** ADR 027: nested checkouts are skipped by default; these patterns opt named ones back in. */
+  readonly includeNestedCheckouts?: readonly string[];
 }
 
 interface Scanner {
@@ -369,6 +374,9 @@ interface ManifestRecord {
 interface ManifestInventory {
   readonly manifests: readonly ManifestRecord[];
   readonly lockfilePresent: boolean;
+  /** ADR 028, this domain's own: a workspace declaration, lockfile or member manifest align could
+   * not read or parse, plus members excluded by config. */
+  readonly blindSpots: readonly ScanBlindSpot[];
 }
 
 interface ManifestScanOptions {
@@ -535,6 +543,13 @@ interface CheckRun {
   // "green because compliant" and "green because empty" as distinguishable states. Always []
   // when the architecture gate didn't fully evaluate (parse/guard-step error).
   readonly ungroundedComponents: readonly UngroundedComponent[];
+  /** ADR 028: every path this run could not look at, with the reason. The three consumers that
+   * infer meaning from a violation's ABSENCE (`prune`, `applyMoves`, the debt line) read this to
+   * tell "gone" from "not looked at". Union of both scan domains. */
+  readonly blindSpots: readonly ScanBlindSpot[];
+  /** What the scan actually saw, kept per-domain on purpose (ADR 028 §5) so a consumer merges them
+   * explicitly rather than inheriting someone else's merge. */
+  readonly observedFiles: { readonly source: ReadonlySet<RepoRelativePath>; readonly manifest: ReadonlySet<RepoRelativePath> };
 }
 ```
 
@@ -556,6 +571,11 @@ interface BaselineEntry {
   readonly file: RepoRelativePath;
   readonly acceptedAt: number;
   readonly acceptedBy: 'init-seed' | 'accept-existing' | 'manual';
+  /** FRAGILE #7 / ADR 006: identity of the violating construct, independent of its path — what lets
+   * a renamed file's accepted debt transfer instead of reading as fixed-plus-new. */
+  readonly contentFingerprint?: string;
+  /** The metric value accepted, for threshold rules where "accepted" means "accepted AT n". */
+  readonly acceptedValue?: number;
 }
 
 interface PruneResult {
