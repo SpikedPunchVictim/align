@@ -352,6 +352,15 @@ pass `--yes`. A run that deletes nothing — a pure move-transfer, or one where 
 — is never gated, so `align baseline prune` remains safe to run unattended when it has nothing to
 destroy.
 
+**`prune` deletes an entry only when the scan actually looked at its file.** A file can be present
+on disk and still absent from the scan — behind an `excludes` pattern, under a `node_modules`-class
+directory, inside a nested checkout, behind a symlink (the walk does not follow links), in a
+directory it could not read, or in a manifest it could not parse. Absence from a scan is not
+evidence of deletion, so those entries are **retained and the reason printed**, never pruned and
+never transferred onto some other file that happens to share their fingerprint (ADR 028). To forfeit
+the retained entries under a subtree you excluded deliberately, name it:
+`align baseline prune --forget-unscanned vendor/lib`. The prefix is required — there is no bare form.
+
 Baseline acceptance is a **human decision by design**: the MCP server never self-serves it
 (`allowBaselineFromMcp` defaults to `false`) — an agent under pressure to reach green cannot grant
 itself amnesty from a rule it's failing.

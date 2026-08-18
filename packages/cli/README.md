@@ -85,6 +85,18 @@ align check || exit 1        # gate a PR on architecture conformance
 Run `align explain <ruleId>` when a violation's cause isn't obvious (it renders cycle chains as a
 Mermaid diagram), and `align doctor` for a read-only survey of scan blind spots (it never fails).
 
+Two scan-scope behaviours are worth knowing before they surprise you. A directory below the repo
+root that carries its own `.git` — a submodule, a vendored clone, a `git worktree` — is **not
+scanned by default**: it is a different repository, and violations reported against it are noise you
+cannot act on. Each skipped path is named in an advisory, never silent, and an
+`includeNestedCheckouts` export in `align.config.ts` opts one back in. And because a file can be
+present on disk yet absent from the scan for six different reasons (that auto-exclusion, an
+`excludes` match, a `node_modules`-class directory name, an unreadable directory, an unparseable
+manifest, or a symlink — the walk does not follow links), **`align baseline prune` never reads that
+absence as "fixed"**: it retains the entry and prints which path and which reason hid it. Use
+`align baseline prune --forget-unscanned <prefix>` to forfeit the retained entries under a subtree
+you excluded on purpose.
+
 ## Dependency security, in the same scan
 
 That `security` line in the output above is a built-in **`security.manifest` gate** — opt-in rules

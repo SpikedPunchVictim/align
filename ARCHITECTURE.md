@@ -100,6 +100,15 @@ package that imports both and wires them together (§5).
    source file, parses it, extracts edges, and **discards the AST** immediately (scan-and-discard). Spike
    measured **2.16–2.33 s cold / 1.37 s mean warm on 456K LOC (1,755 files)**, and **12.9 s / 231 MB peak on
    3.23M LOC (17,708 files, n8n)** — no incremental machinery runs in v1 (ADR 005).
+2b. **Blind-spot record** (ADR 028): the walk also returns every path it *declined* to look at, with the
+   reason — a nested checkout carrying its own `.git` (ADR 027), an `excludes` match, an always-excluded
+   directory name, an unreadable directory, an unparseable manifest, a symlinked subtree. This rides on
+   `DependencyGraph.blindSpots` through to `CheckRun` and onto the wire (`McpCheckPayload.blindSpots`),
+   and it is **load-bearing rather than diagnostic**: every consumer downstream that infers meaning from
+   a file's absence — `store.prune` infers "fixed", `applyMoves` infers "renamed",
+   `validateComponents` infers "empty component" — must be able to tell "align did not look" from "the
+   file is gone". Without the record they are the same observation, and reading it as deletion has
+   produced five severity-zero defects in this repo (`docs/adr/defects/LEDGER.md`).
 3. **Graph assembly**: nodes (file, component, LOC, exports) and edges (`import | reexport | dynamic |
    type-only`) are classified — inter-package edges resolved by **realpath**, not path-substring checks
    (ADR 004; spike: substring classification silently dropped **898 edges, ~11% of the graph**), with a

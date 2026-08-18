@@ -136,6 +136,44 @@ offered as a transfer candidate. A genuine rename still transfers exactly as bef
 baseline written by an earlier version, nothing in it needs repair — the defect was in what a scan
 would do next, not in anything already stored.
 
+### A baselined entry align could not look at is retained, not pruned
+
+This generalizes the nested-checkout behaviour above, and it is the change in 0.2.0 most likely to
+surprise you, because it makes `prune` delete **less** than it used to.
+
+A nested checkout was one of **six** ways a file that is physically present can be absent from
+align's scan. The others: it matched an `excludes` pattern; it sits under an always-excluded
+directory name (`node_modules`, `dist`, …); its directory could not be read (permissions); its
+manifest could not be parsed (a malformed `package.json`); or it is behind a symlink — the walk does
+not follow links, so a symlinked subtree vanishes from the scan entirely while every file in it
+stays readable at its old path.
+
+Before 0.2.0 all six read as "this violation is gone", which `prune` reports as *fixed* and deletes,
+and which move-transfer reads as *renamed*. Neither is true: align simply did not look. Deleting a
+baseline entry destroys a human's recorded consent decision, and doing it while reporting success at
+exit 0 is the worst failure this tool has.
+
+**What you will see.** `align baseline prune` now retains those entries and prints the reason and
+the path responsible — for example `Retained 2 entries: their files are unobservable this scan, not
+fixed (vendor/lib (matched the excludes pattern 'vendor/**'))`. Everything genuinely fixed is still
+pruned, and the command still exits 0. `align check` reports the same paths as a `scan-blind-spot`
+advisory, with two deliberate exceptions: an `excludes` match and an always-excluded directory name
+produce **no advisory**, because you wrote those patterns yourself and every repository has a
+`node_modules`. For those two, `prune`'s retention line is where the reason appears.
+
+**If you excluded a subtree on purpose** and want its accepted entries gone, say so by naming it:
+
+```
+align baseline prune --forget-unscanned vendor/lib
+```
+
+The prefix is required — there is no bare form, because a bare form would forfeit every retained
+entry in one keystroke. It deletes accepted consent decisions under that path only, and it is
+subject to the same consent gate as any other deletion (below).
+
+**Nothing in an existing baseline needs repair.** The defect was in what a scan would do next, never
+in anything already stored.
+
 ### `align baseline prune` now asks before it deletes
 
 **Breaking for non-interactive use.** Every entry `prune` removes is an accepted consent decision — a

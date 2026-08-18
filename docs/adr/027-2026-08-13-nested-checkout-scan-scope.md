@@ -227,6 +227,32 @@ those infers. A future change to scan scope (a new default exclude, a new skip r
 performance-motivated cap) must enumerate the consumers of absence before it ships, not after
 review finds one.
 
+### Amendment (2026-08-18): that enumeration was done, and the answer was worse than this ADR assumed
+
+[ADR 028](028-2026-08-16-scan-blind-spots-and-the-absence-inference.md) is the result of running the
+paragraph above in the other direction — not "what breaks when we narrow the scan" but "in how many
+ways is the scan already narrower than the repository, and what does each one do to a consent
+record." **A nested checkout was one of six**, and this ADR's fix — record the skipped paths on the
+run, route them to the "still known" branch — turns out to be the right shape applied too narrowly.
+The other five (an `excludes` match, an always-excluded directory name, an unreadable directory, an
+unparseable manifest, a symlinked subtree) reach `applyMoves` by exactly the path F1 took, and three
+of them were unknown when this ADR was written.
+
+Two consequences for a reader of this ADR:
+
+- **`DependencyGraph.skippedNestedCheckouts` is gone**, generalized into `blindSpots` with a
+  `ScanBlindSpotReason` union whose `nested-checkout` variant is this ADR's case. The containment
+  test moved with it, from `core/src/baseline/skipped-checkouts.ts` to
+  `core/src/baseline/scan-blind-spots.ts`, and is still imported by both consumers rather than
+  restated — the property this ADR argued for, at the wider scope.
+- **The lesson generalizes past scanning.** F1 was reproduced again on 2026-08-17 and 2026-08-18 in
+  two forms this ADR's guard does not cover: a whole directory absent from the working tree (LEDGER
+  D010) and a file-level transfer needing no blind spot at all (LEDGER D015, still open). The stable
+  statement is therefore stronger than "a scan-scope change is not local to scanning": **absence
+  from a scan is not evidence of deletion, whatever produced the absence** — and separating a rename
+  from a deletion-plus-coincidence is not decidable from a single snapshot at all, which is what
+  [ADR 029](029-2026-08-18-scan-observation-history.md) exists to fix.
+
 ## Evidence
 
 - The motivating incident, verbatim from `c58e7df`'s message (2026-08-09): a Claude Code worktree

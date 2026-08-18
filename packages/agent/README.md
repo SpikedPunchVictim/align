@@ -23,6 +23,18 @@ agent's guards reduce that risk but do not eliminate it:
   specific lines being changed still counts as "covered" — this catches the worst case (nothing
   tests this file at all) cheaply, at the cost of false confidence on partially-exercised code.
 
+A third bound is on **what the scan saw at all**. A file can be present on disk and still absent
+from align's scan — behind an `excludes` pattern, under a `node_modules`-class directory, inside a
+nested checkout, behind a symlink (the walk does not follow links), in an unreadable directory, or
+in an unparseable manifest. Every such path is reported (`scan-blind-spot` advisories, and
+`CheckRun.blindSpots` structurally), and the agent's `VERIFY` step inherits the same bound its
+oracle has: **green means "nothing the scan looked at is violating", not "nothing is violating".**
+The agent runs no destructive baseline command, and its `runCheck` calls the orchestrator directly
+without `persistMovedBaseline` (`cli/src/commands/agent.ts`) — so a move-transfer computed during a
+check is never written to `.align/baseline.json` on this path, and a blind spot cannot cost you a
+consent record here. What it can do is make a green fix look more complete than it is; the advisory
+naming the path is what tells you so.
+
 Neither guard is a substitute for a real test suite. If the target repo has weak or no tests, the
 agent's fixes carry the same behavioral risk any unreviewed automated edit would. Review the diff
 (or the draft PR, which is the default terminal-merge mode) before merging to a protected branch.

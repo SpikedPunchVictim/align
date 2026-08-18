@@ -11,11 +11,11 @@
 // `migration-notes-drift.test.ts` fails if UPGRADING_MD_CONTENT_HASH below no longer matches
 // the doc's current content — that is the drift detector, not a suggestion.
 //
-// Generated at: 2026-08-18T07:38:41.692Z
+// Generated at: 2026-08-18T15:57:16.300Z
 import type { MigrationNote } from './types.js';
 
 /** sha256Hex (16-char) of UPGRADING.md's full text at compile time. */
-export const UPGRADING_MD_CONTENT_HASH = "1fc0dbf694980628";
+export const UPGRADING_MD_CONTENT_HASH = "50f2ac16be0de360";
 
 /** Migration notes compiled from UPGRADING.md, keyed by the exact version heading text
  * ("## <version>") it was compiled from. */
@@ -44,6 +44,10 @@ export const COMPILED_NOTES: Readonly<Record<string, readonly MigrationNote[]>> 
     {
       heading: "Baseline move-transfer no longer treats a skipped checkout's file as a rename",
       body: "Move-transfer is the mechanism that keeps a renamed file's accepted debt accepted: when a violation\ndisappears from one file and an identical one appears in another, align transfers the baseline entry\nrather than reporting the old one fixed and the new one new. An earlier change in this release\ntightened it so a transfer requires the original file to have genuinely disappeared from the scan\n(see \"Baseline move-transfer only fires on a real move\" below).\n\nAuto-excluding a nested checkout makes a file disappear from the scan in exactly that way, for an\nentirely different reason — the file did not move, align simply stopped looking at it. Without the\nfix described here, that would be enough to make a checkout-resident baseline entry eligible for\ntransfer, and the entry would then be re-homed onto any live violation sharing its rule and its\nsource line. For a vendored copy of the same code that is the expected case, not a rare coincidence.\nThe result would be a violation nobody had ever reviewed carrying a real person's acceptance\ntimestamp and name, on a plain `align check` with no destructive command involved, reported as a\ngreen verdict and exit 0.\n\nalign treats a file inside a skipped checkout as still known rather than as gone, so it is never\noffered as a transfer candidate. A genuine rename still transfers exactly as before. If you have a\nbaseline written by an earlier version, nothing in it needs repair — the defect was in what a scan\nwould do next, not in anything already stored.",
+    },
+    {
+      heading: "A baselined entry align could not look at is retained, not pruned",
+      body: "This generalizes the nested-checkout behaviour above, and it is the change in 0.2.0 most likely to\nsurprise you, because it makes `prune` delete **less** than it used to.\n\nA nested checkout was one of **six** ways a file that is physically present can be absent from\nalign's scan. The others: it matched an `excludes` pattern; it sits under an always-excluded\ndirectory name (`node_modules`, `dist`, …); its directory could not be read (permissions); its\nmanifest could not be parsed (a malformed `package.json`); or it is behind a symlink — the walk does\nnot follow links, so a symlinked subtree vanishes from the scan entirely while every file in it\nstays readable at its old path.\n\nBefore 0.2.0 all six read as \"this violation is gone\", which `prune` reports as *fixed* and deletes,\nand which move-transfer reads as *renamed*. Neither is true: align simply did not look. Deleting a\nbaseline entry destroys a human's recorded consent decision, and doing it while reporting success at\nexit 0 is the worst failure this tool has.\n\n**What you will see.** `align baseline prune` now retains those entries and prints the reason and\nthe path responsible — for example `Retained 2 entries: their files are unobservable this scan, not\nfixed (vendor/lib (matched the excludes pattern 'vendor/**'))`. Everything genuinely fixed is still\npruned, and the command still exits 0. `align check` reports the same paths as a `scan-blind-spot`\nadvisory, with two deliberate exceptions: an `excludes` match and an always-excluded directory name\nproduce **no advisory**, because you wrote those patterns yourself and every repository has a\n`node_modules`. For those two, `prune`'s retention line is where the reason appears.\n\n**If you excluded a subtree on purpose** and want its accepted entries gone, say so by naming it:\n\n```\nalign baseline prune --forget-unscanned vendor/lib\n```\n\nThe prefix is required — there is no bare form, because a bare form would forfeit every retained\nentry in one keystroke. It deletes accepted consent decisions under that path only, and it is\nsubject to the same consent gate as any other deletion (below).\n\n**Nothing in an existing baseline needs repair.** The defect was in what a scan would do next, never\nin anything already stored.",
     },
     {
       heading: "`align baseline prune` now asks before it deletes",
