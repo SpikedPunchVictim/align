@@ -6,6 +6,7 @@ import * as fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { writeFileAtomic } from './fs-atomic.js';
 import { withAlignDirLock } from './align-lock.js';
+import { ConcurrentAlignWriteError } from './concurrent-write-error.js';
 import * as path from 'node:path';
 import type { z } from 'zod';
 import {
@@ -269,7 +270,7 @@ export function writeBaseline(rootDir: string, entries: readonly BaselineEntry[]
   withAlignDirLock(alignDirPath(rootDir), 'writeBaseline', () => {
     const actual = tokenOf(baselinePath(rootDir));
     if (actual !== expectedToken) {
-      throw new Error(
+      throw new ConcurrentAlignWriteError(
         'align: .align/baseline.json changed while this command was running, so writing now would ' +
           'silently discard whatever the other process recorded — most likely another align (an MCP ' +
           'server, an editor integration, or a second terminal) accepted or pruned entries. Nothing ' +

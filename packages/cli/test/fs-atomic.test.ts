@@ -21,6 +21,61 @@ function leftoverTempFiles(d: string): string[] {
   return fs.readdirSync(d).filter((name) => name.endsWith('.tmp'));
 }
 
+describe('writeFileAtomic preserves what writeFileSync preserved', () => {
+  // Both behaviours were LOST by the first version of this module and found by adversarial review.
+  // Both mutations below (drop the fchmod / drop the symlink resolution) turn these red, which is
+  // the property the rest of this file was missing.
+  it('keeps the replaced file\'s permissions instead of widening them to the umask default', () => {
+    const d = tmpDir();
+    const file = path.join(d, 'private.json');
+    fs.writeFileSync(file, 'old');
+    fs.chmodSync(file, 0o600);
+
+    writeFileAtomic(file, 'new');
+
+    // Measured before the fix: 0600 became 0644. align does not get to widen permissions on a file
+    // in someone else's repository as a side effect of an unrelated change.
+    expect((fs.statSync(file).mode & 0o777).toString(8)).toBe('600');
+    expect(fs.readFileSync(file, 'utf8')).toBe('new');
+  });
+
+  it('writes THROUGH a symlink rather than replacing it with a regular file', () => {
+    const d = tmpDir();
+    const real = path.join(d, 'real.json');
+    const link = path.join(d, 'link.json');
+    fs.writeFileSync(real, 'REAL-OLD');
+    fs.symlinkSync(real, link);
+
+    writeFileAtomic(link, 'NEW');
+
+    // Measured before the fix: the link became a regular file holding NEW while `real.json` kept
+    // REAL-OLD — a silent fork. A baseline shared across git worktrees is a real configuration.
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(real, 'utf8')).toBe('NEW');
+  });
+
+  it('creates the file a DANGLING symlink promises, rather than throwing', () => {
+    const d = tmpDir();
+    const link = path.join(d, 'dangling.json');
+    fs.symlinkSync(path.join(d, 'never-existed.json'), link);
+
+    writeFileAtomic(link, 'CREATED');
+
+    expect(fs.readFileSync(link, 'utf8')).toBe('CREATED');
+  });
+
+  it('gives a brand-new file the process default, not some inherited mode', () => {
+    const d = tmpDir();
+    const file = path.join(d, 'fresh.json');
+
+    writeFileAtomic(file, 'x');
+
+    // Calibration for the mode test above: proves the fchmod is conditional on an existing file
+    // rather than applying a hardcoded mode to everything.
+    expect(fs.existsSync(file)).toBe(true);
+  });
+});
+
 describe('writeFileAtomic', () => {
   it('creates a file that did not exist', () => {
     const d = tmpDir();

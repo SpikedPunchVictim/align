@@ -150,6 +150,64 @@ describe('withAlignDirLock', () => {
     );
   });
 
+  it('a zero-byte lock — what a kill mid-acquire used to leave — is broken once it is stale', () => {
+    const d = repo();
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(lockPath(d), ''); // the exact artefact the old two-step acquire produced
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    // Backdate it past the staleness floor; mtime is the only age an unparseable lock has.
+    const old = new Date(Date.now() - 5_000);
+    fs.utimesSync(lockPath(d), old, old);
+
+    const result = withAlignDirLock(d, 'align check', () => 'proceeded', { staleAfterMs: 1_000, waitTimeoutMs: 2_000, pollIntervalMs: 5 });
+
+    // Reproduced before the fix: this timed out and failed, FOREVER, at any age — every later align
+    // in the repository bricked until a human deleted the file.
+    expect(result).toBe('proceeded');
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('breaking a stale .align/ lock'));
+  });
+
+  it('a zero-byte lock is NOT broken before the staleness floor', () => {
+    const d = repo();
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(lockPath(d), '');
+
+    // Calibration for the test above: the recovery is age-gated, not a blanket "unparseable means
+    // free to take", so a lock being written right now by a live align is still respected.
+    expect(() => withAlignDirLock(d, 'align check', () => 'never', { staleAfterMs: 60_000, waitTimeoutMs: 100, pollIntervalMs: 5 })).toThrow(
+      /timed out/,
+    );
+  });
+
+  it('never leaves a partially-written lock file: the acquire publishes a COMPLETE one', () => {
+    const d = repo();
+    withAlignDirLock(d, 'align baseline prune', () => {
+      const raw = fs.readFileSync(lockPath(d), 'utf8');
+      // The whole point of the link-based acquire. Under the old two-step version there was a window
+      // where this file existed and was empty.
+      const holder = JSON.parse(raw) as { pid: number; command: string; host: string; acquiredAt: string };
+      expect(holder.pid).toBe(process.pid);
+      expect(holder.command).toBe('align baseline prune');
+      expect(Number.isFinite(Date.parse(holder.acquiredAt))).toBe(true);
+      return 0;
+    });
+    // And the temp file it was linked from is gone.
+    expect(fs.readdirSync(d).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('a live holder past the staleness floor is still not broken — liveness, not just age', () => {
+    const d = repo();
+    // The gap the previous suite had: every "not broken" case was decided by the age floor or the
+    // host check before liveness was ever consulted, so `return true` in place of `!processAlive()`
+    // survived the whole file. This is the case that requires the liveness check specifically.
+    plantLock(d, { pid: process.pid, ageMs: 10 * 60_000 });
+
+    expect(() => withAlignDirLock(d, 'align check', () => 'never', { staleAfterMs: 1_000, waitTimeoutMs: 150, pollIntervalMs: 10 })).toThrow(
+      /timed out/,
+    );
+    expect(fs.existsSync(lockPath(d))).toBe(true);
+  });
+
   it('is re-acquirable after a normal release', () => {
     const d = repo();
     expect(withAlignDirLock(d, 'first', () => 1)).toBe(1);

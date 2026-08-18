@@ -18,6 +18,7 @@ import { reportCliError } from '../cli-error.js';
 import { verifyFrozenRules } from './build.js';
 import { buildCheckEvent, computeAndPersistViolationTransitions, computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
 import { withVersionSkew } from '../version-skew.js';
+import { isConcurrentAlignWriteError } from '../concurrent-write-error.js';
 import { partitionBlindSpotCandidates } from '../scan-blind-spot-retention.js';
 import { createFileExistenceProbe } from '../file-existence.js';
 
@@ -120,7 +121,15 @@ async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<
     // rather than an unhandled Node stack trace.
     persistMovedBaseline(rootDir, run, baselineStore, baselineToken);
   } catch (err) {
-    return reportCliError('align check', err);
+    // A concurrent align is NOT a failed check. `persistMovedBaseline` writes a move-transfer the
+    // in-memory store has already applied, so this run's verdict and output do not depend on it, and
+    // the next `align check` re-derives and re-persists the same transfer unconditionally
+    // (`commands/baseline.ts` relies on exactly that when it defers transfers). Failing the command
+    // here turned a green repository into an exit-1 with no results printed, indistinguishable in CI
+    // from a real violation — found by adversarial review of ADR 030.
+    if (!isConcurrentAlignWriteError(err)) return reportCliError('align check', err);
+    console.error('align check: a concurrent align changed the baseline, so the move-transfer was not persisted; the next run redoes it. Check results follow.'
+      + '');
   }
 
   let effectiveRun = run;
@@ -264,10 +273,16 @@ async function runUntrustedCheck(rootDir: string, options: CheckOptions): Promis
     // `runTrustedCheck`'s identical catch above.
     persistMovedBaseline(rootDir, run, baselineStore, baselineToken);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`align check --untrusted: ${message}`);
-    recorder.record({ kind: 'error', errorKind: 'untrusted-refusal', message: shortMessage(message), command: 'check --untrusted' });
-    return 1;
+    // Same reasoning as the plain-`check` arm above: a concurrent align defers a transfer that the
+    // next run redoes, and must not be reported as an untrusted-scan refusal.
+    if (isConcurrentAlignWriteError(err)) {
+      console.error('align check --untrusted: a concurrent align changed the baseline, so the move-transfer was not persisted; the next run redoes it.');
+    } else {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`align check --untrusted: ${message}`);
+      recorder.record({ kind: 'error', errorKind: 'untrusted-refusal', message: shortMessage(message), command: 'check --untrusted' });
+      return 1;
+    }
   }
 
   recordCheckTelemetry(rootDir, recorder, run, wallMs, rulesetIrHash, 'check --untrusted');

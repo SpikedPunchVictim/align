@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { ConcurrentAlignWriteError } from './concurrent-write-error.js';
 
 /**
  * A short-held exclusive lock over `.align/`, for the moment a command commits a write.
@@ -79,12 +80,33 @@ function processAlive(pid: number): boolean {
  * means nothing locally — `processAlive` would answer about an unrelated process of the same
  * number. Refusing there costs a confused user one manual `rm`; guessing costs them a baseline.
  */
-function isBreakable(holder: LockHolder | undefined, now: number, staleAfterMs: number): boolean {
-  if (holder === undefined) return false;
+function isBreakable(holder: LockHolder | undefined, now: number, staleAfterMs: number, file: string): boolean {
+  if (holder === undefined) {
+    // UNIDENTIFIABLE HOLDER. The first version returned false here on the "corrupt is not absent"
+    // principle, and that was the wrong principle to borrow. Reproduced: a lock file that is empty
+    // or malformed became UNBREAKABLE AT ANY AGE, so every later align in that repository waited the
+    // full timeout and failed, forever, until a human deleted the file. The acquire below can no
+    // longer produce such a file — it is created complete, by `link` — so anything unparseable here
+    // is external damage, and the only recovery align can offer is age.
+    //
+    // The distinction that makes this safe rather than reckless: `.align/.lock` is a file align
+    // creates, owns and deletes on every run. It holds no user data. "Never break it" is the unsafe
+    // direction (a permanently bricked repository), unlike `baseline.json`, where it is the safe one.
+    return ageOf(file, now) >= staleAfterMs;
+  }
   if (holder.host !== os.hostname()) return false;
   const age = now - Date.parse(holder.acquiredAt);
   if (!Number.isFinite(age) || age < staleAfterMs) return false;
   return !processAlive(holder.pid);
+}
+
+/** Age from the filesystem, for the one case where the lock cannot speak for itself. */
+function ageOf(file: string, now: number): number {
+  try {
+    return now - fs.statSync(file).mtimeMs;
+  } catch {
+    return 0; // Vanished under us: not breakable, and the next acquire attempt will just succeed.
+  }
 }
 
 function describe(holder: LockHolder | undefined): string {
@@ -95,6 +117,15 @@ function describe(holder: LockHolder | undefined): string {
 /** Blocking sleep. `Atomics.wait` rather than a spin loop: this runs on the synchronous write path
  * (every `.align/` writer is sync), so there is no event loop to await on, and a busy-wait would
  * burn a core while the other process finishes. */
+let tmpCounter = 0;
+
+/** Writes a COMPLETE holder file at `file`. Separate from the acquire so that the acquire itself is
+ * a single atomic `link` of an already-finished file — see `withAlignDirLock`. */
+function writeHolderFile(file: string, command: string): void {
+  const holder: LockHolder = { pid: process.pid, host: os.hostname(), command, acquiredAt: new Date().toISOString() };
+  fs.writeFileSync(file, `${JSON.stringify(holder, null, 2)}\n`, 'utf8');
+}
+
 function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -130,17 +161,35 @@ export function withAlignDirLock<T>(alignDir: string, command: string, fn: () =>
   const staleAfterMs = timings.staleAfterMs ?? STALE_AFTER_MS;
   const pollIntervalMs = timings.pollIntervalMs ?? POLL_INTERVAL_MS;
   const deadline = Date.now() + waitTimeoutMs;
+  const tmpFile = path.join(alignDir, `${LOCK_BASENAME}.${process.pid}.${(tmpCounter += 1).toString(36)}.tmp`);
 
   for (;;) {
-    let handle: number;
     try {
-      // 'wx' — atomic create-if-absent. This, and only this, is the acquire.
-      handle = fs.openSync(file, 'wx');
+      // ACQUIRE, and it is one atomic step on purpose. The first version was two — `open(file,'wx')`
+      // created an EMPTY lock, then the holder JSON was written into it — and a kill in that window
+      // left a lock nothing could parse. Reproduced: that made the lock UNBREAKABLE AT ANY AGE, so
+      // every later align in the repository waited the full timeout and failed until a human deleted
+      // the file. A lock built to survive crashes had a crash window that bricked the repo.
+      //
+      // `link` is the fix: the temp file is written COMPLETE first, and `link` publishes it under
+      // the lock name only if that name does not exist. There is no moment at which a partial lock
+      // is visible. `link` fails with EEXIST when the name is taken, which is the contention signal.
+      writeHolderFile(tmpFile, command);
+      try {
+        fs.linkSync(tmpFile, file);
+      } finally {
+        // The lock file and the temp now share one inode; dropping the temp name leaves the lock.
+        try {
+          fs.rmSync(tmpFile, { force: true });
+        } catch {
+          // Leaves litter in `.align/`, nothing worse; never fail an acquired lock over cleanup.
+        }
+      }
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
 
       const holder = readHolder(file);
-      if (isBreakable(holder, Date.now(), staleAfterMs)) {
+      if (isBreakable(holder, Date.now(), staleAfterMs, file)) {
         // Named on stderr, never silently: a broken lock means another align died mid-write, which
         // is exactly the moment a user wants to know the file may be mid-history.
         console.error(`align: breaking a stale .align/ lock left by ${describe(holder)} — that process is no longer running.`);
@@ -148,7 +197,7 @@ export function withAlignDirLock<T>(alignDir: string, command: string, fn: () =>
         continue;
       }
       if (Date.now() >= deadline) {
-        throw new Error(
+        throw new ConcurrentAlignWriteError(
           `align: timed out after ${waitTimeoutMs / 1000}s waiting for the .align/ lock, held by ${describe(holder)}. ` +
             'Another align process is writing to this repository. Wait for it to finish and retry. ' +
             `If you are certain no align process is running, delete ${file}.`,
@@ -160,12 +209,6 @@ export function withAlignDirLock<T>(alignDir: string, command: string, fn: () =>
 
     // Held. Everything from here runs with the lock and must release it on every path.
     try {
-      const holder: LockHolder = { pid: process.pid, host: os.hostname(), command, acquiredAt: new Date().toISOString() };
-      try {
-        fs.writeFileSync(handle, `${JSON.stringify(holder, null, 2)}\n`, 'utf8');
-      } finally {
-        fs.closeSync(handle);
-      }
       return fn();
     } finally {
       // Release even if `fn` threw. `force` because a stale-breaker may already have removed it,

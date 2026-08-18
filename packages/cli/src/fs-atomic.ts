@@ -29,21 +29,57 @@ import * as path from 'node:path';
  * **What this does NOT provide: mutual exclusion.** Two processes calling this concurrently both
  * succeed, and the loser's contents are silently gone — atomically. That is a different defect with
  * a different fix (see `align-lock.ts`); do not read "atomic" as "safe to race".
+ *
+ * **Two behaviours of `fs.writeFileSync` that a bare rename would silently drop**, both found by
+ * adversarial review of the first version of this file and both reproduced before being fixed:
+ *
+ *   - **Mode.** `writeFileSync` writes through to the existing inode and keeps its permissions; a
+ *     rename installs a brand-new inode created under the process umask. Measured: a
+ *     `baseline.json` at `0600` came back `0644`. align does not get to widen permissions on a
+ *     file in someone else's repository as a side effect of an unrelated fix.
+ *   - **Symlinks.** `writeFileSync` follows them; a rename replaces the link itself with a regular
+ *     file. Measured: writing through a symlinked `baseline.json` left the real file holding the
+ *     OLD content and the link replaced — a silent fork, where every later read goes to one file
+ *     and the user's other worktree still sees the other. Repos do share a baseline across git
+ *     worktrees, so this is a real configuration, not a hypothetical.
  */
 export function writeFileAtomic(file: string, contents: string): void {
-  const dir = path.dirname(file);
-  // Same directory (EXDEV), and a name that cannot collide with a concurrent writer's temp file:
-  // pid alone is not enough, since one process can write the same artifact twice in a run.
-  const tmp = path.join(dir, `.${path.basename(file)}.${process.pid}.${(counter += 1).toString(36)}.tmp`);
+  // Follow a symlink to its target and replace THAT, so the link survives and keeps pointing at
+  // live content. `realpathSync` throws on a dangling link, which is the one case where writing the
+  // link path itself is right (it creates the file the link promised).
+  let target = file;
+  try {
+    if (fs.lstatSync(file).isSymbolicLink()) target = fs.realpathSync(file);
+  } catch {
+    // Does not exist, or a dangling link: `file` is the correct path to create.
+  }
+
+  // Mode of the file being replaced, so the new inode inherits it. `undefined` when there is no
+  // existing file — a fresh write correctly gets the process default.
+  let mode: number | undefined;
+  try {
+    mode = fs.statSync(target).mode & 0o777;
+  } catch {
+    // No existing file; leave the default.
+  }
+
+  const dir = path.dirname(target);
+  // Same directory (EXDEV), and a name that cannot collide with a concurrent writer's temp file ON
+  // THIS HOST: pid alone is not enough, since one process can write the same artifact twice in a
+  // run. `wx` rather than `w` because uniqueness across HOSTS is not guaranteed — two containers on
+  // one bind mount can both be pid 1 — and there an exclusive create turns silent mutual corruption
+  // into a loud EEXIST at no cost.
+  const tmp = path.join(dir, `.${path.basename(target)}.${process.pid}.${(counter += 1).toString(36)}.tmp`);
 
   let handle: number | undefined;
   try {
-    handle = fs.openSync(tmp, 'w');
+    handle = fs.openSync(tmp, 'wx');
+    if (mode !== undefined) fs.fchmodSync(handle, mode);
     fs.writeFileSync(handle, contents, 'utf8');
     fs.fsyncSync(handle);
     fs.closeSync(handle);
     handle = undefined;
-    fs.renameSync(tmp, file);
+    fs.renameSync(tmp, target);
   } catch (err) {
     if (handle !== undefined) {
       try {
