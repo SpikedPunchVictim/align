@@ -135,8 +135,10 @@ discovered in production — or, if you are lucky, on a scenario's first run.
 
 ## S-09 — Fixed one arm, missed the other
 
-**Instances**: ADR 027 F1 (S0), D016 (S1). **Rung**: brief, **plus one executable technique** —
-see below.
+**Instances**: ADR 027 F1 (S0), D016 (S1), D017 (S1). **Rung**: brief, **plus one executable
+technique** — see below. **Three instances in one day is the highest rate any shape here has, and
+that is the finding**: this repo's fixes are consistently scoped to the code the reproduction
+touched, and consistently stop at the edge of it.
 
 A defect class with two call sites. One is fixed; the other has the same shape and is not, because
 the fix was framed as a bug rather than a class. CLAUDE.md rule 6 in one line: *hunt the class, not
@@ -154,6 +156,16 @@ above is necessary and not sufficient; widen it.
 
 > **Ask (added)**: this guard names one cause of the failure it prevents. Enumerate the other causes
 > of the *same observable symptom*. Which of them reaches this code without passing the guard?
+
+**Third instance, 2026-08-18 (D017), a third distinct axis.** D016's two arms were two causes inside
+one function; ADR 027 F1's were two call sites. D017's are two *layers*: `loadWorkspacePackages`
+reads each member manifest correctly and records what it cannot read, then opens with
+`if (patterns.length === 0) return []` — and the function producing those patterns failed silently,
+so the careful inner loop never ran at all. A fix is scoped to the code the reproduction touched,
+and the reproduction never exercises the layer above.
+
+> **Ask (added)**: what must be true for the code you just fixed to RUN? Whoever decides that is
+> inside the blast radius, and a reproduction that starts below it will never implicate it.
 
 **The general shape cannot be promoted** — "some other arm of this class exists somewhere" is not
 decidable, and a check that tried would be a linter for insight. **One sub-case is, and it was used

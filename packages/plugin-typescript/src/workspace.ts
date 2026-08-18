@@ -39,39 +39,92 @@ const asStringArray = (value: unknown): string[] =>
  * field) is intentionally not read here — see the PM-support notes. Read-only survey posture: a
  * malformed file yields `[]`, never a thrown scan.
  */
-export function readWorkspaceGlobs(rootDir: string): string[] {
-  const pnpmWsPath = path.join(rootDir, 'pnpm-workspace.yaml');
-  if (fs.existsSync(pnpmWsPath)) {
+export type BlindSpotSink = (path: string, reason: ScanBlindSpot['reason']) => void;
+
+/**
+ * Reads one workspace-declaration file, telling its three failure modes apart (task #11, ADR 028's
+ * discipline applied one layer up from `loadWorkspacePackages`).
+ *
+ * ENOENT returns `undefined` and records nothing: no `pnpm-workspace.yaml` is the ordinary
+ * single-package repo, and no `lerna.json` is nearly every repo — recording those would put an
+ * advisory on almost everything align sees, which is the fastest way to teach a user to ignore
+ * advisories. Every OTHER read error means align could not look, which is never the same fact.
+ */
+function readDeclaration(absPath: string, relPath: string, record: BlindSpotSink | undefined): string | undefined {
+  try {
+    return fs.readFileSync(absPath, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      record?.(relPath, { kind: 'unreadable', error: err instanceof Error ? err.message : String(err) });
+    }
+    return undefined;
+  }
+}
+
+/**
+ * `record` (task #11): the sink `loadWorkspacePackages` already threads for per-member failures,
+ * extended to the layer that decides whether that loop runs at ALL.
+ *
+ * This was the gap. `loadWorkspacePackages` reads each member manifest correctly and records what
+ * it cannot read — but it opens with `if (patterns.length === 0) return []`, so a
+ * `pnpm-workspace.yaml` that could not be read or parsed produced an empty member set, an empty
+ * inventory, and not one blind spot. Measured before the fix: a two-package workspace with one
+ * malformed character in `pnpm-workspace.yaml` scanned the root manifest only and reported
+ * `blindSpots: []`. Shape S-09 — the inner loop was fixed, the guard deciding whether the loop runs
+ * was not.
+ *
+ * **These records report; they do not drive containment, and that is deliberate.** A member set
+ * align could not read is a set whose paths it cannot name, so there is no precise path to record
+ * against. Retention for those entries falls to ADR 028 mechanism 2 (the file-existence probe): a
+ * member's `package.json` is still on disk and unobserved, so it is retained already. Recording the
+ * repo root instead, to force at-or-under containment, would retain every entry in the repository
+ * over one malformed YAML file — shape S-04, safe and useless.
+ *
+ * The sink stays OPTIONAL, extending the exemption argued on `loadWorkspacePackages` below rather
+ * than inventing a new one: of the three callers, only the manifest path (`scanManifests`) feeds a
+ * destructive inference, and `doctor`/`init` infer nothing from a missing member.
+ */
+export function readWorkspaceGlobs(rootDir: string, record?: BlindSpotSink): string[] {
+  const pnpmWs = readDeclaration(path.join(rootDir, 'pnpm-workspace.yaml'), 'pnpm-workspace.yaml', record);
+  if (pnpmWs !== undefined) {
     try {
-      const doc = parseYaml(fs.readFileSync(pnpmWsPath, 'utf8')) as { packages?: unknown } | undefined;
+      const doc = parseYaml(pnpmWs) as { packages?: unknown } | undefined;
       const patterns = asStringArray(doc?.packages);
       if (patterns.length > 0) return patterns;
-    } catch {
-      // fall through to package.json — a malformed pnpm-workspace.yaml shouldn't hide a workspaces field
+    } catch (err) {
+      // Fall through to package.json — a malformed pnpm-workspace.yaml shouldn't HIDE a workspaces
+      // field — but say so on the way past. Silently falling through is how a repo ends up scanned
+      // by the wrong declaration with nobody told.
+      record?.('pnpm-workspace.yaml', { kind: 'unparseable', error: err instanceof Error ? err.message : String(err) });
     }
   }
 
-  const pkgPath = path.join(rootDir, 'package.json');
-  if (fs.existsSync(pkgPath)) {
+  const pkgRaw = readDeclaration(path.join(rootDir, 'package.json'), 'package.json', record);
+  if (pkgRaw !== undefined) {
     try {
-      const ws = (JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { workspaces?: unknown }).workspaces;
+      const ws = (JSON.parse(pkgRaw) as { workspaces?: unknown }).workspaces;
       if (Array.isArray(ws)) return asStringArray(ws);
       if (ws !== null && typeof ws === 'object') return asStringArray((ws as { packages?: unknown }).packages);
-    } catch {
-      // malformed package.json: read-only survey posture
+    } catch (err) {
+      // `buildManifestRecord` records this same file, with this same reason kind, for its own read.
+      // The two losses are genuinely different (no workspace globs vs. no root manifest) but the
+      // record cannot express the difference — same path, same kind — so `scanManifests` collapses
+      // them and the user is told once. Recorded here anyway rather than skipped: this reader has
+      // three callers, and the other two do not run `buildManifestRecord` at all.
+      record?.('package.json', { kind: 'unparseable', error: err instanceof Error ? err.message : String(err) });
     }
   }
 
   // lerna.json — reached only when no PM workspace declaration won above (a repo using both a real
   // `workspaces` field and lerna delegates globbing to the PM, so that wins). Lerna defaults an
   // omitted `packages` to `['packages/*']`, so an existing lerna.json always yields a usable glob.
-  const lernaPath = path.join(rootDir, 'lerna.json');
-  if (fs.existsSync(lernaPath)) {
+  const lernaRaw = readDeclaration(path.join(rootDir, 'lerna.json'), 'lerna.json', record);
+  if (lernaRaw !== undefined) {
     try {
-      const patterns = asStringArray((JSON.parse(fs.readFileSync(lernaPath, 'utf8')) as { packages?: unknown }).packages);
+      const patterns = asStringArray((JSON.parse(lernaRaw) as { packages?: unknown }).packages);
       return patterns.length > 0 ? patterns : ['packages/*'];
-    } catch {
-      // malformed lerna.json: read-only survey posture
+    } catch (err) {
+      record?.('lerna.json', { kind: 'unparseable', error: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -94,12 +147,12 @@ export function loadWorkspacePackages(
   rootDir: string,
   record?: (path: string, reason: ScanBlindSpot['reason']) => void,
 ): WorkspacePackage[] {
-  const patterns = readWorkspaceGlobs(rootDir);
+  const patterns = readWorkspaceGlobs(rootDir, record);
   if (patterns.length === 0) return [];
 
   const dirs = new Set<string>();
   for (const pattern of patterns) {
-    for (const dir of expandPattern(rootDir, pattern)) dirs.add(dir);
+    for (const dir of expandPattern(rootDir, pattern, record)) dirs.add(dir);
   }
 
   const packages: WorkspacePackage[] = [];
@@ -144,12 +197,12 @@ export function loadWorkspacePackages(
  * package.json. Supports the pattern vocabulary pnpm-workspace.yaml actually uses: literal
  * segments, a single trailing/interior `*` (one directory level), and a trailing `**` (recursive
  * — any package.json anywhere under the prefix). */
-function expandPattern(rootDir: string, pattern: string): string[] {
+function expandPattern(rootDir: string, pattern: string, record?: BlindSpotSink): string[] {
   const normalized = pattern.split('\\').join('/');
   if (normalized.endsWith('/**') || normalized === '**') {
     const prefix = normalized === '**' ? '' : normalized.slice(0, -'/**'.length);
     const base = path.join(rootDir, prefix);
-    return collectPackageDirsRecursive(base);
+    return collectPackageDirsRecursive(base, rootDir, record);
   }
 
   const segments = normalized.split('/').filter((s) => s.length > 0);
@@ -158,7 +211,7 @@ function expandPattern(rootDir: string, pattern: string): string[] {
     const next: string[] = [];
     for (const dir of currentDirs) {
       if (segment === '*') {
-        for (const entry of safeReaddir(dir)) {
+        for (const entry of safeReaddir(dir, rootDir, record)) {
           if (entry.isDirectory()) next.push(path.join(dir, entry.name));
         }
       } else {
@@ -171,12 +224,12 @@ function expandPattern(rootDir: string, pattern: string): string[] {
   return currentDirs;
 }
 
-function collectPackageDirsRecursive(base: string): string[] {
+function collectPackageDirsRecursive(base: string, rootDir: string, record?: BlindSpotSink): string[] {
   const results: string[] = [];
   const visit = (dir: string): void => {
     if (!isDirectory(dir)) return;
     if (fs.existsSync(path.join(dir, 'package.json'))) results.push(dir);
-    for (const entry of safeReaddir(dir)) {
+    for (const entry of safeReaddir(dir, rootDir, record)) {
       if (entry.isDirectory() && entry.name !== 'node_modules' && !entry.name.startsWith('.')) {
         visit(path.join(dir, entry.name));
       }
@@ -186,10 +239,22 @@ function collectPackageDirsRecursive(base: string): string[] {
   return results;
 }
 
-function safeReaddir(dir: string): fs.Dirent[] {
+/**
+ * Task #11. Unlike the config-file records above, THIS one drives containment as well as reporting:
+ * an unreadable directory names the affected subtree exactly, so a baseline entry beneath it is
+ * retained by the blind-spot test rather than relying on the probe (which cannot see through an
+ * unreadable parent either — the case `blind-spot-unreadable-retains` exists for).
+ *
+ * ENOENT is still silent: a glob may legitimately name a directory that does not exist.
+ */
+function safeReaddir(dir: string, rootDir: string, record?: BlindSpotSink): fs.Dirent[] {
   try {
     return fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      const rel = path.relative(rootDir, dir).split(path.sep).join('/');
+      record?.(rel === '' ? '.' : rel, { kind: 'unreadable', error: err instanceof Error ? err.message : String(err) });
+    }
     return [];
   }
 }

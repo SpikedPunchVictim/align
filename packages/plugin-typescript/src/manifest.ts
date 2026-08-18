@@ -21,6 +21,13 @@ import {
   type ManifestScanOptions,
 } from '@spikedpunch/align-core';
 import { loadWorkspacePackages } from './workspace.js';
+// The source walker's own directory-exclude matcher, IMPORTED rather than reimplemented (task #11).
+// This domain used to carry its own exact-or-directory-prefix dialect with no `globMatch` and no
+// `/**` handling, so `excludes: ['packages/*']` hid a package's sources while leaving its manifest
+// in the inventory — one config entry meaning two different things depending on which walker read
+// it. BUG #4 is the precedent: a second, independent glob implementation diverged from core's three
+// separate ways before it was deleted. One matcher, so the two domains cannot drift apart again.
+import { matchingExcludePatternForDirectory } from './scanner.js';
 
 const DEP_FIELDS: readonly ManifestDepField[] = ['dependencies', 'devDependencies', 'optionalDependencies'];
 
@@ -42,21 +49,34 @@ interface PnpmLockfile {
   readonly importers?: Record<string, LockImporter>;
 }
 
-function readJson<T>(absPath: string): T | undefined {
-  try {
-    return JSON.parse(fs.readFileSync(absPath, 'utf8')) as T;
-  } catch {
-    return undefined; // malformed/unreadable: skip this one file, not the whole scan
-  }
-}
-
-function readLockfile(rootDir: string): PnpmLockfile | undefined {
+/**
+ * Task #11. `lockfilePresent: false` used to mean three different things — no lockfile, a lockfile
+ * align could not read, and a lockfile it could not parse — and only the first is sound. The other
+ * two are BUG #1's corrupt-≠-absent discipline, and they are not merely cosmetic here: every
+ * `catalog:`-managed dependency falls back to its raw package.json text when the lockfile is
+ * unavailable, so `security.manifest.source-hygiene` evaluates a different specifier than the one
+ * that actually ships. A wrong answer, reported as a clean one.
+ *
+ * Still returns `undefined` in all three cases — the scan proceeds read-only rather than crashing,
+ * which is the right posture — but the last two now say so.
+ */
+function readLockfile(rootDir: string, record: (path: string, reason: ScanBlindSpot['reason']) => void): PnpmLockfile | undefined {
   const lockPath = path.join(rootDir, 'pnpm-lock.yaml');
-  if (!fs.existsSync(lockPath)) return undefined;
+  let raw: string;
   try {
-    return parseYaml(fs.readFileSync(lockPath, 'utf8')) as PnpmLockfile;
-  } catch {
-    return undefined; // malformed lockfile: read-only survey posture, don't crash the scan
+    raw = fs.readFileSync(lockPath, 'utf8');
+  } catch (err) {
+    // ENOENT is sound and common: a pre-install checkout, or a repo on another package manager.
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      record('pnpm-lock.yaml', { kind: 'unreadable', error: err instanceof Error ? err.message : String(err) });
+    }
+    return undefined;
+  }
+  try {
+    return parseYaml(raw) as PnpmLockfile;
+  } catch (err) {
+    record('pnpm-lock.yaml', { kind: 'unparseable', error: err instanceof Error ? err.message : String(err) });
+    return undefined;
   }
 }
 
@@ -76,19 +96,6 @@ function findDependencyLine(raw: string, depName: string): number | undefined {
     if (re.test(lines[i] ?? '')) return i + 1;
   }
   return undefined;
-}
-
-/** Returns the matching pattern rather than a boolean, so the blind-spot record can name the one
- * responsible (ADR 028 §3 — reasons are printed, never just counts).
- *
- * NOTE, recorded rather than fixed here: this dialect is exact-or-directory-prefix only, with no
- * `globMatch`, and therefore DIVERGES from the source walker's (`scanner.ts`). One `excludes` entry
- * can drop a package's sources while keeping its manifest, or the reverse. ADR 028 names that
- * divergence as its own out-of-scope item; this change makes the manifest domain record what it
- * skips, it does not reconcile the two dialects. */
-function matchingExclude(relDir: string, excludes: readonly string[]): string | undefined {
-  if (relDir === '') return undefined;
-  return excludes.find((pattern) => relDir === pattern || relDir.startsWith(`${pattern}/`));
 }
 
 /**
@@ -159,19 +166,22 @@ function buildManifestRecord(
  * lockfile is present (root importer key is `.`; member keys are their repo-relative dir with no
  * trailing slash). */
 export function scanManifests(rootDir: string, excludes: readonly string[] = []): ManifestInventory {
-  const lock = readLockfile(rootDir);
   const manifests: ManifestRecord[] = [];
   const blindSpots: ScanBlindSpot[] = [];
   const record = (relPath: string, reason: ScanBlindSpot['reason']): void => {
     blindSpots.push({ path: toRepoRelativePath(relPath), reason });
   };
 
+  // Declared before the lockfile read, not after: the lockfile is the first thing this scan can
+  // fail to look at, and it used to fail silently.
+  const lock = readLockfile(rootDir, record);
+
   const rootRecord = buildManifestRecord(rootDir, '', lock?.importers?.['.'], record);
   if (rootRecord !== undefined) manifests.push(rootRecord);
 
   for (const pkg of loadWorkspacePackages(rootDir, record)) {
     const relDir = pkg.dir.endsWith('/') ? pkg.dir.slice(0, -1) : pkg.dir;
-    const pattern = matchingExclude(relDir, excludes);
+    const pattern = matchingExcludePatternForDirectory(relDir, excludes);
     if (pattern !== undefined) {
       // Recorded against the DIRECTORY, not the manifest path: at-or-under containment then covers
       // the member's `package.json` and anything else under it, matching how the source walker
@@ -183,8 +193,19 @@ export function scanManifests(rootDir: string, excludes: readonly string[] = [])
     if (memberRecord !== undefined) manifests.push(memberRecord);
   }
 
-  blindSpots.sort((a, b) => a.path.localeCompare(b.path));
-  return { manifests, lockfilePresent: lock !== undefined, blindSpots };
+  // Collapse duplicates by (path, kind). Two readers can legitimately fail on the SAME file for the
+  // same reason — a malformed root `package.json` is both "no workspace globs" and "no root
+  // manifest" — and the record has no way to say which is which, so reporting it twice is noise
+  // rather than information. Distinct kinds on one path are kept: those ARE different facts.
+  const seen = new Set<string>();
+  const deduped = blindSpots.filter((spot) => {
+    const key = `${spot.path}\u0000${spot.reason.kind}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  deduped.sort((a, b) => a.path.localeCompare(b.path));
+  return { manifests, lockfilePresent: lock !== undefined, blindSpots: deduped };
 }
 
 /** `@spikedpunch/align-core`'s `ManifestScanner` injection seam, concretely implemented for the pnpm/Node

@@ -350,7 +350,7 @@ function isExcludedPath(relPath: string, excludes: readonly string[]): boolean {
  * per file. Measured on a 10-file fixture: 10 records for the brace form against 2 for the
  * equivalent `['src/a/**','src/b/**']`, with identical `files` — the bound broken, not correctness.
  */
-function matchingExcludePatternForDirectory(relDir: string, excludes: readonly string[]): string | undefined {
+export function matchingExcludePatternForDirectory(relDir: string, excludes: readonly string[]): string | undefined {
   const direct = matchingExcludePattern(relDir, excludes);
   if (direct !== undefined) return direct;
   if (relDir === '') return undefined;

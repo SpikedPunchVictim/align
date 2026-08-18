@@ -174,6 +174,38 @@ subject to the same consent gate as any other deletion (below).
 **Nothing in an existing baseline needs repair.** The defect was in what a scan would do next, never
 in anything already stored.
 
+### `excludes` now means the same thing to your manifests as to your sources
+
+One `excludes` entry used to be read by two different matchers. The source walker understood the
+full glob dialect; the manifest scanner understood only an exact match or a literal directory
+prefix. So `excludes: ['packages/vendor/*']` hid a vendored package's **source files** while its
+`package.json` stayed in the scan, and `security.manifest.*` rules kept reporting against it. Both
+domains now use the source walker's matcher.
+
+**What you will see**: if you exclude a directory with a glob (`*`, `**`, or a `{a,b}` brace group)
+and that directory contains a `package.json`, its manifest violations will stop being reported.
+That is what the exclude asked for. Baseline entries for those violations are **retained, not
+pruned** — they are unobservable now, not fixed — so nothing in `.align/baseline.json` is lost, and
+`align baseline prune` will name the pattern responsible if you ask it to clean up.
+
+If you *want* a package's manifest scanned while its sources are excluded, an exclude pattern can no
+longer express that; exclude the source subdirectory (`packages/vendor/src/**`) instead of the
+package directory.
+
+### align now tells you when it could not read your workspace files
+
+A malformed or unreadable `pnpm-workspace.yaml`, `lerna.json` or `pnpm-lock.yaml` used to be
+indistinguishable from not having one. A single bad character in `pnpm-workspace.yaml` meant align
+found no workspace members, scanned your root `package.json` alone, and reported a green check over
+a fraction of your monorepo without saying anything.
+
+Those now produce a `scan-blind-spot` advisory naming the file and the parse or permission error.
+The scan still proceeds — align stays read-only and does not crash on a file it cannot read — and
+`lockfilePresent` still reports false, but you are told why. This matters beyond coverage: when the
+lockfile cannot be read, every `catalog:`-managed dependency falls back to the raw specifier text in
+`package.json`, so `security.manifest.source-hygiene` was evaluating a string that is not what your
+install actually resolves.
+
 ### `align baseline prune` now asks before it deletes
 
 **Breaking for non-interactive use.** Every entry `prune` removes is an accepted consent decision — a

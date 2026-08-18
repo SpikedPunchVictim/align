@@ -521,9 +521,18 @@ and the `includeNestedCheckouts` README judgement noted above.
   the MCP server racing a CLI `accept` can lose a consent decision. Own ADR.
 - **Case-only renames on case-insensitive filesystems** (ADR 028 mechanism #8) — known gap.
 - **Whether align should follow symlinks at all** — Stage 1 records them; it does not decide this.
-- **The manifest domain's own exits** — malformed-`package.json`-as-absent (`manifest.ts:44-50`) and
+- ~~**The manifest domain's own exits** — malformed-`package.json`-as-absent (`manifest.ts:44-50`) and
   its exclude dialect diverging from the source walker's (`manifest.ts:80-83` vs `scanner.ts:250-255`).
-  Same class, second walker. Should be next, not last.
+  Same class, second walker. Should be next, not last.~~ **DONE 2026-08-18, LEDGER D017**, and this
+  entry was wrong in both halves in a way worth recording. The `manifest.ts:44-50` exit named here
+  was already dead code — ADR 028 F3's rewrite of `buildManifestRecord` orphaned `readJson` and
+  nobody noticed, so "closing" it meant deleting a corpse. The live exits were somewhere else and
+  there were **four** of them, one layer up: `readWorkspaceGlobs` (three declaration files),
+  `safeReaddir` in the glob walk, and `readLockfile`. All four silently shrank the scan and recorded
+  nothing — measured. The exclude-dialect half was real and is closed by importing the source
+  walker's `matchingExcludePatternForDirectory` rather than growing a third copy of the dialect.
+  **Lesson for the next out-of-scope list**: an item written as two file:line citations decays into
+  a false map of the problem. Cite the property, not the lines.
 - **`custom.host` seatbelt rule** confining scanner imports — catches only the five direct-scan
   projections, misses `baseline.ts`/`upgrade.ts`. Belongs with the reframe.
 

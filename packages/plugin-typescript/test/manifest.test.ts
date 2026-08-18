@@ -187,3 +187,133 @@ describe('scanManifests records what it could not turn into a record (ADR 028 F3
     expect(scanManifests(dir, []).blindSpots).toEqual([]);
   });
 });
+
+/**
+ * The manifest domain's own absence exits, above the per-manifest read that ADR 028 F3 already
+ * fixed. `buildManifestRecord` and `loadWorkspacePackages` both read-then-branch-on-`code`
+ * correctly — but neither runs at all if the layer that decides WHICH directories are members
+ * fails silently first. That is shape S-09 again (the inner loop was fixed, the guard deciding
+ * whether the loop runs was not), and all four cases below were measured against the built
+ * scanner before the fix: the member manifest vanished from the inventory and `blindSpots` was
+ * `[]` — align looked at a fraction of the repo and said nothing.
+ *
+ * **What these records are and are not for.** A malformed `pnpm-workspace.yaml` makes the member
+ * set unknowable, so there is no precise path to record containment against — the affected
+ * manifests are exactly the ones we could not enumerate. These records therefore REPORT
+ * (mechanism 1) while retention falls to the file-existence probe (mechanism 2), which already
+ * covers them: a member's `package.json` is still on disk and unobserved, so it is retained.
+ * Recording the repo root instead, to force containment, would retain every entry in the
+ * repository whenever a lockfile is malformed — shape S-04, safe and useless. The unreadable
+ * DIRECTORY case is different and does record a containing path, because there the affected
+ * subtree is known exactly.
+ */
+describe('scanManifests records the absence exits ABOVE the per-manifest read (task #11)', () => {
+  let dir: string;
+
+  afterEach(() => {
+    if (dir !== undefined) {
+      for (const rel of ['packages', 'pnpm-workspace.yaml', 'pnpm-lock.yaml']) {
+        const p = path.join(dir, rel);
+        if (fs.existsSync(p)) fs.chmodSync(p, 0o755);
+      }
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /** A two-package pnpm workspace: root plus `packages/member`. Every test below breaks exactly one
+   * thing about it, so a dropped member is attributable to that one break. */
+  function workspaceRepo(): string {
+    const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'align-manifest-exits-')));
+    fs.writeFileSync(path.join(d, 'package.json'), `${JSON.stringify({ name: 'root' })}\n`, 'utf8');
+    fs.mkdirSync(path.join(d, 'packages', 'member'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'packages', 'member', 'package.json'), `${JSON.stringify({ name: 'member' })}\n`, 'utf8');
+    fs.writeFileSync(path.join(d, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n", 'utf8');
+    return d;
+  }
+
+  it('is calibrated: the healthy workspace finds the member and records nothing', () => {
+    dir = workspaceRepo();
+    const inventory = scanManifests(dir, []);
+    // Without this, every assertion below is satisfied by a repo whose member was never findable.
+    expect(inventory.manifests.map((m) => m.file)).toEqual(['package.json', 'packages/member/package.json']);
+    expect(inventory.blindSpots).toEqual([]);
+  });
+
+  it('records a MALFORMED pnpm-workspace.yaml — a member set align could not read is not an empty one', () => {
+    dir = workspaceRepo();
+    fs.writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n   bad: [oops\n", 'utf8');
+
+    const inventory = scanManifests(dir, []);
+
+    expect(inventory.blindSpots.map((s) => ({ path: s.path, kind: s.reason.kind }))).toEqual([
+      { path: 'pnpm-workspace.yaml', kind: 'unparseable' },
+    ]);
+  });
+
+  it('records an UNREADABLE pnpm-workspace.yaml, which existsSync reported as simply absent', () => {
+    dir = workspaceRepo();
+    fs.chmodSync(path.join(dir, 'pnpm-workspace.yaml'), 0o000);
+
+    const inventory = scanManifests(dir, []);
+
+    expect(inventory.blindSpots.map((s) => ({ path: s.path, kind: s.reason.kind }))).toEqual([
+      { path: 'pnpm-workspace.yaml', kind: 'unreadable' },
+    ]);
+  });
+
+  it('records a MALFORMED pnpm-lock.yaml instead of silently reporting no lockfile', () => {
+    dir = workspaceRepo();
+    fs.writeFileSync(path.join(dir, 'pnpm-lock.yaml'), 'importers:\n  .: [unclosed\n', 'utf8');
+
+    const inventory = scanManifests(dir, []);
+
+    // `lockfilePresent: false` on a lockfile that is right there is corrupt-read-as-absent (BUG #1's
+    // class). It also silently changes RESULTS: every `catalog:` specifier falls back to its raw
+    // package.json text, so the security gate evaluates a different string than the one that ships.
+    expect(inventory.blindSpots.map((s) => ({ path: s.path, kind: s.reason.kind }))).toEqual([
+      { path: 'pnpm-lock.yaml', kind: 'unparseable' },
+    ]);
+  });
+
+  it('records an UNREADABLE workspace directory against the directory, where containment is exact', () => {
+    dir = workspaceRepo();
+    fs.chmodSync(path.join(dir, 'packages'), 0o000);
+
+    const inventory = scanManifests(dir, []);
+
+    // Unlike the config-file cases above, the affected subtree is known precisely here, so this
+    // record carries a path that at-or-under containment can actually use.
+    expect(inventory.blindSpots.map((s) => ({ path: s.path, kind: s.reason.kind }))).toEqual([
+      { path: 'packages', kind: 'unreadable' },
+    ]);
+  });
+
+  it.each([['packages/**'], ['packages/*'], ['packages/{member,other}']])(
+    'excludes %s the same way the source walker does — one entry cannot hide sources but keep the manifest',
+    (pattern) => {
+      dir = workspaceRepo();
+
+      const inventory = scanManifests(dir, [pattern]);
+
+      // The divergence this pins: the manifest domain matched exact-or-directory-prefix only, with
+      // no glob and no `/**` handling, so every pattern above excluded the member's SOURCES while
+      // its package.json stayed in the inventory — one `excludes` entry meaning two different things
+      // depending on which walker read it. Measured before the fix: `blindSpots: []` and the member
+      // manifest present for all three. Both domains now go through the source walker's own matcher.
+      expect(inventory.manifests.map((m) => m.file)).toEqual(['package.json']);
+      expect(inventory.blindSpots.map((sp) => ({ path: sp.path, kind: sp.reason.kind }))).toEqual([
+        { path: 'packages/member', kind: 'excluded' },
+      ]);
+    },
+  );
+
+  it('does NOT record a genuinely absent pnpm-workspace.yaml or lockfile — ENOENT stays sound', () => {
+    dir = workspaceRepo();
+    fs.rmSync(path.join(dir, 'pnpm-workspace.yaml'));
+
+    // No workspace declaration at all is the ordinary single-package repo, and no lockfile is the
+    // ordinary pre-install one. Neither is a blind spot, and recording them would put an advisory
+    // on nearly every repository align sees — the fastest way to teach users to ignore advisories.
+    expect(scanManifests(dir, []).blindSpots).toEqual([]);
+  });
+});

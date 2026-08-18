@@ -11,11 +11,11 @@
 // `migration-notes-drift.test.ts` fails if UPGRADING_MD_CONTENT_HASH below no longer matches
 // the doc's current content — that is the drift detector, not a suggestion.
 //
-// Generated at: 2026-08-18T15:57:16.300Z
+// Generated at: 2026-08-18T19:32:24.780Z
 import type { MigrationNote } from './types.js';
 
 /** sha256Hex (16-char) of UPGRADING.md's full text at compile time. */
-export const UPGRADING_MD_CONTENT_HASH = "50f2ac16be0de360";
+export const UPGRADING_MD_CONTENT_HASH = "5d918fb9d70a39d8";
 
 /** Migration notes compiled from UPGRADING.md, keyed by the exact version heading text
  * ("## <version>") it was compiled from. */
@@ -48,6 +48,14 @@ export const COMPILED_NOTES: Readonly<Record<string, readonly MigrationNote[]>> 
     {
       heading: "A baselined entry align could not look at is retained, not pruned",
       body: "This generalizes the nested-checkout behaviour above, and it is the change in 0.2.0 most likely to\nsurprise you, because it makes `prune` delete **less** than it used to.\n\nA nested checkout was one of **six** ways a file that is physically present can be absent from\nalign's scan. The others: it matched an `excludes` pattern; it sits under an always-excluded\ndirectory name (`node_modules`, `dist`, …); its directory could not be read (permissions); its\nmanifest could not be parsed (a malformed `package.json`); or it is behind a symlink — the walk does\nnot follow links, so a symlinked subtree vanishes from the scan entirely while every file in it\nstays readable at its old path.\n\nBefore 0.2.0 all six read as \"this violation is gone\", which `prune` reports as *fixed* and deletes,\nand which move-transfer reads as *renamed*. Neither is true: align simply did not look. Deleting a\nbaseline entry destroys a human's recorded consent decision, and doing it while reporting success at\nexit 0 is the worst failure this tool has.\n\n**What you will see.** `align baseline prune` now retains those entries and prints the reason and\nthe path responsible — for example `Retained 2 entries: their files are unobservable this scan, not\nfixed (vendor/lib (matched the excludes pattern 'vendor/**'))`. Everything genuinely fixed is still\npruned, and the command still exits 0. `align check` reports the same paths as a `scan-blind-spot`\nadvisory, with two deliberate exceptions: an `excludes` match and an always-excluded directory name\nproduce **no advisory**, because you wrote those patterns yourself and every repository has a\n`node_modules`. For those two, `prune`'s retention line is where the reason appears.\n\n**If you excluded a subtree on purpose** and want its accepted entries gone, say so by naming it:\n\n```\nalign baseline prune --forget-unscanned vendor/lib\n```\n\nThe prefix is required — there is no bare form, because a bare form would forfeit every retained\nentry in one keystroke. It deletes accepted consent decisions under that path only, and it is\nsubject to the same consent gate as any other deletion (below).\n\n**Nothing in an existing baseline needs repair.** The defect was in what a scan would do next, never\nin anything already stored.",
+    },
+    {
+      heading: "`excludes` now means the same thing to your manifests as to your sources",
+      body: "One `excludes` entry used to be read by two different matchers. The source walker understood the\nfull glob dialect; the manifest scanner understood only an exact match or a literal directory\nprefix. So `excludes: ['packages/vendor/*']` hid a vendored package's **source files** while its\n`package.json` stayed in the scan, and `security.manifest.*` rules kept reporting against it. Both\ndomains now use the source walker's matcher.\n\n**What you will see**: if you exclude a directory with a glob (`*`, `**`, or a `{a,b}` brace group)\nand that directory contains a `package.json`, its manifest violations will stop being reported.\nThat is what the exclude asked for. Baseline entries for those violations are **retained, not\npruned** — they are unobservable now, not fixed — so nothing in `.align/baseline.json` is lost, and\n`align baseline prune` will name the pattern responsible if you ask it to clean up.\n\nIf you *want* a package's manifest scanned while its sources are excluded, an exclude pattern can no\nlonger express that; exclude the source subdirectory (`packages/vendor/src/**`) instead of the\npackage directory.",
+    },
+    {
+      heading: "align now tells you when it could not read your workspace files",
+      body: "A malformed or unreadable `pnpm-workspace.yaml`, `lerna.json` or `pnpm-lock.yaml` used to be\nindistinguishable from not having one. A single bad character in `pnpm-workspace.yaml` meant align\nfound no workspace members, scanned your root `package.json` alone, and reported a green check over\na fraction of your monorepo without saying anything.\n\nThose now produce a `scan-blind-spot` advisory naming the file and the parse or permission error.\nThe scan still proceeds — align stays read-only and does not crash on a file it cannot read — and\n`lockfilePresent` still reports false, but you are told why. This matters beyond coverage: when the\nlockfile cannot be read, every `catalog:`-managed dependency falls back to the raw specifier text in\n`package.json`, so `security.manifest.source-hygiene` was evaluating a string that is not what your\ninstall actually resolves.",
     },
     {
       heading: "`align baseline prune` now asks before it deletes",
