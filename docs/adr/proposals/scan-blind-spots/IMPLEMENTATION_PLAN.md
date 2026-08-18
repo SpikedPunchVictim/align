@@ -404,11 +404,13 @@ pre-commit hook, and `upgrade` forwards the consent it already obtained rather t
     the file-existence probe answer "present" on its own. Both mechanisms must be disabled before
     those two fail. The redundancy is real and is now documented in each scenario's header rather
     than implied.
-  - **The `unreadable` scenario cannot run as root** (`chmod` does not stop root, and the
-    Dockerfile's `node:24-slim` sets no `USER`). The mutation verifies its own precondition and
-    throws a named error rather than passing vacuously; the gate that matters
-    (`.github/workflows/ci.yml`) runs non-root. Whether to add `USER node` to the Dockerfile is
-    open.
+  - **The `unreadable` scenario cannot run as root** (`chmod` does not stop root). The mutation
+    verifies its own precondition and throws a named error rather than passing vacuously.
+    **RESOLVED 2026-08-18**: `integration/Dockerfile` now sets `USER node`, switching before the
+    install/build steps so nothing needs a `chown -R` across an installed monorepo. Measured after
+    the change: the image builds, runs as `uid=1000(node)`, and the scenario PASSES all 15 steps
+    inside `docker run` — where before it could not run at all. Both supported paths
+    (`.github/workflows/ci.yml` and the container) are now non-root and agree.
 - ~~Carried from Stage 4, reporting only: decide whether the floor should suppress or qualify
   `align upgrade`'s `baselined debt: N → 0` line ... this is a wording decision, not a gap.~~
   **INVESTIGATED 2026-08-18 — it is a gap, and wider than `upgrade`.** Measured against the built

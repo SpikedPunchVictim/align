@@ -75,6 +75,12 @@ NOT baked into the image — bind-mount it (`-v $(pwd)/integration/results/.cach
 across runs to reuse the cloned-and-installed project base and avoid repeating the (slow) `npm ci`
 step on every container invocation.
 
+The container runs as `node` (uid 1000), not root, and that is a test requirement rather than
+hardening: `chmod 000` does not stop root, so `blind-spot-unreadable-retains` cannot create the
+blind spot it exists to test when the harness runs privileged. If you bind-mount
+`integration/results/.cache`, make it writable by uid 1000 or the run will fail on its first
+write.
+
 ## Tiers (ADR 026 item 3)
 
 Two npm scripts at the repo root turn a flag combination into one remembered command:

@@ -36,12 +36,33 @@
 //     step 11 no retention reported
 //
 // That is the severity zero in its purest form: no destructive command, no flag, exit 0.
+//
+// **Calibrated against the published 0.1.4, and the reason is written down on purpose.**
+// `expectFailOn` asserts only that the scenario did NOT pass on that target (run.mjs's calibration
+// check); it cannot name a step, so a scenario that failed for an unrelated reason would satisfy
+// the pin while proving nothing. Measured 2026-08-18 against real 0.1.4 binaries on this exact
+// world: step 9's `align check` goes red -> **GREEN at exit 0**, prints `advisory
+// (baseline-moved): 1 entry transferred (file moves)` and `baselined debt: 2 -> 1 (-1)`, and
+// rewrites `.align/baseline.json` with one accepted entry re-homed onto the never-reviewed
+// `harness-tree/bait/bait.ts` (the other stays untouched — a plain `check` never deletes). That is
+// the defect, failing for the right reason.
+//
+// Two things had to be true for that to be a fair test, and both were checked rather than assumed:
+// the world's config uses only vocabulary 0.1.4 understands (verified by running 0.1.4 against it
+// — it loads and finds both violations), and the scenario reaches step 9 at all. It ALSO fails on
+// 0.1.4 later at `prune --yes` (`error: unknown option '--yes'` — the consent gate is 0.2.0), a
+// wrong-reason failure that would have satisfied the pin on its own. Hence this note.
 export default {
   id: 'blind-spot-symlink-retains',
   project: 'nest',
   description:
     'A baselined violation under a SYMLINKED directory must be retained by `baseline prune` and must not be ' +
     'transferred onto a fingerprint-identical unreviewed violation by a plain `align check` (ADR 028 Stage 5).',
+  // F3, and only added AFTER `local` went green: a red run against a published version is
+  // meaningless unless the fixed side passes, since otherwise it cannot distinguish the bug from
+  // a scenario that never ran. See the header for WHICH step fails on 0.1.4 and what it prints —
+  // `expectFailOn` itself can only see pass/fail.
+  expectFailOn: ['0.1.4'],
   // ADR 026. No `align init` runs (the config is written by a mutation), so there is no CLAUDE.md
   // and no .gitignore in the set — only the install's two files, the tree this scenario's own
   // mutations own, and the two `.align/` artifacts `baseline accept` writes. `harness-stash/**` is

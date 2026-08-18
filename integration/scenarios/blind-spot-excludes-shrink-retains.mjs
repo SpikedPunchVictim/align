@@ -24,12 +24,31 @@
 // the unreviewed bait. As with the symlink case the two mechanisms are redundant for this reason
 // code — an excluded directory is still perfectly readable, so the file-existence probe answers
 // "present" on its own; only the unreadable-directory scenario isolates the blind-spot record.
+//
+// **Calibrated against the published 0.1.4, with the reason written down on purpose.**
+// `expectFailOn` asserts only that the scenario did NOT pass on that target (run.mjs's calibration
+// check); it cannot name a step, so a scenario failing for an unrelated reason would satisfy the
+// pin while proving nothing. Measured 2026-08-18 against real 0.1.4 binaries on this exact world:
+// step 9's `align check` goes red -> **GREEN at exit 0**, prints `advisory (baseline-moved): 1
+// entry transferred (file moves)` and `baselined debt: 2 -> 1 (-1)`, and rewrites
+// `.align/baseline.json` with one accepted entry re-homed onto the never-reviewed
+// `harness-tree/bait/bait.ts` (the other stays untouched — a plain `check` never deletes).
+//
+// The world's config was kept to vocabulary 0.1.4 understands so that this could be a fair test,
+// and that was checked rather than assumed: 0.1.4 loads it and finds both violations. This
+// scenario ALSO fails on 0.1.4 later at `prune --yes` (`error: unknown option '--yes'` — the
+// consent gate is 0.2.0), a wrong-reason failure that would have satisfied the pin on its own.
 export default {
   id: 'blind-spot-excludes-shrink-retains',
   project: 'nest',
   description:
     'Narrowing the scan with a new `excludes` pattern must retain the baselined entries it hides and must not ' +
     'transfer them onto a fingerprint-identical unreviewed violation on a plain `align check` (ADR 028 Stage 5).',
+  // F3, and only added AFTER `local` went green: a red run against a published version is
+  // meaningless unless the fixed side passes, since otherwise it cannot distinguish the bug from
+  // a scenario that never ran. See the header for WHICH step fails on 0.1.4 and what it prints —
+  // `expectFailOn` itself can only see pass/fail.
+  expectFailOn: ['0.1.4'],
   // ADR 026. `align.config.ts` is in the set because the mutation appends the `excludes` export to
   // it — the config is this scenario's instrument, not align's output, and it is declared for the
   // same reason the source files are.

@@ -481,13 +481,13 @@ export function hideSubtreeAsSymlink(workingDir) {
  * ADR 028 Stage 5, blind-spot reason `unreadable`. `chmod 000` on the directory, so `readdirSync`
  * throws EACCES and the walk records the path instead of crashing or, worse, silently continuing.
  *
- * **Verifies its own precondition, loudly.** `chmod` does not stop `root`, and the Dockerfile's
- * `node:24-slim` runs as root by default, so under `docker run` this mutation would leave the
- * directory perfectly readable and the scenario would fail with a confusing retention assertion
- * instead of an honest "this cannot be tested here". The release gate that matters runs
- * non-root (`.github/workflows/ci.yml` runs `node integration/run.mjs` directly on the GitHub
- * runner), so the check below is what keeps the Docker path honest rather than silently vacuous —
- * LEDGER D012's lesson: a scenario the gate does not really execute is not calibration.
+ * **Verifies its own precondition, loudly.** `chmod` does not stop `root`, so as root this mutation
+ * would leave the directory perfectly readable and the scenario would fail with a confusing
+ * retention assertion instead of an honest "this cannot be tested here". Both execution paths are
+ * non-root today — `.github/workflows/ci.yml` runs `node integration/run.mjs` on the GitHub runner,
+ * and `integration/Dockerfile` sets `USER node` for exactly this reason — so the check below is a
+ * guard against that changing, not a standing limitation. LEDGER D012's lesson: a scenario the gate
+ * does not really execute is not calibration.
  */
 export function hideSubtreeUnreadable(workingDir) {
   const dir = hideableDir(workingDir);
@@ -500,9 +500,10 @@ export function hideSubtreeUnreadable(workingDir) {
   fs.chmodSync(dir, 0o755); // leave the working copy usable for the post-mortem
   throw new Error(
     "mutation 'hide-subtree-unreadable': the directory is still readable after chmod 000 — this " +
-      'process is almost certainly running as root (the integration Dockerfile does not set USER). ' +
-      'Run the harness as a non-root user; this scenario cannot produce an `unreadable` blind spot ' +
-      'as root, and passing it vacuously would be worse than failing.',
+      'process is almost certainly running as root. Both supported paths run non-root (CI on the ' +
+      "GitHub runner, and `integration/Dockerfile`'s `USER node`), so reaching this means one of " +
+      'them changed. Run the harness as a non-root user; this scenario cannot produce an ' +
+      '`unreadable` blind spot as root, and passing it vacuously would be worse than failing.',
   );
 }
 
