@@ -8,8 +8,9 @@ import { baselineEntriesInSkippedCheckoutsValidator } from '../src/migrations/va
 import { MIGRATION_REGISTRY, hasEntryForVersion, hasNotesForVersion } from '../src/migrations/registry.js';
 import { COMPILED_NOTES } from '../src/migrations/notes.generated.js';
 import { selectRange } from '../src/migrations/range.js';
-import { writeBaseline } from '../src/align-dir.js';
+
 import { expectOnlyWrote, snapshotTree } from './write-set.js';
+import { seedBaseline as writeSeededBaseline } from './seed-baseline.js';
 
 // ADR 022 tier 2 for 0.2.0: task #25 stopped scanning nested git checkouts by default, so a repo
 // upgrading from 0.1.x can hold baseline entries whose violations are now UNOBSERVABLE, not fixed.
@@ -77,7 +78,7 @@ function buildRepo(options: RepoOptions = {}): string {
  * purely on `file`, never on the fingerprint being "real" (same rationale as
  * `write-set-baseline.test.ts` and `nested-checkout-scan-scope.test.ts`). */
 function seedBaseline(dir: string, files: readonly string[]): void {
-  writeBaseline(
+  writeSeededBaseline(
     dir,
     files.map((file, index) => ({
       fingerprint: toViolationId(`seeded-${index}`),

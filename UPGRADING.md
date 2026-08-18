@@ -206,6 +206,33 @@ lockfile cannot be read, every `catalog:`-managed dependency falls back to the r
 `package.json`, so `security.manifest.source-hygiene` was evaluating a string that is not what your
 install actually resolves.
 
+### align refuses to overwrite a baseline another process changed underneath it
+
+`.align/baseline.json` is a full-snapshot replace, and every destructive command wraps it in
+read → scan → write. Until 0.2.0 nothing checked that the file still looked the way the command
+expected when it got to the write, so two aligns overlapping — an MCP server and a terminal, or two
+terminals — meant the second write erased the first, **and both reported success**. Since align
+ships an MCP server, an agent and a human sharing a repository is the intended usage, not a corner
+case.
+
+align now takes a content fingerprint when it reads the baseline and checks it, under a short lock,
+at the moment it writes. If they differ it writes nothing and tells you:
+
+```
+align: .align/baseline.json changed while this command was running, so writing now would
+silently discard whatever the other process recorded ... Re-run the command; it will pick
+up the current baseline.
+```
+
+**Re-running is always safe and always sufficient** — the command re-reads and recomputes. If you
+see this in CI, two align invocations are running concurrently against one working copy; serialize
+them.
+
+Every `.align/` file is also written atomically now (temp file + `rename`), so a run interrupted
+mid-write — Ctrl-C, an OOM kill, a cancelled CI job — leaves the previous file intact instead of a
+truncated one. If you ever hit "baseline.json is not valid JSON" after an interrupted run, that is
+the failure this removes.
+
 ### `align baseline prune` now asks before it deletes
 
 **Breaking for non-interactive use.** Every entry `prune` removes is an accepted consent decision — a

@@ -12,7 +12,7 @@ import { ensureTelemetryGitignored } from '../init/gitignore.js';
 import { offerAlignScript } from '../init/npm-script.js';
 import { createOrchestrator } from '../composition-root.js';
 import { CONFIG_FILENAME, loadConfig } from '../config.js';
-import { writeBaseline, readBaseline, recordBaselineReconciled } from '../align-dir.js';
+import { writeBaseline, readBaselineSnapshot, recordBaselineReconciled, type BaselineToken } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
 import { describeRetainedEntries, partitionBlindSpotCandidates, retainedEntries } from '../scan-blind-spot-retention.js';
@@ -227,8 +227,11 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   // in this command already fails loudly on corruption (`loadConfig`, above); the baseline itself
   // did not, because until this amendment `init` never read it at all.
   let existingBaseline: BaselineEntry[];
+  let baselineToken: BaselineToken;
   try {
-    existingBaseline = readBaseline(rootDir);
+    const snapshot = readBaselineSnapshot(rootDir);
+    existingBaseline = snapshot.entries;
+    baselineToken = snapshot.token;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return reportCliError('align init', new Error(`${message} Repair or delete the file, then re-run \`align init\`.`));
@@ -283,7 +286,7 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     // corrupted `.align/version.json` (same corrupt-≠-absent discipline as every other artifact
     // reader), caught here the same way every other refusal in this command is.
     try {
-      writeBaseline(rootDir, retainedEntries(atRisk.retained));
+      writeBaseline(rootDir, retainedEntries(atRisk.retained), baselineToken);
       recordBaselineReconciled(rootDir);
     } catch (err) {
       return reportCliError('align init', err);
@@ -394,6 +397,7 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
         }),
         ...retainedEntries(seedAtRisk.retained),
       ],
+      baselineToken,
     );
     recordBaselineReconciled(rootDir);
   } catch (err) {

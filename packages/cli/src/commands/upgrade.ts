@@ -1,7 +1,7 @@
 import { InMemoryBaselineStore, type BaselineEntry, type CheckRun, type RepoRelativePath, type ScanBlindSpot } from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
-import { readBaseline, readVersionFile, recordBaselineReconciled } from '../align-dir.js';
+import { readBaselineSnapshot, readVersionFile, recordBaselineReconciled, type BaselineToken } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
 import { partitionBlindSpotCandidates } from '../scan-blind-spot-retention.js';
@@ -182,8 +182,11 @@ export async function runUpgrade(rootDir: string, options: UpgradeOptions): Prom
   const { ruleset, excludes, includeNestedCheckouts, hostRules } = loaded;
 
   let previousBaseline: BaselineEntry[];
+  let baselineToken: BaselineToken;
   try {
-    previousBaseline = readBaseline(rootDir);
+    const snapshot = readBaselineSnapshot(rootDir);
+    previousBaseline = snapshot.entries;
+    baselineToken = snapshot.token;
   } catch (err) {
     return reportCliError('align upgrade', err);
   }
@@ -195,7 +198,7 @@ export async function runUpgrade(rootDir: string, options: UpgradeOptions): Prom
     // (`commands/check.ts`) — reused rather than re-derived, and deliberately called BEFORE the
     // tier-1 refusal below: ADR 023's "transfer-only" exemption applies here too (a rename must not
     // be lost just because the SAME scan also happened to error on an unrelated gate).
-    persistMovedBaseline(rootDir, run, baselineStore);
+    persistMovedBaseline(rootDir, run, baselineStore, baselineToken);
   } catch (err) {
     return reportCliError('align upgrade', err);
   }

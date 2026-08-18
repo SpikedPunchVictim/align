@@ -3,10 +3,11 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readBaseline, writeBaseline } from '../src/align-dir.js';
+import { readBaseline } from '../src/align-dir.js';
 import { baselineAccept, baselinePrune, baselineShow } from '../src/commands/baseline.js';
 import { runCheck } from '../src/commands/check.js';
 import { toRuleId, toRepoRelativePath, toViolationId, type BaselineEntry } from '@spikedpunch/align-core';
+import { seedBaseline } from './seed-baseline.js';
 
 // Bug hunt 2026-08-03, BUG #1: `.align/baseline.json` is a committed file multiple developers
 // append to via `align baseline accept`; a git merge conflict left unresolved inside it used to be
@@ -122,7 +123,7 @@ describe('a corrupted baseline is never destroyed by `align baseline accept` (th
     tmpDir = copyFixture('simple-app-violation');
     // Seed a real baseline first, then corrupt it — simulating an unresolved merge conflict in a
     // file that already held real, irreplaceable consent decisions.
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       { fingerprint: toViolationId('real-entry'), ruleId: toRuleId('arch.layers:api'), file: toRepoRelativePath('src/api/service.ts'), acceptedAt: 1, acceptedBy: 'manual' },
     ]);
     writeCorruptBaseline(tmpDir, MERGE_CONFLICT_BASELINE);

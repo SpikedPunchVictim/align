@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toRepoRelativePath, toRuleId, toViolationId } from '@spikedpunch/align-core';
 import { runUpgrade } from '../src/commands/upgrade.js';
-import { ensureAlignDir, readBaseline, writeBaseline } from '../src/align-dir.js';
+import { ensureAlignDir, readBaseline } from '../src/align-dir.js';
+import { seedBaseline } from './seed-baseline.js';
 
 /**
  * `align upgrade`'s prune PREVIEW (`reconcilePrune`, `commands/upgrade.ts`) must count exactly what
@@ -132,7 +133,7 @@ describe("align upgrade's prune preview counts exactly what `baselinePrune` will
       'prompt is asked at all, because `baselinePrune` would forfeit 0 of them and retain 1',
     async () => {
       tmpDir = buildRepoWithSkippedCheckout();
-      writeBaseline(tmpDir, [checkoutResidentEntry()]);
+      seedBaseline(tmpDir, [checkoutResidentEntry()]);
       writeOldVersionStamp(tmpDir);
 
       const questions: string[] = [];
@@ -162,7 +163,7 @@ describe("align upgrade's prune preview counts exactly what `baselinePrune` will
       'ADR 023 tier 2 against the FORFEITED count (0 here), so the preview must not refuse on 1',
     async () => {
       tmpDir = buildIncompleteRepoWithSkippedCheckout();
-      writeBaseline(tmpDir, [checkoutResidentEntry()]);
+      seedBaseline(tmpDir, [checkoutResidentEntry()]);
       writeOldVersionStamp(tmpDir);
 
       const { result: code, errors } = await withCapturedConsole(() => runUpgrade(tmpDir, { nonInteractive: true, yes: true }));

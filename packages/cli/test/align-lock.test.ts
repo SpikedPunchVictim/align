@@ -1,0 +1,159 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { lockPath, withAlignDirLock } from '../src/align-lock.js';
+
+let dir: string;
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  if (dir !== undefined) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+/** The `.align` directory the lock lives in — this module takes that directory, not the repo
+ * root, so that it need not import `align-dir.ts` and create a cycle (see its doc comment). */
+function repo(): string {
+  dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'align-lock-')));
+  return path.join(dir, '.align');
+}
+
+/** Plants a lock file as if another process held it. `pid` decides whether it looks alive:
+ * `process.pid` is this test runner, which is emphatically alive. */
+function plantLock(rootDir: string, holder: { pid: number; host?: string; ageMs?: number }): void {
+  fs.mkdirSync(path.dirname(lockPath(rootDir)), { recursive: true });
+  fs.writeFileSync(
+    lockPath(rootDir),
+    JSON.stringify({
+      pid: holder.pid,
+      host: holder.host ?? os.hostname(),
+      command: 'align baseline prune',
+      acquiredAt: new Date(Date.now() - (holder.ageMs ?? 0)).toISOString(),
+    }),
+  );
+}
+
+/** A pid that is almost certainly not running. Not guaranteed by POSIX, but 2^22-ish is above the
+ * default pid_max on Linux and macOS, and the tests that use it assert "treated as dead" — a false
+ * negative would make them fail loudly rather than pass wrongly. */
+const DEAD_PID = 4_194_303;
+
+describe('withAlignDirLock', () => {
+  it('creates the lock while the body runs and removes it afterwards', () => {
+    const d = repo();
+    let seenDuring = false;
+
+    const result = withAlignDirLock(d, 'align check', () => {
+      seenDuring = fs.existsSync(lockPath(d));
+      return 42;
+    });
+
+    expect(result).toBe(42);
+    expect(seenDuring).toBe(true);
+    expect(fs.existsSync(lockPath(d))).toBe(false);
+  });
+
+  it('releases the lock when the body throws, and propagates the original error', () => {
+    const d = repo();
+
+    expect(() =>
+      withAlignDirLock(d, 'align check', () => {
+        throw new Error('body exploded');
+      }),
+    ).toThrow('body exploded');
+
+    // A lock leaked on the error path is worse than no lock: every later align in this repo blocks
+    // for the full timeout and then reports a holder that never existed.
+    expect(fs.existsSync(lockPath(d))).toBe(false);
+  });
+
+  it('propagates an EEXIST thrown by the BODY instead of mistaking it for lock contention', () => {
+    const d = repo();
+    // The bug this pins, caught while writing these tests: acquisition and execution shared one
+    // `try`, so any error escaping the body was inspected for `EEXIST` — and the body here is a
+    // filesystem write, which raises exactly that. The caller's error would be swallowed, the loop
+    // would retry until the deadline, and the user would be told the lock timed out.
+    fs.mkdirSync(d, { recursive: true }); // `d` is the .align dir, which nothing has created yet
+    const collide = path.join(d, 'already-there');
+    fs.writeFileSync(collide, 'x');
+
+    expect(() =>
+      withAlignDirLock(
+        d,
+        'align check',
+        () => {
+          fs.openSync(collide, 'wx'); // EEXIST, from the body
+        },
+        { waitTimeoutMs: 200, pollIntervalMs: 5 },
+      ),
+    ).toThrow(/EEXIST/);
+    expect(fs.existsSync(lockPath(d))).toBe(false);
+  });
+
+  it('waits, then times out with a message naming the holder, when the lock is held by a LIVE process', () => {
+    const d = repo();
+    plantLock(d, { pid: process.pid }); // this very test runner: unambiguously alive
+
+    expect(() => withAlignDirLock(d, 'align check', () => 'never', { waitTimeoutMs: 150, pollIntervalMs: 10 })).toThrow(
+      /timed out after 0.15s .*align baseline prune.*pid \d+/s,
+    );
+    // Not broken: a live holder's lock must survive. Breaking it is the one action here that causes
+    // the corruption the lock exists to prevent.
+    expect(fs.existsSync(lockPath(d))).toBe(true);
+  });
+
+  it('breaks a stale lock whose holder is gone, and says so on stderr', () => {
+    const d = repo();
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    plantLock(d, { pid: DEAD_PID, ageMs: 5_000 });
+
+    const result = withAlignDirLock(d, 'align check', () => 'proceeded', { staleAfterMs: 1_000, waitTimeoutMs: 2_000, pollIntervalMs: 5 });
+
+    expect(result).toBe('proceeded');
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('breaking a stale .align/ lock'));
+    expect(fs.existsSync(lockPath(d))).toBe(false);
+  });
+
+  it('does NOT break a dead holder that is younger than the staleness floor', () => {
+    const d = repo();
+    // Age is the backstop for a recycled pid: a lock created a moment ago whose pid does not resolve
+    // is more likely a pid we misjudged than a crash, so the age floor has to be cleared too.
+    plantLock(d, { pid: DEAD_PID, ageMs: 0 });
+
+    expect(() => withAlignDirLock(d, 'align check', () => 'never', { staleAfterMs: 60_000, waitTimeoutMs: 100, pollIntervalMs: 5 })).toThrow(
+      /timed out/,
+    );
+  });
+
+  it('never breaks a lock held by another HOST, however old', () => {
+    const d = repo();
+    // A pid from another machine says nothing locally — `process.kill(pid, 0)` would answer about an
+    // unrelated local process of the same number. Refusing costs a confused user one `rm`; guessing
+    // costs them the baseline.
+    plantLock(d, { pid: DEAD_PID, host: 'some-other-host', ageMs: 10 * 60_000 });
+
+    expect(() => withAlignDirLock(d, 'align check', () => 'never', { staleAfterMs: 1_000, waitTimeoutMs: 100, pollIntervalMs: 5 })).toThrow(
+      /timed out/,
+    );
+    expect(fs.existsSync(lockPath(d))).toBe(true);
+  });
+
+  it('treats an unreadable lock file as held by someone unidentifiable, not as absent', () => {
+    const d = repo();
+    fs.mkdirSync(path.dirname(lockPath(d)), { recursive: true });
+    fs.writeFileSync(lockPath(d), 'not json at all');
+
+    // Corrupt is not absent (ADR 028's discipline, applied to the lock itself). The file is right
+    // there; concluding "no holder" from an unparseable one would break a live lock.
+    expect(() => withAlignDirLock(d, 'align check', () => 'never', { waitTimeoutMs: 100, pollIntervalMs: 5 })).toThrow(
+      /an unidentifiable holder/,
+    );
+  });
+
+  it('is re-acquirable after a normal release', () => {
+    const d = repo();
+    expect(withAlignDirLock(d, 'first', () => 1)).toBe(1);
+    expect(withAlignDirLock(d, 'second', () => 2)).toBe(2);
+    expect(withAlignDirLock(d, 'third', () => 3)).toBe(3);
+  });
+});

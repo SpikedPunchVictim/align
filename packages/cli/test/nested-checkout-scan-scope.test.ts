@@ -7,8 +7,9 @@ import { toRepoRelativePath, toRuleId, toViolationId } from '@spikedpunch/align-
 import { runCheck } from '../src/commands/check.js';
 import { baselineAccept, baselinePrune } from '../src/commands/baseline.js';
 import { runInit } from '../src/commands/init.js';
-import { readBaseline, writeBaseline } from '../src/align-dir.js';
+import { readBaseline } from '../src/align-dir.js';
 import { connectedClient, textOf } from './mcp-test-helpers.js';
+import { seedBaseline } from './seed-baseline.js';
 
 /** Captures every `console.log` call made during `run()` as plain strings, restoring the real
  * `console.log` afterward even if `run()` throws — used below to assert on `baselinePrune`'s/
@@ -256,7 +257,7 @@ describe(
   () => {
     it('exits 0, drops the genuinely-fixed entry, keeps the checkout entry, and reports the retention', async () => {
       tmpDir = buildRepoWithSkippedCheckoutAndCleanFile();
-      writeBaseline(tmpDir, [
+      seedBaseline(tmpDir, [
         // Genuinely fixed: `src/a.ts` is present in every scan and never violates `arch.noCycles`
         // — an ordinary orphan `store.prune` has always been correct to delete.
         {
@@ -296,7 +297,7 @@ describe(
     'review "hunt the class" audit, CLAUDE.md rule 6)',
   () => {
     it(
-      "the zero-violations reset path (`writeBaseline(rootDir, [])`) retains an existing entry whose file " +
+      "the zero-violations reset path (`seedBaseline(rootDir, [])`) retains an existing entry whose file " +
         "is inside a skipped nested checkout instead of silently dropping it — BUG #18's exact shape, a " +
         'second instance found by auditing the other destructive baseline-write consumer',
       async () => {
@@ -304,7 +305,7 @@ describe(
         // Simulates a re-run of `init` on a repo that already has an accepted entry for a file the
         // scan can no longer see (the checkout was opted in when it was accepted, or accepted by an
         // older align, or seeded directly for the test — any of those are the real-world shape).
-        writeBaseline(tmpDir, [
+        seedBaseline(tmpDir, [
           {
             fingerprint: toViolationId('stale-in-checkout'),
             ruleId: toRuleId('arch.no-cycles'),
@@ -397,7 +398,7 @@ describe(
         // nested checkout — carrying the SAME content fingerprint (same ruleId, identical trimmed
         // import line) and a distinguishable, irreplaceable `acceptedAt`/`acceptedBy`.
         addSkippedCheckout(tmpDir);
-        writeBaseline(tmpDir, [
+        seedBaseline(tmpDir, [
           {
             fingerprint: toViolationId('vendored-copy'),
             ruleId: ruleId!,
@@ -446,7 +447,7 @@ describe(
         expect(ruleId).toBeDefined();
 
         addSkippedCheckout(tmpDir);
-        writeBaseline(tmpDir, [
+        seedBaseline(tmpDir, [
           {
             fingerprint: toViolationId('vendored-copy'),
             ruleId: ruleId!,

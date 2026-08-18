@@ -11,11 +11,11 @@
 // `migration-notes-drift.test.ts` fails if UPGRADING_MD_CONTENT_HASH below no longer matches
 // the doc's current content — that is the drift detector, not a suggestion.
 //
-// Generated at: 2026-08-18T19:32:24.780Z
+// Generated at: 2026-08-18T20:02:23.031Z
 import type { MigrationNote } from './types.js';
 
 /** sha256Hex (16-char) of UPGRADING.md's full text at compile time. */
-export const UPGRADING_MD_CONTENT_HASH = "5d918fb9d70a39d8";
+export const UPGRADING_MD_CONTENT_HASH = "e9626bc1e795ac77";
 
 /** Migration notes compiled from UPGRADING.md, keyed by the exact version heading text
  * ("## <version>") it was compiled from. */
@@ -56,6 +56,10 @@ export const COMPILED_NOTES: Readonly<Record<string, readonly MigrationNote[]>> 
     {
       heading: "align now tells you when it could not read your workspace files",
       body: "A malformed or unreadable `pnpm-workspace.yaml`, `lerna.json` or `pnpm-lock.yaml` used to be\nindistinguishable from not having one. A single bad character in `pnpm-workspace.yaml` meant align\nfound no workspace members, scanned your root `package.json` alone, and reported a green check over\na fraction of your monorepo without saying anything.\n\nThose now produce a `scan-blind-spot` advisory naming the file and the parse or permission error.\nThe scan still proceeds — align stays read-only and does not crash on a file it cannot read — and\n`lockfilePresent` still reports false, but you are told why. This matters beyond coverage: when the\nlockfile cannot be read, every `catalog:`-managed dependency falls back to the raw specifier text in\n`package.json`, so `security.manifest.source-hygiene` was evaluating a string that is not what your\ninstall actually resolves.",
+    },
+    {
+      heading: "align refuses to overwrite a baseline another process changed underneath it",
+      body: "`.align/baseline.json` is a full-snapshot replace, and every destructive command wraps it in\nread → scan → write. Until 0.2.0 nothing checked that the file still looked the way the command\nexpected when it got to the write, so two aligns overlapping — an MCP server and a terminal, or two\nterminals — meant the second write erased the first, **and both reported success**. Since align\nships an MCP server, an agent and a human sharing a repository is the intended usage, not a corner\ncase.\n\nalign now takes a content fingerprint when it reads the baseline and checks it, under a short lock,\nat the moment it writes. If they differ it writes nothing and tells you:\n\n```\nalign: .align/baseline.json changed while this command was running, so writing now would\nsilently discard whatever the other process recorded ... Re-run the command; it will pick\nup the current baseline.\n```\n\n**Re-running is always safe and always sufficient** — the command re-reads and recomputes. If you\nsee this in CI, two align invocations are running concurrently against one working copy; serialize\nthem.\n\nEvery `.align/` file is also written atomically now (temp file + `rename`), so a run interrupted\nmid-write — Ctrl-C, an OOM kill, a cancelled CI job — leaves the previous file intact instead of a\ntruncated one. If you ever hit \"baseline.json is not valid JSON\" after an interrupted run, that is\nthe failure this removes.",
     },
     {
       heading: "`align baseline prune` now asks before it deletes",

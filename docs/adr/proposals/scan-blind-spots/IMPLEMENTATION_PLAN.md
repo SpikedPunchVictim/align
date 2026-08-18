@@ -517,8 +517,13 @@ and the `includeNestedCheckouts` README judgement noted above.
 
 - **The pipeline reframe** (ADR 028 §7) — own ADR, own release. Destructive commands first
   (`prune`, `upgrade`, `init`); `upgrade` collapsing from ~6 walks to 1 is the largest single win.
-- **Concurrency**: `cli/src/align-dir.ts:206-209` is a non-atomic full-snapshot write with no lock;
-  the MCP server racing a CLI `accept` can lose a consent decision. Own ADR.
+- ~~**Concurrency**: `cli/src/align-dir.ts:206-209` is a non-atomic full-snapshot write with no lock;
+  the MCP server racing a CLI `accept` can lose a consent decision. Own ADR.~~ **DONE 2026-08-18 —
+  [ADR 030](../../030-2026-08-18-align-dir-write-integrity.md), LEDGER D018.** Both halves: atomic
+  rename-based writes on all seven `.align/` writers, and a read-token compared under a short lock
+  for the baseline specifically. The lock is deliberately NOT held across the scan (that would
+  serialize every concurrent `align check`), which is why the token is required rather than
+  optional — a short lock cannot see staleness that happened before it was taken.
 - **Case-only renames on case-insensitive filesystems** (ADR 028 mechanism #8) — known gap.
 - **Whether align should follow symlinks at all** — Stage 1 records them; it does not decide this.
 - ~~**The manifest domain's own exits** — malformed-`package.json`-as-absent (`manifest.ts:44-50`) and

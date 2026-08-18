@@ -4,11 +4,12 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { toRepoRelativePath, toRuleId, toViolationId } from '@spikedpunch/align-core';
-import { ensureAlignDir, readBaseline, readVersionFile, writeBaseline } from '../src/align-dir.js';
+import { ensureAlignDir, readBaseline, readVersionFile } from '../src/align-dir.js';
 import { baselineAccept } from '../src/commands/baseline.js';
 import { runCheck } from '../src/commands/check.js';
 import { runUpgrade } from '../src/commands/upgrade.js';
 import { ALIGN_VERSION } from '../src/telemetry/process-context.js';
+import { seedBaseline } from './seed-baseline.js';
 
 // `align upgrade` (ADR 022, task #16 slice D): a consent-gated wrapper over the existing
 // prune/check/accept flow. These tests exercise the flow end to end against real fixtures (the
@@ -126,7 +127,7 @@ const alwaysNo = async (): Promise<boolean> => false;
 describe('align upgrade — happy path', () => {
   it('consents to both prune and accept, reconciles the baseline, and stamps both fields', async () => {
     tmpDir = copyFixture('simple-app-violation');
-    writeBaseline(tmpDir, [staleEntry()]); // orphaned — the real api->ui violation is NOT yet baselined
+    seedBaseline(tmpDir, [staleEntry()]); // orphaned — the real api->ui violation is NOT yet baselined
     writeVersionStamp(tmpDir, '0.1.0');
 
     const { result: code, logs } = await withCapturedConsole(() =>
@@ -151,7 +152,7 @@ describe('align upgrade — happy path', () => {
 
   it('`--yes` reconciles fully non-interactively, without any prompt', async () => {
     tmpDir = copyFixture('simple-app-violation');
-    writeBaseline(tmpDir, [staleEntry()]);
+    seedBaseline(tmpDir, [staleEntry()]);
     writeVersionStamp(tmpDir, '0.1.0'); // writeBaseline above already stamped alignVersion=current; override it back
 
     const code = await runUpgrade(tmpDir, { nonInteractive: true, yes: true });
@@ -180,7 +181,7 @@ describe('align upgrade — happy path', () => {
 describe('align upgrade — consent refused', () => {
   it('non-interactive without --yes leaves the baseline and version stamp byte-identical, and exits non-zero', async () => {
     tmpDir = copyFixture('simple-app-violation');
-    writeBaseline(tmpDir, [staleEntry()]);
+    seedBaseline(tmpDir, [staleEntry()]);
     writeVersionStamp(tmpDir, '0.1.0');
     const baselineBefore = fs.readFileSync(baselinePath(tmpDir), 'utf8');
     const versionBefore = fs.readFileSync(versionPath(tmpDir), 'utf8');
@@ -196,7 +197,7 @@ describe('align upgrade — consent refused', () => {
 
   it('interactively declining both prompts leaves everything untouched too', async () => {
     tmpDir = copyFixture('simple-app-violation');
-    writeBaseline(tmpDir, [staleEntry()]);
+    seedBaseline(tmpDir, [staleEntry()]);
     writeVersionStamp(tmpDir, '0.1.0'); // writeBaseline above already stamped alignVersion=current; override it back
     const baselineBefore = fs.readFileSync(baselinePath(tmpDir), 'utf8');
     const versionBefore = fs.readFileSync(versionPath(tmpDir), 'utf8');
@@ -214,7 +215,7 @@ describe('align upgrade — consent refused', () => {
 describe('align upgrade — partial consent', () => {
   it('consenting to prune but not accept mutates the baseline but does NOT advance baselineReconciledBy', async () => {
     tmpDir = copyFixture('simple-app-violation');
-    writeBaseline(tmpDir, [staleEntry()]);
+    seedBaseline(tmpDir, [staleEntry()]);
     writeVersionStamp(tmpDir, '0.1.0', '0.1.0'); // both fields start at an older version
 
     const pruneOnly = async (question: string): Promise<boolean> => question.includes('Prune');
@@ -239,7 +240,7 @@ describe('align upgrade — partial consent', () => {
 
   it('consenting to accept but not prune leaves the stale entry in place and also does not stamp', async () => {
     tmpDir = copyFixture('simple-app-violation');
-    writeBaseline(tmpDir, [staleEntry()]);
+    seedBaseline(tmpDir, [staleEntry()]);
     writeVersionStamp(tmpDir, '0.1.0', '0.1.0'); // both fields start at an older version
 
     const acceptOnly = async (question: string): Promise<boolean> => question.includes('Re-accept');
@@ -260,7 +261,7 @@ describe('align upgrade — partial consent', () => {
 describe('align upgrade — --notes', () => {
   it('prints notes and validator findings, and mutates/stamps nothing', async () => {
     tmpDir = copyFixture('simple-app-violation');
-    writeBaseline(tmpDir, [staleEntry()]);
+    seedBaseline(tmpDir, [staleEntry()]);
     writeVersionStamp(tmpDir, '0.1.0'); // writeBaseline above already stamped alignVersion=current; override it back
     const baselineBefore = fs.readFileSync(baselinePath(tmpDir), 'utf8');
     const versionBefore = fs.readFileSync(versionPath(tmpDir), 'utf8');
@@ -288,7 +289,7 @@ describe('align upgrade — --notes', () => {
 describe('align upgrade — errored scan (ADR 023 tier 1)', () => {
   it('refuses outright, stamps nothing, and leaves the baseline byte-identical', async () => {
     tmpDir = copyErroredFixture();
-    writeBaseline(tmpDir, [staleEntry()]);
+    seedBaseline(tmpDir, [staleEntry()]);
     writeVersionStamp(tmpDir, '0.1.0');
     const before = fs.readFileSync(baselinePath(tmpDir), 'utf8');
 
@@ -305,7 +306,7 @@ describe('align upgrade — errored scan (ADR 023 tier 1)', () => {
 describe('align upgrade — incomplete scan (ADR 023 tier 2)', () => {
   it('refuses to delete without --allow-incomplete, but still re-accepts (adds proceed)', async () => {
     tmpDir = copyIncompleteFixture();
-    writeBaseline(tmpDir, [staleEntry()]);
+    seedBaseline(tmpDir, [staleEntry()]);
     writeVersionStamp(tmpDir, '0.1.0'); // writeBaseline above already stamped alignVersion=current; override it back
 
     const { result: code, errors } = await withCapturedConsole(() => runUpgrade(tmpDir, { nonInteractive: true, yes: true }));
@@ -323,7 +324,7 @@ describe('align upgrade — incomplete scan (ADR 023 tier 2)', () => {
 
   it('proceeds with deletion under --allow-incomplete, fully reconciling and stamping', async () => {
     tmpDir = copyIncompleteFixture();
-    writeBaseline(tmpDir, [staleEntry()]);
+    seedBaseline(tmpDir, [staleEntry()]);
     writeVersionStamp(tmpDir, '0.1.0'); // writeBaseline above already stamped alignVersion=current; override it back
 
     const code = await runUpgrade(tmpDir, { nonInteractive: true, yes: true, allowIncomplete: true });
@@ -339,7 +340,7 @@ describe('align upgrade — incomplete scan (ADR 023 tier 2)', () => {
 describe('align upgrade — edge cases', () => {
   it('already current: a clear no-op message, exit 0, no mutation', async () => {
     tmpDir = copyFixture('simple-app-violation');
-    writeBaseline(tmpDir, [staleEntry()]);
+    seedBaseline(tmpDir, [staleEntry()]);
     writeVersionStamp(tmpDir, ALIGN_VERSION, ALIGN_VERSION);
     const before = fs.readFileSync(baselinePath(tmpDir), 'utf8');
 

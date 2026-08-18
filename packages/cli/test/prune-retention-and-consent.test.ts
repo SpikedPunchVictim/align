@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toRepoRelativePath, toRuleId, toViolationId, type BaselineEntry } from '@spikedpunch/align-core';
 import { baselinePrune } from '../src/commands/baseline.js';
 import { runInit } from '../src/commands/init.js';
-import { readBaseline, writeBaseline } from '../src/align-dir.js';
+import { readBaseline } from '../src/align-dir.js';
+import { seedBaseline } from './seed-baseline.js';
 
 /**
  * ADR 028 Stage 4 — what `align baseline prune` does when it cannot prove a violation was fixed,
@@ -159,7 +160,7 @@ describe('mechanism 3: a missing DIRECTORY is not evidence that its files were f
     // violation(s)", exited 0, and left `.align/baseline.json` as `[]`.
     tmpDir = buildTwoComponentRepo();
     await withCapturedConsole(() => baselinePrune(tmpDir!, { yes: true })); // seed nothing; accept below
-    writeBaseline(tmpDir, [entry('b/one.ts', 'e1')]);
+    seedBaseline(tmpDir, [entry('b/one.ts', 'e1')]);
     const before = baselineBytes(tmpDir);
     fs.rmSync(path.join(tmpDir, 'b'), { recursive: true, force: true });
 
@@ -180,7 +181,7 @@ describe('mechanism 3: a missing DIRECTORY is not evidence that its files were f
     // The other half of the trade. If this ever starts retaining, mechanism 3 has stopped being a
     // missing-tree test and become "never delete anything", and `prune` is a no-op command.
     tmpDir = buildTwoComponentRepo();
-    writeBaseline(tmpDir, [entry('b/deleted-sibling.ts', 'e1')]); // b/one.ts is still there and observed
+    seedBaseline(tmpDir, [entry('b/deleted-sibling.ts', 'e1')]); // b/one.ts is still there and observed
 
     const { result: code, logs } = await withCapturedConsole(() => baselinePrune(tmpDir!, { yes: true }));
 
@@ -194,7 +195,7 @@ describe('mechanism 3: a missing DIRECTORY is not evidence that its files were f
     // the way it tests a real directory, every such entry would be retained forever on any repo with
     // no source files — which is exactly the trap the removed floor sprang on a greenfield repo.
     tmpDir = buildTwoComponentRepo();
-    writeBaseline(tmpDir, [entry('package.json', 'e1')]);
+    seedBaseline(tmpDir, [entry('package.json', 'e1')]);
 
     const { result: code, logs } = await withCapturedConsole(() => baselinePrune(tmpDir!, { yes: true }));
 
@@ -207,7 +208,7 @@ describe('mechanism 3: a missing DIRECTORY is not evidence that its files were f
 describe('the consent gate — every deletion is approved, and only deletions are gated (ADR 006)', () => {
   it('refuses non-interactively without --yes, leaving the baseline byte-identical', async () => {
     tmpDir = buildTwoComponentRepo();
-    writeBaseline(tmpDir, [entry('b/deleted-sibling.ts', 'e1')]);
+    seedBaseline(tmpDir, [entry('b/deleted-sibling.ts', 'e1')]);
     const before = baselineBytes(tmpDir);
 
     const { result: code, errors, logs } = await withCapturedConsole(() => baselinePrune(tmpDir!, { nonInteractive: true }));
@@ -220,7 +221,7 @@ describe('the consent gate — every deletion is approved, and only deletions ar
 
   it('deletes when the human says yes', async () => {
     tmpDir = buildTwoComponentRepo();
-    writeBaseline(tmpDir, [entry('b/deleted-sibling.ts', 'e1')]);
+    seedBaseline(tmpDir, [entry('b/deleted-sibling.ts', 'e1')]);
 
     const { result: code } = await withCapturedConsole(() => baselinePrune(tmpDir!, { confirm: async () => true }));
 
@@ -230,7 +231,7 @@ describe('the consent gate — every deletion is approved, and only deletions ar
 
   it('changes nothing when the human says no', async () => {
     tmpDir = buildTwoComponentRepo();
-    writeBaseline(tmpDir, [entry('b/deleted-sibling.ts', 'e1')]);
+    seedBaseline(tmpDir, [entry('b/deleted-sibling.ts', 'e1')]);
     const before = baselineBytes(tmpDir);
 
     const { result: code, logs } = await withCapturedConsole(() => baselinePrune(tmpDir!, { confirm: async () => false }));
@@ -244,7 +245,7 @@ describe('the consent gate — every deletion is approved, and only deletions ar
     // An all-retained run destroys nothing, so gating it would turn a safe read-mostly command into
     // one that fails CI for asking a question nobody can answer.
     tmpDir = buildTwoComponentRepo();
-    writeBaseline(tmpDir, [entry('b/one.ts', 'e1')]);
+    seedBaseline(tmpDir, [entry('b/one.ts', 'e1')]);
     fs.rmSync(path.join(tmpDir, 'b'), { recursive: true, force: true });
     let asked = false;
 
@@ -273,7 +274,7 @@ describe('align baseline prune --forget-unscanned <prefix> — the way back out 
     fs.mkdirSync(path.join(tmpDir, 'assets'), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, 'assets', 'thing.ts'), 'export const t = 1;\n', 'utf8');
     writeConfig(tmpDir, `{ app: 'src/**' }`, `\nexport const excludes = ['vendor/**', 'assets/**'];\n`);
-    writeBaseline(tmpDir, [entry('vendor/lib.ts', 'e1'), entry('vendor/nested/deep.ts', 'e2'), entry('assets/thing.ts', 'e3')]);
+    seedBaseline(tmpDir, [entry('vendor/lib.ts', 'e1'), entry('vendor/nested/deep.ts', 'e2'), entry('assets/thing.ts', 'e3')]);
 
     const { result: code, logs } = await withCapturedConsole(() =>
       baselinePrune(tmpDir!, { forgetUnscanned: 'vendor', yes: true }),
@@ -286,7 +287,7 @@ describe('align baseline prune --forget-unscanned <prefix> — the way back out 
 
   it('matches a single file exactly, not only a directory', async () => {
     tmpDir = buildPartiallyBlindRepo();
-    writeBaseline(tmpDir, [entry('vendor/lib.ts', 'e1'), entry('vendor/nested/deep.ts', 'e2')]);
+    seedBaseline(tmpDir, [entry('vendor/lib.ts', 'e1'), entry('vendor/nested/deep.ts', 'e2')]);
 
     const { result: code } = await withCapturedConsole(() =>
       baselinePrune(tmpDir!, { forgetUnscanned: 'vendor/lib.ts', yes: true }),
@@ -301,7 +302,7 @@ describe('align baseline prune --forget-unscanned <prefix> — the way back out 
     fs.mkdirSync(path.join(tmpDir, 'vendor-extra'), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, 'vendor-extra', 'x.ts'), 'export const x = 1;\n', 'utf8');
     writeConfig(tmpDir, `{ app: 'src/**' }`, `\nexport const excludes = ['vendor/**', 'vendor-extra/**'];\n`);
-    writeBaseline(tmpDir, [entry('vendor-extra/x.ts', 'e1')]);
+    seedBaseline(tmpDir, [entry('vendor-extra/x.ts', 'e1')]);
 
     const { result: code, logs } = await withCapturedConsole(() =>
       baselinePrune(tmpDir!, { forgetUnscanned: 'vendor', yes: true }),
@@ -324,7 +325,7 @@ describe('align baseline prune --forget-unscanned <prefix> — the way back out 
     ['vendor/../..', 'escapes the repository via an interior segment'],
   ])('refuses the prefix %j (%s) — there is no bare form that forgets everything', async (prefix) => {
     tmpDir = buildPartiallyBlindRepo();
-    writeBaseline(tmpDir, [entry('vendor/lib.ts', 'e1')]);
+    seedBaseline(tmpDir, [entry('vendor/lib.ts', 'e1')]);
     const before = baselineBytes(tmpDir);
 
     const { result: code, errors } = await withCapturedConsole(() =>
@@ -341,7 +342,7 @@ describe('align baseline prune --forget-unscanned <prefix> — the way back out 
     writeConfig(tmpDir, `{ app: 'src/**', inner: 'src/api/**' }`, `\nexport const excludes = ['vendor/**'];\n`);
     fs.mkdirSync(path.join(tmpDir, 'vendor'), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, 'vendor', 'lib.ts'), 'export const v = 1;\n', 'utf8');
-    writeBaseline(tmpDir, [entry('vendor/lib.ts', 'e1')]);
+    seedBaseline(tmpDir, [entry('vendor/lib.ts', 'e1')]);
     const before = baselineBytes(tmpDir);
 
     const { result: code, errors } = await withCapturedConsole(() =>
@@ -358,7 +359,7 @@ describe('align baseline prune --forget-unscanned <prefix> — the way back out 
     fs.mkdirSync(path.join(tmpDir, 'vendor'), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, 'vendor', 'lib.ts'), 'export const v = 1;\n', 'utf8');
     writeConfig(tmpDir, `{ app: 'src/**' }`, `\nexport const excludes = ['vendor/**'];\n`);
-    writeBaseline(tmpDir, [entry('vendor/lib.ts', 'e1')]);
+    seedBaseline(tmpDir, [entry('vendor/lib.ts', 'e1')]);
     const before = baselineBytes(tmpDir);
 
     const refused = await withCapturedConsole(() => baselinePrune(tmpDir!, { forgetUnscanned: 'vendor', yes: true }));
@@ -377,7 +378,7 @@ describe('align baseline prune --forget-unscanned <prefix> — the way back out 
 describe("prune's headline never asserts the opposite of what the run did", () => {
   it('says nothing to prune when no entry was even a candidate', async () => {
     tmpDir = buildPartiallyBlindRepo();
-    writeBaseline(tmpDir, []);
+    seedBaseline(tmpDir, []);
 
     const { logs } = await withCapturedConsole(() => baselinePrune(tmpDir!, { yes: true }));
 
@@ -387,7 +388,7 @@ describe("prune's headline never asserts the opposite of what the run did", () =
 
   it('says every candidate was retained, and why, when retention saved them all', async () => {
     tmpDir = buildPartiallyBlindRepo();
-    writeBaseline(tmpDir, [entry('vendor/lib.ts', 'e1')]);
+    seedBaseline(tmpDir, [entry('vendor/lib.ts', 'e1')]);
 
     const { logs } = await withCapturedConsole(() => baselinePrune(tmpDir!, { yes: true }));
 
@@ -400,7 +401,7 @@ describe("prune's headline never asserts the opposite of what the run did", () =
     // POST-split retained count, so forfeiting the only retained entry printed "Nothing to prune —
     // no baseline entry is orphaned" directly above "Forgot 1 retained entry ... is deleted".
     tmpDir = buildPartiallyBlindRepo();
-    writeBaseline(tmpDir, [entry('vendor/lib.ts', 'e1')]);
+    seedBaseline(tmpDir, [entry('vendor/lib.ts', 'e1')]);
 
     const { logs } = await withCapturedConsole(() =>
       baselinePrune(tmpDir!, { forgetUnscanned: 'vendor', yes: true }),

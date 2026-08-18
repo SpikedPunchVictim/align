@@ -34,6 +34,7 @@ import { createFileExistenceProbe } from '../file-existence.js';
 import { defaultConfirm } from '../prompt.js';
 import {
   readBaseline,
+  readBaselineSnapshot,
   readGeneratedRules,
   readRulesLock,
   writeBaseline,
@@ -286,9 +287,10 @@ export function writeBuildArtifacts(
     // Add-only (CLAUDE.md rule 4's exemption): this path only ever calls `accept` + `snapshot`, so
     // the probe is never consulted. Passed for real anyway — see `commands/baseline.ts`'s
     // `baselineAccept` for why a stub would be a false statement rather than a harmless one.
-    const store = new InMemoryBaselineStore(readBaseline(rootDir), createFileExistenceProbe(rootDir));
+    const baseline = readBaselineSnapshot(rootDir);
+    const store = new InMemoryBaselineStore(baseline.entries, createFileExistenceProbe(rootDir));
     store.accept(result.impact.addedNew, 'manual');
-    writeBaseline(rootDir, store.snapshot());
+    writeBaseline(rootDir, store.snapshot(), baseline.token);
   }
 
   const lock: RulesLock = {

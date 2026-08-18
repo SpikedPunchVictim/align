@@ -3,10 +3,11 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readBaseline, writeBaseline } from '../src/align-dir.js';
+import { readBaseline } from '../src/align-dir.js';
 import { baselineAccept } from '../src/commands/baseline.js';
 import { runInit } from '../src/commands/init.js';
 import { toRuleId, toRepoRelativePath, toViolationId } from '@spikedpunch/align-core';
+import { seedBaseline } from './seed-baseline.js';
 
 // `InitOptions.confirm` (`commands/init.ts`) is a test-only seam mirroring `UpgradeOptions.confirm`
 // (`commands/upgrade.ts`) exactly: supplying it forces `isInteractive` true, independent of
@@ -78,7 +79,7 @@ function trackingConfirm(answer: boolean): { readonly fn: (question: string) => 
 describe('`align init` interactive baseline-seed consent, via `InitOptions.confirm`', () => {
   it('guard-ordering pin: on an incomplete scan where the seed would drop an existing entry, runInit refuses and NEVER calls confirm — the guard decides whether to even ask', async () => {
     tmpDir = copyFixture('simple-app-violation-incomplete');
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       {
         fingerprint: toViolationId('stale-1'),
         ruleId: toRuleId('arch.no-dependency:api->ui'),
@@ -129,7 +130,7 @@ describe('`align init` interactive baseline-seed consent, via `InitOptions.confi
     const seeded = readBaseline(tmpDir);
     expect(seeded).toHaveLength(1);
     const real = seeded[0]!;
-    writeBaseline(tmpDir, [{ ...real, acceptedAt: 1_700_000_000_000, acceptedBy: 'manual' }]);
+    seedBaseline(tmpDir, [{ ...real, acceptedAt: 1_700_000_000_000, acceptedBy: 'manual' }]);
     const confirm = trackingConfirm(true);
 
     const { result: code, logs } = await withCapturedConsole(() =>

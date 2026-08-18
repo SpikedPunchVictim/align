@@ -4,9 +4,10 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { baselineAccept, baselinePrune } from '../src/commands/baseline.js';
-import { writeBaseline } from '../src/align-dir.js';
+
 import { toRuleId, toRepoRelativePath, toViolationId } from '@spikedpunch/align-core';
 import { expectOnlyWrote, snapshotTree } from './write-set.js';
+import { seedBaseline } from './seed-baseline.js';
 
 // ADR 026 fast-path coverage for `align baseline accept`/`align baseline prune` — `prune` is one
 // of the two commands BUG #18 (ADR 023) fired from, and the ONE command in this codebase that
@@ -47,7 +48,7 @@ describe('`align baseline prune` write-set (ADR 026 fast path)', () => {
     // `simple-app` is clean (zero current violations) — a pre-seeded baseline entry for a file
     // that no longer violates anything is exactly the "fixed violation" `prune` exists to drop.
     tmpDir = copyFixture('simple-app');
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       {
         fingerprint: toViolationId('stale-1'),
         ruleId: toRuleId('arch.no-cycles'),

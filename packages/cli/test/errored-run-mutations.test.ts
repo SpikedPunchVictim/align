@@ -3,12 +3,14 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readBaseline, writeBaseline } from '../src/align-dir.js';
+import { readBaseline } from '../src/align-dir.js';
 import { baselineAccept, baselinePrune } from '../src/commands/baseline.js';
 import { persistMovedBaseline, runCheck } from '../src/commands/check.js';
 import { runInit } from '../src/commands/init.js';
 import { refuseIfRunIncomplete } from '../src/errored-run.js';
 import { InMemoryBaselineStore, toRuleId, toRepoRelativePath, toViolationId, type CheckRun, type FileExistenceProbe } from '@spikedpunch/align-core';
+import { seedBaseline } from './seed-baseline.js';
+import { readBaselineSnapshot } from '../src/align-dir.js';
 /** ADR 028 mechanism 2's probe, answering "absent" for everything — this test's world is exactly
  * the scan it stages, so nothing exists on disk beyond it. Declared locally rather than imported:
  * `packages/core`'s test helpers are not published, and inventing a cross-package test-only export
@@ -84,7 +86,7 @@ function copyErroredFixture(): string {
   );
   // The real fingerprint `align baseline accept` produces for this fixture's seeded violation, and
   // a file that IS still present in the scan — the exact combination `store.prune` deletes.
-  writeBaseline(dest, [
+  seedBaseline(dest, [
     {
       fingerprint: toViolationId('b26ffb86865fc059'),
       ruleId: toRuleId('arch.no-dependency:api->ui'),
@@ -156,7 +158,7 @@ describe('`align baseline prune` on an error-verdict run (the data-loss regressi
   it('still prunes normally on a GREEN verdict (no regression)', async () => {
     tmpDir = copyFixture('simple-app');
     // A stale entry whose file is still present in the scan ⇒ genuinely fixed ⇒ prunable.
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       {
         fingerprint: toViolationId('stale-fixed'),
         ruleId: toRuleId('arch.no-cycles'),
@@ -179,7 +181,7 @@ describe('`align baseline prune` on an error-verdict run (the data-loss regressi
     const real = readBaseline(tmpDir);
     expect(real).toHaveLength(1);
     // Add a stale entry alongside the real one; the run is red (the real violation still fires).
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       ...real,
       {
         fingerprint: toViolationId('stale-fixed'),
@@ -293,7 +295,10 @@ describe('the other mutating consumers of a run’s violations', () => {
       // No refusal mechanism exists in this function's signature (unlike `baselinePrune`/`runInit`,
       // there is no exit code to inspect) — the only observable proof it proceeded unconditionally
       // is that the write actually happened.
-      persistMovedBaseline(tmpDir, erroredRunWithMove, store);
+      // Token read immediately before the call: this test asserts the ADR 023 transfer-only
+      // exemption, not ADR 030's concurrency guard, so it must present the current state rather
+      // than a stale one — otherwise it would fail for the wrong reason (shape S-05).
+      persistMovedBaseline(tmpDir, erroredRunWithMove, store, readBaselineSnapshot(tmpDir).token);
 
       expect(readBaseline(tmpDir)).toEqual(store.snapshot());
     },
@@ -351,7 +356,7 @@ describe('`align baseline prune` on an incomplete (complete: false) run — ADR 
 
     // Two stale entries whose files are still present in the scan (FRAGILE #7's "fixed, not
     // moved" case) — exactly the shape `store.prune` would otherwise delete.
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       ...real,
       {
         fingerprint: toViolationId('stale-1'),
@@ -385,7 +390,7 @@ describe('`align baseline prune` on an incomplete (complete: false) run — ADR 
     tmpDir = copyIncompleteFixture();
     await withCapturedConsole(() => baselineAccept(tmpDir, undefined));
     const real = readBaseline(tmpDir);
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       ...real,
       {
         fingerprint: toViolationId('stale-1'),

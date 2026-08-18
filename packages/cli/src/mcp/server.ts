@@ -15,7 +15,7 @@ import { z } from 'zod';
 import { buildMcpCheckPayload, proposeRulesFromDoc, ruleFragmentSchema, toRepoRelativePath, type BaselineDebt, type CheckRun } from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
-import { readBaseline, writeBaseline } from '../align-dir.js';
+import { readBaselineSnapshot, writeBaseline } from '../align-dir.js';
 import { buildExplainPayload } from '../commands/explain.js';
 import { computeBaselineDebt } from '../commands/check.js';
 import { createFileExistenceProbe } from '../file-existence.js';
@@ -41,11 +41,14 @@ import { decideMcpBaselineWrite } from './baseline-gate.js';
  * you call it done. */
 async function freshCheck(rootDir: string): Promise<{ readonly run: CheckRun; readonly baselineDebt: BaselineDebt }> {
   const { ruleset, excludes, includeNestedCheckouts, hostRules } = await loadConfig(rootDir);
-  const previousBaseline = readBaseline(rootDir);
+  // Snapshot, not a bare read. The MCP server is HALF of the race this guards: an agent calling
+  // `align_check` while a human runs `align baseline accept` in a terminal is the concrete way a
+  // consent decision gets lost, and it is the case ADR 030 was written for.
+  const { entries: previousBaseline, token: baselineToken } = readBaselineSnapshot(rootDir);
   const { orchestrator, baselineStore } = createOrchestrator(rootDir, ruleset, previousBaseline, hostRules);
   const run = withVersionSkew(await orchestrator.check({ rootDir, excludes, includeNestedCheckouts }), rootDir);
   if (run.advisories.some((a) => a.kind === 'baseline-moved')) {
-    writeBaseline(rootDir, baselineStore.snapshot());
+    writeBaseline(rootDir, baselineStore.snapshot(), baselineToken);
   }
   // Shared, error-run-guarded computation (check.ts) — NOT an inline `Σ baselinedCount`, which
   // fabricates a `−N` debt drop on error runs (gates report 0 baselined then). This was the third

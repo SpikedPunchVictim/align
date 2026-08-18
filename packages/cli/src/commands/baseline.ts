@@ -1,7 +1,7 @@
 import { InMemoryBaselineStore, describeMovedEntries, toRuleId, type BaselineEntry, type RepoRelativePath } from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
-import { readBaseline, writeBaseline } from '../align-dir.js';
+import { readBaselineSnapshot, writeBaseline, type BaselineToken } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
 import { describeRetainedEntries, partitionBlindSpotCandidates, retainedEntries } from '../scan-blind-spot-retention.js';
@@ -20,9 +20,14 @@ import { defaultConfirm } from '../prompt.js';
  * ever writes it, so catching the throw HERE — before `InMemoryBaselineStore` is even constructed —
  * guarantees a corrupt file is reported and left untouched on disk, never overwritten.
  */
-function tryReadBaseline(rootDir: string, command: string): { readonly ok: true; readonly entries: BaselineEntry[] } | { readonly ok: false; readonly code: number } {
+function tryReadBaseline(
+  rootDir: string,
+  command: string,
+): { readonly ok: true; readonly entries: BaselineEntry[]; readonly token: BaselineToken } | { readonly ok: false; readonly code: number } {
   try {
-    return { ok: true, entries: readBaseline(rootDir) };
+    // Snapshot, not a bare read: whatever this returns will be written back after a scan, and the
+    // token is what proves nobody else wrote in between (`writeBaseline`).
+    return { ok: true, ...readBaselineSnapshot(rootDir) };
   } catch (err) {
     console.error(`${command}: ${err instanceof Error ? err.message : String(err)}`);
     return { ok: false, code: 1 };
@@ -62,7 +67,7 @@ export async function baselineAccept(rootDir: string, ruleId?: string, telemetry
   // throw on a corrupted `.align/version.json` — same corrupt-≠-absent discipline as `tryReadBaseline`
   // above, caught here rather than left as a raw Node stack trace.
   try {
-    writeBaseline(rootDir, store.snapshot());
+    writeBaseline(rootDir, store.snapshot(), previous.token);
   } catch (err) {
     return reportCliError('align baseline accept', err);
   }
@@ -300,7 +305,7 @@ export async function baselinePrune(rootDir: string, options: PruneOptions = {})
   // Same corrupt-≠-absent throw risk as `baselineAccept` above (`writeBaseline`'s internal
   // `alignVersion` stamp, ADR 022) — caught here rather than left as a raw Node stack trace.
   try {
-    writeBaseline(rootDir, finalEntries);
+    writeBaseline(rootDir, finalEntries, previous.token);
   } catch (err) {
     return reportCliError('align baseline prune', err);
   }

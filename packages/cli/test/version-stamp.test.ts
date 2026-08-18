@@ -9,8 +9,9 @@ import { runCheck } from '../src/commands/check.js';
 import { runBuild } from '../src/commands/build.js';
 import { runExportIr } from '../src/commands/export-ir.js';
 import { baselineAccept, baselinePrune } from '../src/commands/baseline.js';
-import { readVersionFile, writeBaseline } from '../src/align-dir.js';
+import { readVersionFile } from '../src/align-dir.js';
 import { ALIGN_VERSION } from '../src/telemetry/index.js';
+import { seedBaseline } from './seed-baseline.js';
 
 // ADR 022's write discipline: every command that writes an `.align/` artifact ALSO stamps
 // `alignVersion` — EXCEPT a read-only `align check`, which must never create `.align/version.json`
@@ -178,7 +179,7 @@ describe('align check — the write discipline this slice is most likely to get 
         `});\n`,
       'utf8',
     );
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       {
         fingerprint: toViolationId('b26ffb86865fc059'),
         ruleId: toRuleId('arch.no-dependency:api->ui'),
@@ -207,7 +208,7 @@ describe('align check — the write discipline this slice is most likely to get 
         `});\n`,
       'utf8',
     );
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       {
         fingerprint: toViolationId('b26ffb86865fc059'),
         ruleId: toRuleId('arch.no-dependency:api->ui'),

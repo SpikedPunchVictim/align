@@ -6,8 +6,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toRepoRelativePath, toRuleId, toViolationId } from '@spikedpunch/align-core';
 import { baselinePrune } from '../src/commands/baseline.js';
 import { runInit } from '../src/commands/init.js';
-import { readBaseline, writeBaseline } from '../src/align-dir.js';
+import { readBaseline } from '../src/align-dir.js';
 import { createFileExistenceProbe } from '../src/file-existence.js';
+import { seedBaseline } from './seed-baseline.js';
 
 /**
  * ADR 028 Stage 2 against a REAL filesystem — the half core cannot test, because `packages/core`
@@ -150,7 +151,7 @@ describe('align baseline prune — the existence probe retains what the record c
       acceptedBy: 'manual' as const,
       contentFingerprint: toViolationId('content-abc'),
     };
-    writeBaseline(tmpDir, [entry]);
+    seedBaseline(tmpDir, [entry]);
     const before = fs.readFileSync(path.join(tmpDir, '.align', 'baseline.json'), 'utf8');
 
     const { result: code, logs } = await withCapturedLogs(() => baselinePrune(tmpDir!, { yes: true }));
@@ -167,7 +168,7 @@ describe('align baseline prune — the existence probe retains what the record c
 
   it('a genuinely deleted file is still pruned — retention does not become a permanent leak', async () => {
     tmpDir = buildRepo();
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       {
         fingerprint: toViolationId('genuinely-gone'),
         ruleId: toRuleId('arch.no-cycles'),
@@ -195,7 +196,7 @@ describe('align baseline prune — the existence probe retains what the record c
     // `src/a.ts` is scanned every run and has no violation. It exists on disk, so an unconditional
     // probe would retain it — and would retain essentially every fixed violation in every repo,
     // turning `prune` into a permanent no-op. This test is what caught that during Stage 2.
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       {
         fingerprint: toViolationId('observed-and-fixed'),
         ruleId: toRuleId('arch.no-cycles'),
@@ -224,7 +225,7 @@ describe('align baseline prune — the existence probe retains what the record c
     tmpDir = buildRepo();
     fs.mkdirSync(path.join(tmpDir, 'notes'), { recursive: true });
     fs.symlinkSync(path.join(tmpDir, 'notes', 'nope.ts'), path.join(tmpDir, 'notes', 'broken.ts'));
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       {
         fingerprint: toViolationId('broken-link'),
         ruleId: toRuleId('arch.no-cycles'),
@@ -255,7 +256,7 @@ describe('align baseline prune — the existence probe retains what the record c
       acceptedAt: 99,
       acceptedBy: 'manual' as const,
     };
-    writeBaseline(tmpDir, [entry]);
+    seedBaseline(tmpDir, [entry]);
 
     const { result: code, logs } = await withCapturedLogs(() => baselinePrune(tmpDir!, { yes: true }));
 
@@ -292,10 +293,10 @@ describe('align init — the same probe protection as prune (ADR 028 Stage 2, bo
       acceptedAt: 4321,
       acceptedBy: 'manual' as const,
     };
-    writeBaseline(tmpDir, [entry]);
+    seedBaseline(tmpDir, [entry]);
 
     // The fixture is green (`arch.noCycles` over a single file), so init takes its zero-violation
-    // path — the one that used to `writeBaseline(rootDir, [])` straight over an existing baseline.
+    // path — the one that used to `seedBaseline(rootDir, [])` straight over an existing baseline.
     const { result: code, logs } = await withCapturedLogs(() =>
       runInit(tmpDir!, { acceptExisting: false, nonInteractive: true }),
     );
@@ -308,7 +309,7 @@ describe('align init — the same probe protection as prune (ADR 028 Stage 2, bo
 
   it('still drops a genuinely-absent entry on the same path — the probe did not make init a no-op', async () => {
     tmpDir = buildRepo();
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       {
         fingerprint: toViolationId('init-genuinely-gone'),
         ruleId: toRuleId('arch.no-cycles'),

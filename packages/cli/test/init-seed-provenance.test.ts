@@ -3,10 +3,11 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readBaseline, writeBaseline } from '../src/align-dir.js';
+import { readBaseline } from '../src/align-dir.js';
 import { baselineAccept } from '../src/commands/baseline.js';
 import { runInit } from '../src/commands/init.js';
 import { toRuleId, toRepoRelativePath, toViolationId } from '@spikedpunch/align-core';
+import { seedBaseline } from './seed-baseline.js';
 
 // ADR 023 amendment (2026-08-11), "Resolved (same day): the seed path preserves provenance":
 // independent of completeness (covered by `init-incomplete-baseline.test.ts`), the seed path used
@@ -88,7 +89,7 @@ describe('`align init` seed path preserves baseline provenance — ADR 023 amend
     const seeded = readBaseline(tmpDir);
     expect(seeded).toHaveLength(1);
     const real = seeded[0]!;
-    writeBaseline(tmpDir, [{ ...real, acceptedAt: 1_700_000_000_000, acceptedBy: 'manual' }]);
+    seedBaseline(tmpDir, [{ ...real, acceptedAt: 1_700_000_000_000, acceptedBy: 'manual' }]);
 
     const { result: code, logs } = await withCapturedConsole(() =>
       runInit(tmpDir, { acceptExisting: true, nonInteractive: true, noScripts: true }),
@@ -142,7 +143,7 @@ describe('`align init` seed path preserves baseline provenance — ADR 023 amend
     // Persist ONLY the `service.ts` entry, with sentinel provenance — the `other.ts` violation's
     // entry is dropped entirely, simulating "no prior entry with that fingerprint" for it, exactly
     // as if this were the first time `init` had ever seen it.
-    writeBaseline(tmpDir, [{ ...serviceEntry!, acceptedAt: 1_700_000_000_000, acceptedBy: 'manual' }]);
+    seedBaseline(tmpDir, [{ ...serviceEntry!, acceptedAt: 1_700_000_000_000, acceptedBy: 'manual' }]);
 
     const before = Date.now();
     const { result: code, logs } = await withCapturedConsole(() =>
@@ -177,7 +178,7 @@ describe('`align init` seed path preserves baseline provenance — ADR 023 amend
     // `ruleId`/`file` — the shape a moved file's SURVIVING entry would have if the merge wrongly
     // carried the prior entry over verbatim instead of re-reading `ruleId`/`file` off the current
     // violation.
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       {
         ...real,
         ruleId: toRuleId('arch.no-dependency:ui->api'),
@@ -212,7 +213,7 @@ describe('`align init` seed path preserves baseline provenance — ADR 023 amend
     expect(seeded).toHaveLength(1);
     const real = seeded[0]!;
 
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       { ...real, acceptedAt: 1_700_000_000_000, acceptedBy: 'manual' },
       {
         fingerprint: toViolationId('stale-never-observed'),

@@ -13,7 +13,7 @@ import {
 } from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
-import { readBaseline, readGeneratedRules, readRulesetIr, readRulesLock, writeBaseline } from '../align-dir.js';
+import { readBaselineSnapshot, readGeneratedRules, readRulesetIr, readRulesLock, writeBaseline, type BaselineToken } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { verifyFrozenRules } from './build.js';
 import { buildCheckEvent, computeAndPersistViolationTransitions, computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
@@ -94,8 +94,11 @@ async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<
   }
   const { ruleset, excludes, hostRules, telemetry, includeNestedCheckouts } = loaded;
   let previousBaseline: BaselineEntry[];
+  let baselineToken: BaselineToken;
   try {
-    previousBaseline = readBaseline(rootDir);
+    const snapshot = readBaselineSnapshot(rootDir);
+    previousBaseline = snapshot.entries;
+    baselineToken = snapshot.token;
   } catch (err) {
     // readBaseline throws on a corrupted `.align/baseline.json` (bug hunt 2026-08-03, BUG #1) —
     // caught here the same way `runUntrustedCheck` below catches `readRulesetIr`, instead of an
@@ -115,7 +118,7 @@ async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<
     // write discipline, `align-dir.ts`) and can throw on a corrupted `.align/version.json` — same
     // corrupt-≠-absent discipline as `readBaseline`'s catch above, reported the same clean way
     // rather than an unhandled Node stack trace.
-    persistMovedBaseline(rootDir, run, baselineStore);
+    persistMovedBaseline(rootDir, run, baselineStore, baselineToken);
   } catch (err) {
     return reportCliError('align check', err);
   }
@@ -239,8 +242,11 @@ async function runUntrustedCheck(rootDir: string, options: CheckOptions): Promis
 
   const rulesetIrHash = computeRulesetIrHash(exported.ruleset);
   let previousBaseline: BaselineEntry[];
+  let baselineToken: BaselineToken;
   try {
-    previousBaseline = readBaseline(rootDir);
+    const snapshot = readBaselineSnapshot(rootDir);
+    previousBaseline = snapshot.entries;
+    baselineToken = snapshot.token;
   } catch (err) {
     // Same discipline as the `readRulesetIr` catch above — a corrupted `.align/baseline.json`
     // (bug hunt 2026-08-03, BUG #1) is a refusal, not a raw Node stack trace.
@@ -256,7 +262,7 @@ async function runUntrustedCheck(rootDir: string, options: CheckOptions): Promis
   try {
     // Same corrupt-≠-absent risk (a move-transfer write stamps `alignVersion`, ADR 022) as
     // `runTrustedCheck`'s identical catch above.
-    persistMovedBaseline(rootDir, run, baselineStore);
+    persistMovedBaseline(rootDir, run, baselineStore, baselineToken);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`align check --untrusted: ${message}`);
@@ -285,11 +291,16 @@ async function runUntrustedCheck(rootDir: string, options: CheckOptions): Promis
  * rename, never gate it on consent" behavior a plain `align check` already has (ADR 006: a rename
  * must not turn CI red for one cycle, and ADR 023's "transfer-only" exemption deliberately does not
  * call `refuseIfRunErrored` here either — see this function's own logic below). */
-export function persistMovedBaseline(rootDir: string, run: CheckRun, baselineStore: InMemoryBaselineStore): void {
+export function persistMovedBaseline(
+  rootDir: string,
+  run: CheckRun,
+  baselineStore: InMemoryBaselineStore,
+  expectedToken: BaselineToken,
+): void {
   // Move-transfer (ADR 006) mutated the in-memory store during `check` — persist so a rename
   // doesn't need a separate `align baseline prune` run to stop being reported every time.
   if (run.advisories.some((a) => a.kind === 'baseline-moved')) {
-    writeBaseline(rootDir, baselineStore.snapshot());
+    writeBaseline(rootDir, baselineStore.snapshot(), expectedToken);
   }
 }
 

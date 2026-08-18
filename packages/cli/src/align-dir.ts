@@ -3,6 +3,9 @@
  * functional core, imperative shell) — all filesystem I/O for `.align/` lives here, not in core.
  */
 import * as fs from 'node:fs';
+import { createHash } from 'node:crypto';
+import { writeFileAtomic } from './fs-atomic.js';
+import { withAlignDirLock } from './align-lock.js';
 import * as path from 'node:path';
 import type { z } from 'zod';
 import {
@@ -106,7 +109,7 @@ export function readVersionFile(rootDir: string): VersionFile | undefined {
 
 function writeVersionFile(rootDir: string, data: VersionFile): void {
   ensureAlignDir(rootDir);
-  fs.writeFileSync(versionFilePath(rootDir), `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+  writeFileAtomic(versionFilePath(rootDir), `${JSON.stringify(data, null, 2)}\n`);
 }
 
 /**
@@ -203,11 +206,79 @@ export function readBaseline(rootDir: string): BaselineEntry[] {
   ) as unknown as BaselineEntry[];
 }
 
-export function writeBaseline(rootDir: string, entries: readonly BaselineEntry[]): void {
+/**
+ * An opaque witness of the baseline bytes a caller read, for detecting a concurrent write.
+ *
+ * `undefined` means "there was no baseline file" — a distinct state from "a baseline that happens
+ * to be empty", and conflating them would let a racing `init` be overwritten by a stale empty
+ * snapshot. It is a real token, not an opt-out: a caller that read no file and then finds one at
+ * write time has raced someone, and must be refused exactly like any other mismatch.
+ */
+export type BaselineToken = string | undefined;
+
+function tokenOf(file: string): BaselineToken {
+  try {
+    // Content hash rather than mtime: mtime has one-second granularity on some filesystems, which
+    // is far longer than the window this needs to detect, and it moves when nothing changed (a
+    // `touch`, a checkout). The file is small and already being read in full.
+    return createHash('sha256').update(fs.readFileSync(file)).digest('hex').slice(0, 16);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * `readBaseline`, plus the witness needed to write it back safely. Prefer this over `readBaseline`
+ * in any command that will later WRITE what it read — which is every destructive baseline command.
+ */
+export function readBaselineSnapshot(rootDir: string): { readonly entries: BaselineEntry[]; readonly token: BaselineToken } {
+  // Order matters: hash first, parse second. Hashing after the parse would open a window in which
+  // the file changed between the two reads and the token witnessed bytes the caller never saw.
+  const token = tokenOf(baselinePath(rootDir));
+  return { entries: readBaseline(rootDir), token };
+}
+
+/**
+ * Replaces `.align/baseline.json` — atomically (`writeFileAtomic`), under the `.align/` lock, and
+ * refusing if the file changed since the caller read it.
+ *
+ * **The defect this closes.** `writeBaseline` is a full-snapshot REPLACE with no merge, and every
+ * destructive command is a read-modify-write around it: read entries, run a scan that takes
+ * seconds, write the result. Two aligns overlapping in that window — the MCP server and a CLI
+ * `baseline accept` is the case that actually happens, since an agent and a human share a
+ * repository — means the second write erases whatever the first added, and both commands report
+ * success. A destroyed consent decision at exit 0 is this project's severity zero.
+ *
+ * **Why a token and not only a lock.** A lock short enough to be acceptable (see `align-lock.ts`)
+ * does not span the scan, so it cannot stop a caller computing from entries that went stale while
+ * it worked. The token detects exactly that, and it is compared INSIDE the lock — outside, the
+ * compare-then-write would be a race of its own.
+ *
+ * `expectedToken` is required and has no default and no opt-out. The first draft of this function
+ * offered a `null` "I am not doing a read-modify-write" escape hatch, justified in this comment by
+ * naming two callers that supposedly needed it. Making the parameter required proved that claim
+ * false: the compiler listed all seven call sites and every one of them derives its entries from a
+ * baseline it read earlier. The hatch had no users, and an unused hatch that disables a safety check
+ * is a liability — the next caller would have reached for it. An OPTIONAL parameter would be worse
+ * still: a new read-modify-write caller inherits the unsafe behaviour by writing nothing at all,
+ * which is shape S-09, exactly how this class reproduces itself.
+ */
+export function writeBaseline(rootDir: string, entries: readonly BaselineEntry[], expectedToken: BaselineToken): void {
   ensureAlignDir(rootDir);
   const sorted = [...entries].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint));
-  fs.writeFileSync(baselinePath(rootDir), `${JSON.stringify(sorted, null, 2)}\n`, 'utf8');
-  stampAlignVersion(rootDir);
+  withAlignDirLock(alignDirPath(rootDir), 'writeBaseline', () => {
+    const actual = tokenOf(baselinePath(rootDir));
+    if (actual !== expectedToken) {
+      throw new Error(
+        'align: .align/baseline.json changed while this command was running, so writing now would ' +
+          'silently discard whatever the other process recorded — most likely another align (an MCP ' +
+          'server, an editor integration, or a second terminal) accepted or pruned entries. Nothing ' +
+          'has been written. Re-run the command; it will pick up the current baseline.',
+      );
+    }
+    writeFileAtomic(baselinePath(rootDir), `${JSON.stringify(sorted, null, 2)}\n`);
+    stampAlignVersion(rootDir);
+  });
 }
 
 /** Raw on-disk bytes of `.align/generated-rules.json`, or `undefined` if absent — used to `.parse()`
@@ -252,7 +323,7 @@ export function readGeneratedRules(rootDir: string): GeneratedRulesFile | undefi
 export function writeGeneratedRules(rootDir: string, file: GeneratedRulesFile): string {
   ensureAlignDir(rootDir);
   const raw = `${JSON.stringify(file, null, 2)}\n`;
-  fs.writeFileSync(generatedRulesPath(rootDir), raw, 'utf8');
+  writeFileAtomic(generatedRulesPath(rootDir), raw);
   stampAlignVersion(rootDir);
   return raw;
 }
@@ -266,13 +337,13 @@ export function readRulesLock(rootDir: string): RulesLock | undefined {
 
 export function writeRulesLock(rootDir: string, lock: RulesLock): void {
   ensureAlignDir(rootDir);
-  fs.writeFileSync(rulesLockPath(rootDir), `${JSON.stringify(lock, null, 2)}\n`, 'utf8');
+  writeFileAtomic(rulesLockPath(rootDir), `${JSON.stringify(lock, null, 2)}\n`);
   stampAlignVersion(rootDir);
 }
 
 export function writeLastBuildReport(rootDir: string, markdown: string): void {
   ensureAlignDir(rootDir);
-  fs.writeFileSync(lastBuildReportPath(rootDir), markdown, 'utf8');
+  writeFileAtomic(lastBuildReportPath(rootDir), markdown);
 }
 
 /** ADR 014's untrusted-mode artifact. Defaults to `.align/ruleset-ir.json`; `align export-ir
@@ -306,7 +377,7 @@ export function readRulesetIr(rootDir: string, override?: string): ExportedRules
 export function writeRulesetIr(rootDir: string, data: ExportedRuleset, override?: string): string {
   const file = rulesetIrPath(rootDir, override);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+  writeFileAtomic(file, `${JSON.stringify(data, null, 2)}\n`);
   // Only stamp when the write actually landed inside THIS repo's `.align/` — `--out` can point
   // anywhere on disk (ADR 021: "a ruleset-ir.json moved out of .align/ via --out carries no
   // provenance", accepted knowingly), including outside this repo entirely. Stamping
@@ -360,5 +431,5 @@ export function readTelemetryState(rootDir: string): TelemetryState {
 
 export function writeTelemetryState(rootDir: string, state: TelemetryState): void {
   ensureAlignDir(rootDir);
-  fs.writeFileSync(telemetryStatePath(rootDir), `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  writeFileAtomic(telemetryStatePath(rootDir), `${JSON.stringify(state, null, 2)}\n`);
 }

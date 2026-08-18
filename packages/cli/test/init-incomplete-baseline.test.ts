@@ -3,11 +3,12 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readBaseline, writeBaseline } from '../src/align-dir.js';
+import { readBaseline } from '../src/align-dir.js';
 import { baselineAccept } from '../src/commands/baseline.js';
 import { runCheck } from '../src/commands/check.js';
 import { runInit } from '../src/commands/init.js';
 import { toRuleId, toRepoRelativePath, toViolationId } from '@spikedpunch/align-core';
+import { seedBaseline } from './seed-baseline.js';
 
 // ADR 023's 2026-08-11 amendment: tier 2 extends to `align init`, at BOTH write paths, through the
 // one guard `partitionAndRefuseIfBaselineWriteAtRisk` (`commands/init.ts`). Split out of
@@ -71,7 +72,7 @@ function copyErroredFixture(): string {
       `});\n`,
     'utf8',
   );
-  writeBaseline(dest, [
+  seedBaseline(dest, [
     {
       fingerprint: toViolationId('b26ffb86865fc059'),
       ruleId: toRuleId('arch.no-dependency:api->ui'),
@@ -144,7 +145,7 @@ async function withCapturedConsole<T>(run: () => Promise<T>): Promise<{ result: 
 describe('`align init` on an incomplete (complete: false) run — ADR 023 tier 2 amendment (2026-08-11)', () => {
   it('zero-violations path refuses on a green-but-incomplete scan with an existing baseline, names the at-risk count and --allow-incomplete, and leaves the baseline byte-for-byte unchanged', async () => {
     tmpDir = copyIncompleteGreenFixture();
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       {
         fingerprint: toViolationId('stale-1'),
         ruleId: toRuleId('arch.no-dependency:api->ui'),
@@ -177,7 +178,7 @@ describe('`align init` on an incomplete (complete: false) run — ADR 023 tier 2
 
   it('seed path refuses when a pre-seeded entry is no longer observed on an incomplete scan, and leaves the baseline byte-for-byte unchanged', async () => {
     tmpDir = copyIncompleteFixture();
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       {
         fingerprint: toViolationId('stale-1'),
         ruleId: toRuleId('arch.no-dependency:api->ui'),
@@ -202,7 +203,7 @@ describe('`align init` on an incomplete (complete: false) run — ADR 023 tier 2
 
   it('zero-violations path proceeds under --allow-incomplete, producing the same result as today', async () => {
     tmpDir = copyIncompleteGreenFixture();
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       {
         fingerprint: toViolationId('stale-1'),
         ruleId: toRuleId('arch.no-dependency:api->ui'),
@@ -223,7 +224,7 @@ describe('`align init` on an incomplete (complete: false) run — ADR 023 tier 2
 
   it('seed path proceeds under --allow-incomplete, producing the same result as today', async () => {
     tmpDir = copyIncompleteFixture();
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       {
         fingerprint: toViolationId('stale-1'),
         ruleId: toRuleId('arch.no-dependency:api->ui'),
@@ -246,7 +247,7 @@ describe('`align init` on an incomplete (complete: false) run — ADR 023 tier 2
 
   it('zero-violations path is unaffected on a COMPLETE scan — pins the boundary explicitly', async () => {
     tmpDir = copyFixture('simple-app');
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       {
         fingerprint: toViolationId('stale-1'),
         ruleId: toRuleId('arch.no-cycles'),
@@ -273,7 +274,7 @@ describe('`align init` on an incomplete (complete: false) run — ADR 023 tier 2
     await withCapturedConsole(() => baselineAccept(tmpDir, undefined));
     const real = readBaseline(tmpDir);
     expect(real).toHaveLength(1);
-    writeBaseline(tmpDir, [
+    seedBaseline(tmpDir, [
       ...real,
       {
         fingerprint: toViolationId('stale-1'),
