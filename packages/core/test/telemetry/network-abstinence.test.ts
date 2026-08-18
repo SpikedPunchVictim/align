@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
  * align's own ethos (ADR 001, ADR 014's untrusted-mode trust posture): telemetry is a LOCAL FILE
  * ONLY, NEVER a network call. This asserts the source text of every file under
  * `packages/core/src/telemetry` never references a network primitive — the same trust posture
- * `docs/adr/014-untrusted-config-execution.md` already holds align's own config-execution surface
+ * `docs/adr/014-2026-07-12-untrusted-config-execution.md` already holds align's own config-execution surface
  * to, applied to the one new surface this feature adds. `packages/cli/src/telemetry` has its own
  * copy of this test (the CLI is where file I/O — and therefore any hypothetical network call —
  * would actually happen).

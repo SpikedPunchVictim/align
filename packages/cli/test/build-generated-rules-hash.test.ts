@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { runBuild, verifyFrozenRules } from '../src/commands/build.js';
 import { generatedRulesPath, readRulesLock, writeRulesLock } from '../src/align-dir.js';
 
-// ADR 011 amendment (2026-08-12, docs/adr/011-rules-build-markdown-source.md): the defect this
+// ADR 011 amendment (2026-08-12, docs/adr/011-2026-07-11-rules-build-markdown-source.md): the defect this
 // covers was `generatedRulesContentHash = sha256Hex(rawWritten)` (`build.ts`, pre-fix) — hashing the
 // WHOLE `.align/generated-rules.json` file, including `generatedAt: Date.now()`. Two builds of
 // byte-identical rules produced different hashes, silently defeating "rebuild and compare." The fix

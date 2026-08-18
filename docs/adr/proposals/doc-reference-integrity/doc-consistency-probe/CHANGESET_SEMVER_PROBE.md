@@ -169,7 +169,7 @@ changelog entry). This is a trivial, well-specified parse — no ambiguity, no n
 
 ### The surface-delta dependency — what's built vs. what's missing
 
-Read `docs/adr/016-public-surface-inference.md` and the two modules it names,
+Read `docs/adr/016-2026-07-20-public-surface-inference.md` and the two modules it names,
 `packages/core/src/surface/inferSurface.ts` and `packages/plugin-typescript/src/entrypoint.ts`,
 plus the pure diff precedent `packages/agent/src/symbolDiff.ts`.
 

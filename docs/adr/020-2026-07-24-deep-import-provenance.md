@@ -16,7 +16,7 @@ which the evidence is exactly sized. The first-class `arch.import-provenance` IR
 
 ## Context
 
-`docs/proposals/reconciled-build-order.md` #4 names this the strongest net-new signal remaining on
+`docs/adr/proposals/deep-import-provenance/reconciled-build-order.md` #4 names this the strongest net-new signal remaining on
 align's roadmap: a cross-package import that reaches **past** a package's declared public surface into
 its internals — a specifier subpath containing a `src`, `dist`, `lib`, or `internal` path segment
 (e.g. `n8n-nodes-base/dist/nodes/Set/v2/helpers/interfaces`, `@vscode/prompt-tsx/dist/base/...`). It is
@@ -27,7 +27,7 @@ which the scanner already carries.
 
 The build order's explicit gate: **"placebo-test first: compare the exports-aware machinery against a
 dumb `/src/|/dist/` cross-package grep before crediting the machinery."** That probe
-(`docs/evidence/deep-import-provenance-probe/PROBE.md`) was run for real on n8n and vscode; its result
+(`docs/adr/proposals/deep-import-provenance/deep-import-provenance-probe/PROBE.md`) was run for real on n8n and vscode; its result
 is the load-bearing input below.
 
 ## Placebo-test result (the measurement that scopes this ADR)
@@ -160,9 +160,9 @@ rescope.
   in Design Reserve behind the triggers above.
 
 ## Evidence
-- `docs/evidence/deep-import-provenance-probe/PROBE.md` — the Arm A vs Arm B measurement (n8n, vscode),
+- `docs/adr/proposals/deep-import-provenance/deep-import-provenance-probe/PROBE.md` — the Arm A vs Arm B measurement (n8n, vscode),
   hand-checked TP samples, and the real npm-registry manifest check.
-- `docs/proposals/reconciled-build-order.md` #4 — feature framing + the placebo gate.
+- `docs/adr/proposals/deep-import-provenance/reconciled-build-order.md` #4 — feature framing + the placebo gate.
 - `packages/core/src/gates/ungoverned-edges.ts` + `packages/cli/src/commands/doctor.ts` — the #3
   doctor-advisory precedent this v1 mirrors.
 - `packages/plugin-typescript/src/tsconfig-resolver.ts:47-59` — the `unresolved → uncertain` routing

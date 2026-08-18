@@ -3,7 +3,7 @@ import type { DependencyGraph } from '../types/graph.js';
 import type { RulesetIR } from '../types/ir.js';
 
 /**
- * ADR 019 Mode 2 (ACCEPTED, v1 = import-graph-only), docs/proposals/reconciled-build-order.md #3
+ * ADR 019 Mode 2 (ACCEPTED, v1 = import-graph-only), docs/adr/proposals/deep-import-provenance/reconciled-build-order.md #3
  * -- "the real silence-fixer." Enumerates component-to-component import edges NOT covered by any
  * existing arch.no-dependency / arch.layers rule (edges-minus-ruleset, pure graph computation) --
  * boundaries a human hasn't decided on yet. Not a new rule kind and not enforcement: a suggestion

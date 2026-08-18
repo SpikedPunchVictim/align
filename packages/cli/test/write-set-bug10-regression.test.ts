@@ -6,7 +6,7 @@ import { runInit } from '../src/commands/init.js';
 import { expectOnlyWrote, snapshotTree } from './write-set.js';
 
 // The direct BUG #10 regression test ADR 026 calls out by name
-// (docs/adr/026-declared-write-sets.md: "This is BUG #10 expressed as a property rather than as a
+// (docs/adr/026-2026-08-11-declared-write-sets.md: "This is BUG #10 expressed as a property rather than as a
 // remembered anecdote"). Verbatim reproduction that motivated the ADR
 // (.agents/research/2026-08-03-bug-hunt-full-codebase.md:546):
 //

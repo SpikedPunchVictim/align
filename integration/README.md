@@ -12,7 +12,7 @@ align's 962 unit/integration tests all run against fixtures, executed by whateve
 the working tree. None of them can express "install align 0.1.4 in a real project, create a
 baseline, upgrade to local, and assert the behavior changed the way the release notes claim" —
 that is inherently a cross-version statement a single process holding a single build can't make.
-See `docs/adr/025-cross-version-integration-harness.md` for the full rationale.
+See `docs/adr/025-2026-08-08-cross-version-integration-harness.md` for the full rationale.
 
 ## Layout
 
@@ -111,7 +111,7 @@ change — re-measure on a quiet machine/CI runner for a cleaner comparison.
 
 **A command sequence may create, modify, or delete only the paths its scenario declares in
 `writeSet`; every other path in the project tree must be byte-identical afterward.** Full rationale:
-`docs/adr/026-declared-write-sets.md`. Two checks, both applied universally by `lib/scenario-
+`docs/adr/026-2026-08-11-declared-write-sets.md`. Two checks, both applied universally by `lib/scenario-
 runner.mjs` — never opted into per scenario, so a new scenario can't forget them:
 
 1. **Whole-tree delta** (`lib/write-set.mjs`'s `checkWriteSet`) — every path under the project root
@@ -126,7 +126,7 @@ runner.mjs` — never opted into per scenario, so a new scenario can't forget th
 2. **Marker-owned content** (`lib/write-set.mjs`'s `checkMarkerOwnedRegion`) — `align.config.ts`
    and `CLAUDE.md` each wrap one align-owned region between a START/END marker pair. Declaring
    either writable in `writeSet` licenses ONLY that region; the surrounding content must stay
-   byte-identical. This is BUG #10 (docs/adr/026-declared-write-sets.md's motivating incident)
+   byte-identical. This is BUG #10 (docs/adr/026-2026-08-11-declared-write-sets.md's motivating incident)
    expressed as a property. Evaluated per `run`/`mcpCall` step (not `mutate` — see the code comment
    in `lib/scenario-runner.mjs` for why the harness's own fixture mutations are exempt), using each
    step's own before/after capture, so a LATER command in the same scenario corrupting content an

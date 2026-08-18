@@ -6,7 +6,7 @@ import { runInit } from '../src/commands/init.js';
 import { expectMarkerRegionUnchanged, expectOnlyWrote, snapshotTree } from './write-set.js';
 
 // ADR 026 fast-path coverage for `align init` — the command BUG #10 fired from
-// (docs/adr/026-declared-write-sets.md). Additive: `test/init.test.ts` keeps its own assertions
+// (docs/adr/026-2026-08-11-declared-write-sets.md). Additive: `test/init.test.ts` keeps its own assertions
 // untouched, so a failure here points at the whole-tree invariant, never at a refactor of an
 // existing test. Mirrors `test/init.test.ts`'s own inline fixture style (`makeSinglePackageRepo`)
 // rather than the `test/fixtures/*` copies, matching this command's established test convention.

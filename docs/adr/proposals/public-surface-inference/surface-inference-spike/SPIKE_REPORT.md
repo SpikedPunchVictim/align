@@ -1,7 +1,7 @@
 # Public-Surface Inference Spike Report (Stage-S falsification spike)
 
 **Date**: 2026-07-19
-**Trigger**: `docs/adr/016-public-surface-inference.md` §"Falsification / validation plan" — this ADR is
+**Trigger**: `docs/adr/016-2026-07-20-public-surface-inference.md` §"Falsification / validation plan" — this ADR is
 DRAFT, pending owner sign-off, and explicitly states "no spike has yet been run on the inference algorithm
 itself." This report is that spike.
 **Targets** (read-only): `/Users/spikedpunchvictim/temp/enterprise-apps/{backstage,nest,directus,langchainjs}`.

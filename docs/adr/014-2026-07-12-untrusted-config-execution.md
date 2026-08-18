@@ -154,7 +154,7 @@ producing an inconsistent or silently-wrong combination.
   > registers — do not run it against a repository whose config you have not reviewed. Cloning an untrusted
   > repo and running an agent against it? Run `align check --untrusted` instead (after `align export-ir` has
   > produced `.align/ruleset-ir.json` in a trusted checkout) — it never imports `align.config.ts` and refuses
-  > outright if that JSON artifact is missing. See `docs/adr/014-untrusted-config-execution.md`.
+  > outright if that JSON artifact is missing. See `docs/adr/014-2026-07-12-untrusted-config-execution.md`.
 
 - **`custom.host` rules need a portable replacement to be enforced under `--untrusted`** — repos that rely on
   them for real enforcement (not just Design Reserve exercise) should treat this as a prompt to promote the

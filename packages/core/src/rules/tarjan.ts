@@ -1,12 +1,12 @@
 /**
  * Iterative Tarjan strongly-connected-components — the SCC-finding algorithm is ported from
- * docs/evidence/kluster-spike/src/rules.ts (proven algorithm; recursive Tarjan blows the call
+ * docs/adr/proposals/graph-extraction/kluster-spike/src/rules.ts (proven algorithm; recursive Tarjan blows the call
  * stack on large graphs, hence the explicit frame stack). Pure function: adjacency in, SCC groups
  * out, no I/O.
  *
  * `extractCycleChainNodes` below is NOT part of that provenance — it is align's own BFS,
  * written to replace a greedy walk that carried the same stranding defect as the kluster spike's
- * `extractCycleChain` (docs/evidence/kluster-spike/src/rules.ts:178). See BUG #9 in
+ * `extractCycleChain` (docs/adr/proposals/graph-extraction/kluster-spike/src/rules.ts:178). See BUG #9 in
  * .agents/research/2026-08-03-bug-hunt-full-codebase.md.
  */
 export function tarjanScc<T>(adjacency: ReadonlyMap<T, readonly T[]>): T[][] {

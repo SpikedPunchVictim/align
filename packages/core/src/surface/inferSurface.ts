@@ -29,7 +29,7 @@
  * to selectively downgrade). This is the "reachability is only as trustworthy as its weakest hop"
  * framing from the ADR's algorithm sketch, validated against the falsification spike's own
  * round-2 `walkEntrypoint`/`inferPackageSurface` behavior
- * (`docs/evidence/surface-inference-spike/SPIKE_REPORT.md`, `scratchpad/round2/ts_surface.js`).
+ * (`docs/adr/proposals/public-surface-inference/surface-inference-spike/SPIKE_REPORT.md`, `scratchpad/round2/ts_surface.js`).
  * A resolvable `inferred-unique` hop never degrades a `declared` entrypoint's entries — only
  * unresolvability (or a cycle) does. Different entrypoints of the same package (subpath exports)
  * are graded independently: one broken subpath does not degrade a sibling subpath's clean walk.

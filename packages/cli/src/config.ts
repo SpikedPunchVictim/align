@@ -25,7 +25,7 @@ export interface LoadedConfig {
   // `telemetry/resolve.ts`, treats "config didn't say" as "no" only after `--telemetry`/
   // `--no-telemetry`/`ALIGN_TELEMETRY` have all already been checked).
   readonly telemetry?: boolean;
-  // ADR 019 Mode 2 (the ungoverned-edge gap report, docs/proposals/reconciled-build-order.md #3):
+  // ADR 019 Mode 2 (the ungoverned-edge gap report, docs/adr/proposals/deep-import-provenance/reconciled-build-order.md #3):
   // explicit, human-declared composition-root component names (e.g. kluster's catch-all `api`,
   // which legitimately depends on every sub-layer) — excluded as a gap-report edge SOURCE so a
   // deliberate catch-all's expected fan-out isn't reported as noise. Same deviation shape as

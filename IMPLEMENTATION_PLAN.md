@@ -11,7 +11,7 @@ Do not re-litigate that work here.
 **Two parallel tracks — this file is the rules track.** This plan tracks **net-new rules and
 capabilities** (public-surface inference, deep-import, `@internal`, semantic-boundary facts). The
 **adoption / legibility track** — making align keep talking after day one, without new rule kinds —
-lives in [`docs/proposals/reconciled-build-order.md`](docs/proposals/reconciled-build-order.md): the
+lives in [`docs/adr/proposals/deep-import-provenance/reconciled-build-order.md`](docs/adr/proposals/deep-import-provenance/reconciled-build-order.md): the
 deps-not-installed false-green fix (#1), the baseline-delta ratchet (#2), the ungoverned-edge gap
 report (#3, ADR 019), the deep-import advisory (#4, ADR 020 — the shipped form of Stage 1 below), and
 `align init` detection robustness (#5a). Items #1–#5 are **resolved there** — do not re-plan them here.
@@ -41,7 +41,7 @@ tooled and untooled repos.
 
 **Status**: ✅ **BUILT (pure algorithm), 2026-07-20.** `types/publicSurface.ts` +
 `surface/inferSurface.ts` (core) + `entrypoint.ts` (plugin-typescript). Two-round falsification
-(`docs/evidence/surface-inference-spike/SPIKE_REPORT.md`) held against the real modules: backstage
+(`docs/adr/proposals/public-surface-inference/surface-inference-spike/SPIKE_REPORT.md`) held against the real modules: backstage
 99.68% precision / 99.95% recall; nest inferred-path 100%/100% vs published npm `.d.ts`; langchain
 `./output_parsers` regression PASS. core 275→298 tests, plugin-typescript 44→57, dogfood green.
 **Still promotion-gated (NOT built):** the `.align/public-surface.json` persisted artifact,
@@ -58,7 +58,7 @@ PR-research, needing no symbol layer beyond the scanner's existing edges.
 **Status**: ✅ **SHIPPED as a `doctor` advisory (ADR 020, reconciled-build-order #4).** Deliberately
 RESCOPED from the rule-kind design this stage originally described — the changes are the point, not a
 gap:
-- **Not a rule kind.** The placebo test (`docs/evidence/deep-import-provenance-probe/`) cut the
+- **Not a rule kind.** The placebo test (`docs/adr/proposals/deep-import-provenance/deep-import-provenance-probe/`) cut the
   `exports`-aware machinery (~2% swing in both samples) and measured repo-dependent precision (~31% on
   vscode) below ADR 008's blocking bar. It ships advisory-only — `computeDeepImportHits` +
   a `doctor` advisory (the #3 shape) — **not** IR + evaluator. First-class `arch.import-provenance` is

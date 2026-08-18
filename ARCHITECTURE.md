@@ -1,7 +1,7 @@
 # align — Architecture (v1 + growth path)
 
 Status: proposed for sign-off (Stage 0). Companion documents: `docs/adr/` (twelve ADRs), `docs/ir-schema.md`,
-`docs/core-interfaces.md`. Evidence source: `docs/evidence/kluster-spike/SPIKE_REPORT.md`. Plan source: `IMPLEMENTATION_PLAN.md`.
+`docs/core-interfaces.md`. Evidence source: `docs/adr/proposals/graph-extraction/kluster-spike/SPIKE_REPORT.md`. Plan source: `IMPLEMENTATION_PLAN.md`.
 
 ## 1. Purpose & product thesis
 
@@ -129,14 +129,14 @@ package that imports both and wires them together (§5).
 | TS/JS scanner: scan-and-discard, pnpm realpath, workspace-name fallback, type-only edges, nearest-tsconfig, package-entry→source mapping | ✅ | | |
 | `arch.no-dependency` / `no-cycles` / `layers` engine, per-edge cycle detail | ✅ | | |
 | `arch.metric` (max-LOC only) — promoted 2026-07-12 on kluster ruleset evidence | ✅ | | |
-| `security` gate: `security.manifest.source-hygiene` + `security.manifest.new-dependency` — promoted 2026-07-12 on `docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md` probe evidence (ADR 013); manifest scan domain lives in `plugin-typescript`, `dependsOn: []` always-run | ✅ | | |
+| `security` gate: `security.manifest.source-hygiene` + `security.manifest.new-dependency` — promoted 2026-07-12 on `docs/adr/proposals/security-manifest-gate/manifest-security-probe/MANIFEST_PROBE_REPORT.md` probe evidence (ADR 013); manifest scan domain lives in `plugin-typescript`, `dependsOn: []` always-run | ✅ | | |
 | Baseline store (+move detection, `--rule`) | ✅ | | |
 | MCP server (`align_check/status/violations/explain_rule`), CLI (`init/check/baseline`) | ✅ | | |
 | Token-economy payload rules (structured-only, priority sort, dedup, caps/pagination) | ✅ | | |
 | `align init` CLAUDE.md/AGENTS.md instructions block | ✅ | | |
 | Gate `error` semantics + `dependsOn` metadata (v1 dependencies: architecture needs parse; security is `dependsOn: []`) | ✅ | | |
 | Tool-wrapping gates: format/lint/types/tests, `security.secrets`, `security.tool` | | Stage 1/3 | |
-| Install-script-exposure manifest rule (`docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md` Rule 2) | | Stage 1/3 — after a content-pattern classifier rework (ADR 013 follow-up ladder) | |
+| Install-script-exposure manifest rule (`docs/adr/proposals/security-manifest-gate/manifest-security-probe/MANIFEST_PROBE_REPORT.md` Rule 2) | | Stage 1/3 — after a content-pattern classifier rework (ADR 013 follow-up ladder) | |
 | `align_fix_hints`/`align_autofix` MCP tools | | Stage 3/4 | |
 | Edit-block apply pipeline / `FixProposal` (exact + `nearLine` match) | | Stage 4 (contract fixed now, ADR 010) | |
 | `align build` doc→ruleset pipeline, lockfile, provenance | | Stage 4 (contract fixed now, ADR 011) | |
@@ -213,7 +213,7 @@ const orchestrator = new GateOrchestrator(registry, /* rulesetIR, baselineStore,
 ```
 
 **Manifest scan domain placement (ADR 013)**: `plugin-typescript`, not core, and not a new
-`plugin-manifest` package. The probe that motivated this (`docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md`) flagged
+`plugin-manifest` package. The probe that motivated this (`docs/adr/proposals/security-manifest-gate/manifest-security-probe/MANIFEST_PROBE_REPORT.md`) flagged
 this as a genuine open question — manifest/lockfile text is a different input class from
 `plugin-typescript`'s TS-compiler-API source scanning. It stays inside `plugin-typescript` rather
 than becoming a fourth package because it is Node/pnpm-ecosystem-specific (same "zero framework

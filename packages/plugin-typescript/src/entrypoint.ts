@@ -16,7 +16,7 @@
  *
  * The condition-priority list and dist-remap heuristics below (build-output prefixes, bundler
  * infix stripping, the `input` condition) were exercised and measured against 9 real TS monorepos
- * in the ADR 016 falsification spike (`docs/evidence/surface-inference-spike/SPIKE_REPORT.md`
+ * in the ADR 016 falsification spike (`docs/adr/proposals/public-surface-inference/surface-inference-spike/SPIKE_REPORT.md`
  * Round 2, `scratchpad/round2/ts_surface.js`'s `resolveEntrypoints`/`remapToSrc`) — ported here as
  * the validated algorithm, not reinvented from the ADR's prose alone.
  */

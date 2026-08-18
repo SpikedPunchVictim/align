@@ -69,7 +69,7 @@ export function captureState(workingDir, options = {}) {
       claudeBlockRaw === undefined
         ? { present: false }
         : { present: true, raw: claudeBlockRaw, normalized: normalizeText(claudeBlockRaw, ctx) },
-    // ADR 026's named gap (docs/adr/026-declared-write-sets.md:36-43): `claudeMdBlock` above keeps
+    // ADR 026's named gap (docs/adr/026-2026-08-11-declared-write-sets.md:36-43): `claudeMdBlock` above keeps
     // ONLY the region between align's markers — "the human content of CLAUDE.md outside the
     // markers... is discarded before comparison. The harness as built would not have caught the
     // incident that motivates this ADR." `claudeMdFull` is the fix: the WHOLE file's raw bytes,

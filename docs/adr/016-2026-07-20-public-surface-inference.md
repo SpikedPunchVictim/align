@@ -23,7 +23,7 @@ deep-import provenance) is a separate, later decision per this project's promoti
 > both downstream rules.
 
 > **AMENDMENT (2026-07-20, post-spike): the confidence contract is now GRADED, not binary.** The
-> falsification plan (§ below) was executed in two rounds — `docs/evidence/surface-inference-spike/SPIKE_REPORT.md`.
+> falsification plan (§ below) was executed in two rounds — `docs/adr/proposals/public-surface-inference/surface-inference-spike/SPIKE_REPORT.md`.
 > Round 2, using the TypeScript compiler API on both sides against independent ground truth, measured
 > 99.67% precision / 100% recall on backstage (295 packages incl. subpath entrypoints) and **100%
 > precision/recall on the *inferred* path** for 5 `@nestjs/*` packages validated against their published
@@ -46,7 +46,7 @@ package, what its public entrypoint is and what symbols are actually reachable t
 requiring the repo to have already declared `package.json` `exports`, `@public`/`@internal` JSDoc tags, or
 any other curated API metadata.
 
-`docs/proposals/stage0-surface-inference-gap-analysis.md` (companion document) establishes precisely what
+`docs/adr/proposals/public-surface-inference/stage0-surface-inference-gap-analysis.md` (companion document) establishes precisely what
 align already has and what's missing, file:line-cited. Summary of the three load-bearing findings:
 
 1. **Entrypoint resolution today is filename-convention guessing, not manifest-aware.**
@@ -243,7 +243,7 @@ inference-accuracy risk lives entirely in the pure core algorithm, which means i
    - Maintain a visited-file set per walk to detect and name `barrel-cycle` rather than infinite-looping.
    - An edge whose target doesn't resolve to a scanned source node becomes an `unresolvable-reexport` marker,
      following the same "named category, not new machinery" doctrine ADR 004 already applies to
-     `UncertaintyReason` (`docs/adr/004-graph-extraction.md:54-66`) — deliberately not building speculative
+     `UncertaintyReason` (`docs/adr/004-2026-07-11-graph-extraction.md:54-66`) — deliberately not building speculative
      handling for shapes no real repo has been observed to hit yet.
 3. **Assembly**: one `PackagePublicSurface` per workspace package, all its entrypoints' walks merged.
 
@@ -274,7 +274,7 @@ re-inferred silently on every check:
 
 ## Falsification / validation plan
 
-> **STATUS: EXECUTED (2 rounds) — see `docs/evidence/surface-inference-spike/SPIKE_REPORT.md`.** The plan
+> **STATUS: EXECUTED (2 rounds) — see `docs/adr/proposals/public-surface-inference/surface-inference-spike/SPIKE_REPORT.md`.** The plan
 > below is the original design; results: items 1-3 passed with independent (compiler-API, published-npm)
 > ground truth — 99.67% P / 100% R on backstage incl. subpath entrypoints, 100% P/R on the inferred path
 > (nest vs published `.d.ts`). Item 4's gate is met **for the pure algorithm**. Still open, gating the
@@ -322,7 +322,7 @@ something evidenced.
   of deep-import provenance that needs to confirm a rewritten import target is actually exported from the
   entrypoint (the safe-rewrite case), which does depend on this mechanism.
 - **Any autofix implementation for either downstream rule.** The diff-only/HEAD-vs-working-diff distinction
-  (`docs/proposals/stage0-surface-inference-gap-analysis.md` §4) is a constraint this ADR's contract is
+  (`docs/adr/proposals/public-surface-inference/stage0-surface-inference-gap-analysis.md` §4) is a constraint this ADR's contract is
   designed to make possible later (via the confidence field), not something this ADR builds.
 - **Rule A as a metric** (`export *` count at entrypoints as a health signal, `spike-findings.md`'s
   recommended demotion from hard rule to advisory) — mentioned only as a beneficiary of the same
@@ -381,7 +381,7 @@ something evidenced.
 ## Evidence
 
 - File:line citations throughout are the primary evidence for "what already exists" — see
-  `docs/proposals/stage0-surface-inference-gap-analysis.md` for the consolidated version.
+  `docs/adr/proposals/public-surface-inference/stage0-surface-inference-gap-analysis.md` for the consolidated version.
 - Market/motivation evidence: `/Users/spikedpunchvictim/temp/enterprise-apps/pr-research/dataset-c-spike/spike-findings.md`
   (Rule A/B/C TP/FP verdicts) and `fable-feedback-round2.md` (transitive-barrel critique §1, autofix-safety
   regime §2, market-mismatch `@internal` counts, §5's onboarding-gap framing).

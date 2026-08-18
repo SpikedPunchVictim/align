@@ -7,7 +7,7 @@ export default {
   id: 'init-fresh-project',
   project: 'nest',
   description: 'align init --accept-existing on a fresh nest checkout detects components, writes align.config.ts, seeds the baseline, writes the CLAUDE.md block.',
-  // ADR 026 write-set. `init` is BUG #10's own command (docs/adr/026-declared-write-sets.md:13-28),
+  // ADR 026 write-set. `init` is BUG #10's own command (docs/adr/026-2026-08-11-declared-write-sets.md:13-28),
   // so it earns the `destructive` tag even though this scenario runs it exactly once on a fresh
   // checkout (nothing pre-existing to destroy here — the risk is in a RE-run, which this scenario
   // doesn't exercise). Traced against packages/cli/src/commands/init.ts + align-dir.ts:

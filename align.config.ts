@@ -7,12 +7,21 @@ import { toRepoRelativePath, type HostPredicate, type HostRuleContext, type Host
 // and so proposed one component covering all three packages) into per-package components that
 // can actually express the composition-root direction ARCHITECTURE.md §5 requires.
 // Scan-time excludes (not part of the portable IR — see packages/cli/src/config.ts's documented
-// deviation): test-apps/ is a read-only external target and docs/evidence/ holds the relocated
-// throwaway spike and probe code (see docs/evidence/*) — neither is part of align's own architecture; fixture trees under packages/*/test/fixtures/ intentionally
-// contain seeded violations (cycles, forbidden imports) and must not leak into the dogfood check.
+// deviation): test-apps/ is a read-only external target, and throwaway spike/probe code lives under
+// docs/evidence/ plus docs/adr/proposals/ — neither is part of align's own architecture; fixture
+// trees under packages/*/test/fixtures/ intentionally contain seeded violations (cycles, forbidden
+// imports) and must not leak into the dogfood check.
+//
+// `docs/adr/proposals` was added 2026-08-17 with the ADR reorganization, and the reason is worth
+// keeping: that move relocated `kluster-spike` — which is REAL TypeScript, not prose — out from
+// under `docs/evidence/` and straight into the scan, turning align's own check provisional with 5
+// unresolvable specifiers across 2 files. Nothing else noticed; the build, the 1308 unit tests and
+// all 17 integration scenarios stayed green. Moving documentation is not automatically inert when
+// some of that documentation is code.
 export const excludes = [
   'test-apps',
   'docs/evidence',
+  'docs/adr/proposals',
   // Agent tooling scratch space. `.claude/worktrees/` holds full git worktrees of THIS repo, so
   // without this every fixture tree inside them re-enters the scan under a path the
   // `packages/*/test/fixtures` excludes below cannot match (those are prefix-anchored, and a
@@ -168,7 +177,7 @@ export default defineProject({
     c.custom
       .host('no-child-process-outside-git-rails')
       .because('node:child_process shell-outs in agent/createAlign PRODUCTION code must stay confined to the audited, execFile-only rails (packages/agent/src/git.ts, packages/agent/src/format.ts, packages/create-align/src/nodeEffects.ts) — everywhere else in those two components, a child_process import is an unaudited shell-injection/supply-chain surface (test files are exempt; e2e-git.test.ts has a legitimate, reviewed test-time shell-out). core/pluginTypescript/cli are now covered by the three portable cannotDependOn(external(\'node:child_process\')) rules above instead (ADR 017 Part A, 2026-07-21 migration) — this predicate is narrowed to the two components with a genuine file-level exemption arch.no-dependency/arch.layers cannot express at whole-component grain (docs/proposals/rule-expansion-evaluation.md §A.2.2, same gap typesLayerIsLeaf documents). Predicate registered in this file\'s hostRules export.'),
-    // security.manifest gate dogfood (ADR 013, promoted 2026-07-12 on docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md
+    // security.manifest gate dogfood (ADR 013, promoted 2026-07-12 on docs/adr/proposals/security-manifest-gate/manifest-security-probe/MANIFEST_PROBE_REPORT.md
     // probe evidence): align adopts its own two rules. `newDependencyGate` fingerprints every
     // current runtime/dev dependency across root + every workspace member's package.json —
     // `align init`/`baseline accept` seeds today's set once, so only a genuinely new dependency
@@ -177,10 +186,10 @@ export default defineProject({
     // itself (probe-measured) — align's own deps are all registry/workspace-protocol.
     c.security.manifest
       .sourceHygiene()
-      .because('Non-registry dependency sources need explicit human sign-off before they enter the tree (docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md Rule 1).'),
+      .because('Non-registry dependency sources need explicit human sign-off before they enter the tree (docs/adr/proposals/security-manifest-gate/manifest-security-probe/MANIFEST_PROBE_REPORT.md Rule 1).'),
     c.security.manifest
       .newDependencyGate()
-      .because('A newly added dependency is a genuinely new, externally-sourced surface worth a deliberate look before it merges (docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md Rule 7 — real historical catch: @anthropic-ai/sdk entering this repo in Stage 4).'),
+      .because('A newly added dependency is a genuinely new, externally-sourced surface worth a deliberate look before it merges (docs/adr/proposals/security-manifest-gate/manifest-security-probe/MANIFEST_PROBE_REPORT.md Rule 7 — real historical catch: @anthropic-ai/sdk entering this repo in Stage 4).'),
   ],
 });
 

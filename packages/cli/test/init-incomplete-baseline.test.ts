@@ -102,7 +102,7 @@ function copyIncompleteFixture(): string {
  * missing-dependencies advisory independent of what rules are declared, since the advisory comes
  * from the scanner building the dependency graph, not from rule evaluation. This is `align init`'s
  * ZERO-VIOLATIONS write path's precondition — a green-but-incomplete scan, the exact shape the ADR
- * 023 amendment's own reproduction used (docs/adr/023-incomplete-scan-refusal.md, "Zero-violations
+ * 023 amendment's own reproduction used (docs/adr/023-2026-08-08-incomplete-scan-refusal.md, "Zero-violations
  * path"). Config is rewritten before the first `import()` — a dynamic `import()` of the same
  * absolute path is module-cached in-process, so a config rewritten mid-test would silently keep
  * serving the old ruleset.

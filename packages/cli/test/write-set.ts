@@ -18,7 +18,7 @@ import * as path from 'node:path';
  *
  * `expectMarkerRegionUnchanged` is the ADR's separate content-aware clause: declaring
  * `align.config.ts`/`CLAUDE.md` writable licenses only the region between align's own START/END
- * markers (`init/marker-block.ts`) — this is BUG #10 (`docs/adr/026-declared-write-sets.md`)
+ * markers (`init/marker-block.ts`) — this is BUG #10 (`docs/adr/026-2026-08-11-declared-write-sets.md`)
  * expressed as a property. It is intentionally its own function with its own failure message
  * (not folded into `expectOnlyWrote`) — a whole-file hash match tells you the file changed, not
  * WHERE, and BUG #10's damage was entirely inside a file that was already a declared, expected

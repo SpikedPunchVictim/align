@@ -11,14 +11,14 @@ be checkable:
 > behind an `allowBaselineFromMcp` flag, **default false**. An agent cannot grant itself amnesty
 > from a rule it's failing — baseline acceptance is a human decision surfaced through the CLI/init
 > flow, not a tool call an agent can reach for under pressure to turn red green.
-> — `docs/adr/006-baseline.md:40-43`
+> — `docs/adr/006-2026-07-11-baseline.md:40-43`
 
 **`allowBaselineFromMcp` does not exist in the implementation.** A repo-wide search finds it in
 exactly three places, all of them prose:
 
 | Location | What it is |
 |---|---|
-| `docs/adr/006-baseline.md:41` | the decision itself |
+| `docs/adr/006-2026-07-11-baseline.md:41` | the decision itself |
 | `packages/cli/src/docs/conceptual.ts:26` | user-facing docs, printed by `align docs` |
 | `packages/cli/src/skill/static-sections.ts:70-71` | **the skill align installs into the agent's instructions** |
 

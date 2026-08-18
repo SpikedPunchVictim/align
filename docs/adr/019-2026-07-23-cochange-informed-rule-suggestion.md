@@ -36,7 +36,7 @@ boundaries to write rules for. align's existing suggestion surfaces (`align init
 `align_propose_rules` MCP tool) are **structural only** — they can list components and obvious layers,
 but they can't tell you which boundaries *matter*.
 
-The co-change probe (`docs/evidence/co-change-coupling/PROBE.md`) established the missing signal:
+The co-change probe (`docs/adr/proposals/cochange-informed-rule-suggestion/co-change-coupling/PROBE.md`) established the missing signal:
 **logical (co-change) coupling — how often two components change in the same commit — intersected with
 the import graph.** Co-change alone is 70-93% inherent noise (full-stack, ecosystem cadence, tests);
 intersecting it with align's import graph collapses that to the handful of boundaries a rule can
@@ -140,11 +140,11 @@ co-change stays cut.
   ungoverned-edge gap report (retrofit, `align doctor`-shaped).
 - A `compositionRoots` config field (explicit, human-declared) for catch-all exclusion — no heuristic.
 - Serves the dev-loop review's top-supported lever (3a, rule-authoring assist,
-  `docs/proposals/dev-loop-exploration.md`), targeting adoption friction — but the honest scope is
+  `docs/adr/proposals/cochange-informed-rule-suggestion/dev-loop-exploration.md`), targeting adoption friction — but the honest scope is
   smaller than the original draft: on small repos it mostly overlaps ADR 009's layer macros; its real
   payoff is large-repo edge-weight ranking + the retrofit gap report.
 
 ## Evidence
-- `docs/evidence/co-change-coupling/PROBE.md` — co-change vs import graph (the diagnostic + noise classes).
+- `docs/adr/proposals/cochange-informed-rule-suggestion/co-change-coupling/PROBE.md` — co-change vs import graph (the diagnostic + noise classes).
 - Onboarding demonstration (directus): foundation layer surfaced, 467 no-edge pairs filtered.
 - Retrofit demonstration (kluster): `apiPlugins → apiDb` (87%) ungoverned gap, owner-judgeable.

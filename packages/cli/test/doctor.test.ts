@@ -332,7 +332,7 @@ describe('align doctor', () => {
   // doctor-stale-skill-content-hash.test.ts — kept out of this file to stay under the repo's own
   // arch.metric 500-line-per-file limit (docs/ARCHITECTURE-RULES.md).
 
-  // ADR 019 Mode 2 (ACCEPTED, v1 = import-graph-only), docs/proposals/reconciled-build-order.md #3
+  // ADR 019 Mode 2 (ACCEPTED, v1 = import-graph-only), docs/adr/proposals/deep-import-provenance/reconciled-build-order.md #3
   // — the ungoverned-edge gap report. Fixture reproduces the ADR's kluster demo shape: apiDomain's
   // dependency on apiDb is governed (an arch.layers rule), apiPlugins' dependency on apiDb is not
   // — a real gap. A composition-root `api` component also imports every sub-layer but is declared

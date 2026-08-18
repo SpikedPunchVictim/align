@@ -1,7 +1,7 @@
 # ADR 018: Doc-reference integrity (`docs.link-integrity`)
 
 **STATUS: DESIGN RESERVE — the evidence did not clear the bar.** The decisive PR-flow probe
-(`docs/evidence/doc-consistency-probe/PR_FLOW_PROBE.md`) showed genuine dead-link *introduction* is
+(`docs/adr/proposals/doc-reference-integrity/doc-consistency-probe/PR_FLOW_PROBE.md`) showed genuine dead-link *introduction* is
 rare (~0.2% of doc-touching commits; 88% of apparent "flow" was one repo's translated-README
 convention). Per promotion-on-evidence doctrine this candidate is **not built**. The design below is
 retained as the reference shape *if* a real adopter later demonstrates demand — and if so, in the
@@ -20,14 +20,14 @@ _Original draft (superseded by the status above) follows for reference._
 ## Context
 
 Documentation was the largest review-comment category in the enterprise-repo research
-(`docs/proposals/documentation-consistency-exploration.md`), and ~62% of those comments are
+(`docs/adr/proposals/doc-reference-integrity/documentation-consistency-exploration.md`), and ~62% of those comments are
 bot-authored — the signature of LLM-generated PRs botching *structural* doc-code consistency. align's
 credible slice of that space is **doc-code consistency, never prose**: an artifact that must track a
 structural fact align computes, not a judgment about whether prose is good.
 
 Two candidates were probed. This ADR is the winner — **doc-reference integrity**: a documentation file
 links (relatively) to a source/doc file that does not exist, i.e. *"someone renamed/moved the file and
-left the doc pointing at the old path."* The measured case (`docs/evidence/doc-consistency-probe/DOC_REFERENCE_PROBE.md`):
+left the doc pointing at the old path."* The measured case (`docs/adr/proposals/doc-reference-integrity/doc-consistency-probe/DOC_REFERENCE_PROBE.md`):
 
 - Naive "does every local link resolve?" = ~10.5% broken, but **high false-positive rate** from
   docs-site routing (Docusaurus / Next-app root-relative *routes*, not files).
@@ -133,7 +133,7 @@ v1 (reserve) — the file-existence core is the measured, high-value, low-ambigu
 
 ## Evidence
 
-- `docs/proposals/documentation-consistency-exploration.md` — the thesis, candidate family, boundaries.
-- `docs/evidence/doc-consistency-probe/DOC_REFERENCE_PROBE.md` — the measured TP/FP result (5.9%
+- `docs/adr/proposals/doc-reference-integrity/documentation-consistency-exploration.md` — the thesis, candidate family, boundaries.
+- `docs/adr/proposals/doc-reference-integrity/doc-consistency-probe/DOC_REFERENCE_PROBE.md` — the measured TP/FP result (5.9%
   high-precision; docs-site FP drivers; backstage 0/1561).
-- `docs/evidence/doc-consistency-probe/CHANGESET_SEMVER_PROBE.md` — why the other candidate is deferred.
+- `docs/adr/proposals/doc-reference-integrity/doc-consistency-probe/CHANGESET_SEMVER_PROBE.md` — why the other candidate is deferred.

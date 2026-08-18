@@ -1,7 +1,7 @@
 # Stage 0: Public-Surface Inference — Gap Analysis
 
 **Status**: Proposal — no code, plan, ADR, or config changes in this document. Companion to
-`docs/adr/016-public-surface-inference.md` (draft, pending owner sign-off). Written under the same
+`docs/adr/016-2026-07-20-public-surface-inference.md` (draft, pending owner sign-off). Written under the same
 promotion-on-evidence doctrine as `docs/proposals/rule-expansion-evaluation.md`: the burden of proof is on
 promotion, not on the mechanism already being designed.
 
@@ -78,7 +78,7 @@ whether it existed in that file's export list before and after. Confirms: **no e
 supplies, package-level public-surface reachability today.**
 
 ### 1.7 ADR precedent for the extraction philosophy
-ADR 004 (`docs/adr/004-graph-extraction.md`) already establishes "package-entry → source mapping" as a v1
+ADR 004 (`docs/adr/004-2026-07-11-graph-extraction.md`) already establishes "package-entry → source mapping" as a v1
 requirement (lines 41-44) — but scoped narrowly to "so cross-package imports resolve to a scannable node,"
 not "so a package's intentionally-curated public API can be computed." The same ADR's uncertainty-vocabulary
 doctrine (lines 54-66: "uncertainty vocabulary over uncertainty machinery," name the categories that
@@ -208,7 +208,7 @@ prerequisite and not an optional nicety, and must be carried into any downstream
   (`rule-expansion-evaluation.md` §B.0) — that item had an existing, dated, already-occurred false-green to
   point to. This one has strong landscape/market evidence for *why it's needed*, but zero repo-measured
   evidence yet for whether the specific inference algorithm proposed here is *accurate*.** Treat it the way
-  `docs/adr/013-security-manifest-gate.md`'s manifest probe treated its own candidates: build the smallest
+  `docs/adr/013-2026-07-12-security-manifest-gate.md`'s manifest probe treated its own candidates: build the smallest
   version, run it read-only against real repos, and only then decide whether (and how) it gates anything.
 - **Scope-creep risk.** It is tempting to build the downstream rules (`@internal` barrel-escape, deep-import
   provenance) at the same time as the inference layer, since the motivating evidence discusses them together.
@@ -221,5 +221,5 @@ prerequisite and not an optional nicety, and must be carried into any downstream
   world. CommonJS-only packages (`module.exports = {...}` with no ESM export syntax at all) are not analyzed
   by `exports.ts` today and are out of scope for this proposal too — no evidence has been gathered on how
   common that shape is in the target market, and inventing handling for it now would be exactly the
-  "building ahead of evidence" pattern `docs/adr/004-graph-extraction.md`'s uncertainty-vocabulary section
+  "building ahead of evidence" pattern `docs/adr/004-2026-07-11-graph-extraction.md`'s uncertainty-vocabulary section
   warns against.

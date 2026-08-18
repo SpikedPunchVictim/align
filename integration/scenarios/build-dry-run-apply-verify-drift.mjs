@@ -9,7 +9,7 @@ export default {
   project: 'nest',
   description: 'align build dry-run writes nothing; --apply writes generated-rules.json + rules.lock.json; --verify goes red after a doc edit.',
   // ADR 026: `build --apply` is one of ADR 026's own named write commands
-  // (docs/adr/026-declared-write-sets.md:7-8: "`build --apply` rewrites `align.config.ts`'s note
+  // (docs/adr/026-2026-08-11-declared-write-sets.md:7-8: "`build --apply` rewrites `align.config.ts`'s note
   // block and three `.align/` artifacts"). Traced against `writeBuildArtifacts`
   // (commands/build.ts) — same three new `.align/` paths and the same `docs/ARCHITECTURE-RULES.md`
   // mutation-created doc as mcp-propose-rules-baseline-gate.mjs, since both scenarios exercise the

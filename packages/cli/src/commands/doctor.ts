@@ -205,7 +205,7 @@ async function collectDoctorReport(rootDir: string, program: Command | undefined
         });
       }
 
-      // ADR 019 Mode 2 (ACCEPTED, v1 = import-graph-only), docs/proposals/reconciled-build-order.md
+      // ADR 019 Mode 2 (ACCEPTED, v1 = import-graph-only), docs/adr/proposals/deep-import-provenance/reconciled-build-order.md
       // #3, "the real silence-fixer": component import edges that exist but aren't covered by any
       // existing arch.no-dependency/arch.layers rule — boundaries the human hasn't decided on yet.
       // Pure graph computation (edges-minus-ruleset), already ranked by edge-weight/fan-in by

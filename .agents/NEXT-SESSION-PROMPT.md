@@ -12,12 +12,12 @@ branch `fix` (80 commits ahead of `main`, nothing pushed). The previous session 
 
 1. `.agents/HANDOFF.md` — start with the warning block at the top; the tree deliberately does not
    compile right now.
-2. `IMPLEMENTATION_PLAN-028-scan-safety.md` — five stages with file-and-line work lists. **Do not
+2. `docs/adr/proposals/scan-blind-spots/IMPLEMENTATION_PLAN.md` — five stages with file-and-line work lists. **Do not
    re-derive the work lists**; they were built by grepping the actual call sites and they include
    packages an obvious grep misses (`packages/agent`'s test helpers construct `DependencyGraph`s).
-3. `docs/adr/028-scan-blind-spots-and-the-absence-inference.md` — the authoritative reasoning.
+3. `docs/adr/028-2026-08-16-scan-blind-spots-and-the-absence-inference.md` — the authoritative reasoning.
 4. `CLAUDE.md` — destructive-safety rules, binding on new work.
-5. `docs/adr/027-nested-checkout-scan-scope.md` — its closing section is the lesson ADR 028
+5. `docs/adr/027-2026-08-13-nested-checkout-scan-scope.md` — its closing section is the lesson ADR 028
    generalizes, and its "required, not optional" argument is why the new field is required.
 
 ## Where things stand

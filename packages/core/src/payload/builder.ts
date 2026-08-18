@@ -54,14 +54,14 @@ export interface McpCheckPayload {
    * versioning this payload owes its own ADR (ADR 028 Consequences). */
   readonly blindSpots: readonly ScanBlindSpot[];
   /** Change in baselined debt since the last persisted baseline: `47 → 45 (−2)`
-   * (docs/proposals/reconciled-build-order.md #2). Structured so agents can read the ratchet
+   * (docs/adr/proposals/deep-import-provenance/reconciled-build-order.md #2). Structured so agents can read the ratchet
    * without parsing prose. */
   readonly baselineDebt: BaselineDebt;
   /** `false` when the graph was built without the repo's external dependencies (a
    * `missing-dependencies` advisory fired) — external-edge rules could not be fully evaluated, so a
    * `green` verdict here is provisional, not authoritative. Structured so a consumer reading
    * `verdict` alone isn't misled by a lying green (same false-green doctrine as `--frozen-rules`,
-   * docs/proposals/reconciled-build-order.md #1). `true` for a normal, dependency-complete scan. */
+   * docs/adr/proposals/deep-import-provenance/reconciled-build-order.md #1). `true` for a normal, dependency-complete scan. */
   readonly complete: boolean;
 }
 

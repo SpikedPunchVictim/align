@@ -10,8 +10,8 @@ upstream, nothing pushed**. Version is **0.2.0** across all five packages.
 > ```
 >  M packages/core/src/gates/types.ts      # CheckRun: blindSpots + observedFiles
 >  M packages/core/src/types/graph.ts      # ScanBlindSpot types; blindSpots replaces skippedNestedCheckouts
->  ?? docs/adr/028-scan-blind-spots-and-the-absence-inference.md
->  ?? IMPLEMENTATION_PLAN-028-scan-safety.md
+>  ?? docs/adr/028-2026-08-16-scan-blind-spots-and-the-absence-inference.md
+>  ?? docs/adr/proposals/scan-blind-spots/IMPLEMENTATION_PLAN.md
 > ```
 >
 > `pnpm typecheck` reports **exactly 12 errors, all in core** (`orchestrator.ts` ×11,
@@ -20,7 +20,7 @@ upstream, nothing pushed**. Version is **0.2.0** across all five packages.
 > a different count or a different shape of error, something else changed and you should find out
 > what before continuing.
 >
-> **Start by reading `IMPLEMENTATION_PLAN-028-scan-safety.md`.** It has the five stages with
+> **Start by reading `docs/adr/proposals/scan-blind-spots/IMPLEMENTATION_PLAN.md`.** It has the five stages with
 > file-and-line work lists. `docs/adr/028-*.md` is the authoritative reasoning behind them.
 
 Read this, then `CLAUDE.md` (destructive-safety rules — binding on new work), then
@@ -186,7 +186,7 @@ exists; (4) `UPGRADING.md`'s 0.2.0 section carries the note and the registry is 
 
 ### ADR 028 — scan blind spots: **IN PROGRESS, Stage 1 started.** This is the live work
 
-**Read `IMPLEMENTATION_PLAN-028-scan-safety.md` first**, then `docs/adr/028-*.md`. Both are
+**Read `docs/adr/proposals/scan-blind-spots/IMPLEMENTATION_PLAN.md` first**, then `docs/adr/028-*.md`. Both are
 uncommitted. The plan has file-and-line work lists per stage; do not re-derive them.
 
 **The defect class**, in one line: `!knownFiles.has(entry.file)` is read as "this file was deleted",

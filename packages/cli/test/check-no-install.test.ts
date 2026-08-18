@@ -76,7 +76,7 @@ async function readJson(run: () => Promise<number>): Promise<{ code: number; pay
   return { code, payload: JSON.parse(logs.join('')) as { verdict: string; complete: boolean; advisories: { kind: string; message: string }[]; baselineDebt: { previous: number; current: number; delta: number } } };
 }
 
-describe('align check — deps-not-installed false-green fix (docs/proposals/reconciled-build-order.md #1)', () => {
+describe('align check — deps-not-installed false-green fix (docs/adr/proposals/deep-import-provenance/reconciled-build-order.md #1)', () => {
   it('emits a single missing-dependencies advisory instead of many unresolvable-specifier lines', async () => {
     tmpDir = makeRepoWithExternalImport();
     const { code, text } = await readHuman(() => runCheck(tmpDir, { json: false }));

@@ -299,14 +299,14 @@
         "kind": "security.manifest.source-hygiene",
         "id": "security.manifest.source-hygiene",
         "provenance": {
-          "because": "Non-registry dependency sources need explicit human sign-off before they enter the tree (docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md Rule 1)."
+          "because": "Non-registry dependency sources need explicit human sign-off before they enter the tree (docs/adr/proposals/security-manifest-gate/manifest-security-probe/MANIFEST_PROBE_REPORT.md Rule 1)."
         }
       },
       {
         "kind": "security.manifest.new-dependency",
         "id": "security.manifest.new-dependency",
         "provenance": {
-          "because": "A newly added dependency is a genuinely new, externally-sourced surface worth a deliberate look before it merges (docs/evidence/manifest-security-probe/MANIFEST_PROBE_REPORT.md Rule 7 — real historical catch: @anthropic-ai/sdk entering this repo in Stage 4)."
+          "because": "A newly added dependency is a genuinely new, externally-sourced surface worth a deliberate look before it merges (docs/adr/proposals/security-manifest-gate/manifest-security-probe/MANIFEST_PROBE_REPORT.md Rule 7 — real historical catch: @anthropic-ai/sdk entering this repo in Stage 4)."
         }
       }
     ]

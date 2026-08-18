@@ -8,7 +8,7 @@
 //      sets.md, Decision: "A scenario that declares no write-set gets the empty one: nothing may
 //      change"). This is the ADR's primary mechanism, and closes the exact gap the ADR names:
 //      "Everything else in the project tree is invisible to every scenario"
-//      (docs/adr/026-declared-write-sets.md:36-43, citing capture.mjs:36-73).
+//      (docs/adr/026-2026-08-11-declared-write-sets.md:36-43, citing capture.mjs:36-73).
 //
 //   2. checkMarkerOwnedRegion — BUG #10 expressed as a property. `align.config.ts` and `CLAUDE.md`
 //      each wrap ONE align-owned region between a START/END marker pair; declaring the file
@@ -17,7 +17,7 @@
 //      SEPARATE, narrower check layered on top of (1): (1) alone would happily permit a marker-
 //      splice bug to overwrite a human's `components`/`rules` the moment the scenario author
 //      (correctly) declares `align.config.ts` writable at all — which is exactly BUG #10's shape
-//      (docs/adr/026-declared-write-sets.md:13-28: two runs of `align init` against a config whose
+//      (docs/adr/026-2026-08-11-declared-write-sets.md:13-28: two runs of `align init` against a config whose
 //      note block lost its END marker deleted the whole ruleset).
 import * as fs from 'node:fs';
 import * as path from 'node:path';

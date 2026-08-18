@@ -21,7 +21,7 @@ promotion-on-evidence doctrine (`docs/proposals/rule-expansion-evaluation.md`).
 is ~40 lines of hand-rolled graph BFS that — being host code — is **not portable to untrusted mode**
 (ADR 014), not in the IR (ADR 002), and outside the cache/explain story (ADR 005/007).
 
-`docs/evidence/common-rules-survey/SURVEY.md` (§2, §5) mined 10 enterprise repos and, after a skeptical
+`docs/adr/proposals/external-selectors-and-presets/common-rules-survey/SURVEY.md` (§2, §5) mined 10 enterprise repos and, after a skeptical
 review, resolved the highest-value built-ins into **one rule and one classification primitive** — not a
 "library of rules" and not vendored presets:
 
@@ -181,7 +181,7 @@ package outside core, which align need not bless in v1.
 
 ## Evidence
 
-- `docs/evidence/common-rules-survey/SURVEY.md` §2, §5.2, §5.3 — prevalence + corrected ranking.
+- `docs/adr/proposals/external-selectors-and-presets/common-rules-survey/SURVEY.md` §2, §5.2, §5.3 — prevalence + corrected ranking.
 - `packages/core/src/dsl/factories.ts:179-203` — `cannotDependOn`→`arch.no-dependency`,
   `canOnlyDependOn`→`arch.layers` (the corrected IR-impact basis).
 - `packages/core/src/types/graph.ts:59-65,94-98` — external-id normalization; externals excluded from

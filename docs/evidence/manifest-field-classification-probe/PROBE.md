@@ -184,6 +184,6 @@ if it happens, is cheap — the reason to wait is evidence of **need**, not cost
 - `packages/eslint-plugin/rules/no-mixed-plugin-imports.js` — the `roleRules` matrix.
 - `packages/eslint-plugin/rules/no-ui-css-imports-in-non-frontend.js` — the role→external CSS rule.
 - `.eslintrc.js` — the 10 `excludedTargetPackages` + `packages/ui` opt-out.
-- `docs/adr/017-external-selectors-and-presets.md` (on `main`) — Part B spec + Falsification §3.
-- Contrast: `docs/evidence/co-change-coupling/PROBE.md`, `docs/evidence/deep-import-provenance-probe/PROBE.md`
+- `docs/adr/017-2026-07-21-external-selectors-and-presets.md` (on `main`) — Part B spec + Falsification §3.
+- Contrast: `docs/adr/proposals/cochange-informed-rule-suggestion/co-change-coupling/PROBE.md`, `docs/adr/proposals/deep-import-provenance/deep-import-provenance-probe/PROBE.md`
   — the two probes where the baseline ≈ the machinery and the machinery was cut.

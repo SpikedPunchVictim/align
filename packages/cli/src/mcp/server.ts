@@ -26,7 +26,7 @@ import { decideMcpBaselineWrite } from './baseline-gate.js';
 /** Shared by `align_check`/`align_violations`: runs a fresh check and persists any move-transfer
  * (ADR 006) the run performed, so a renamed file's baselined violation doesn't need a separate
  * `align baseline prune` to stop being re-reported on the next call. Also returns the
- * baseline-debt delta for the `align_check` payload (docs/proposals/reconciled-build-order.md #2).
+ * baseline-debt delta for the `align_check` payload (docs/adr/proposals/deep-import-provenance/reconciled-build-order.md #2).
  *
  * NOTE TO WHOEVER ADDS THE NEXT CROSS-CUTTING THING TO CHECK OUTPUT: this function is the one
  * that keeps getting missed. `computeBaselineDebt` above already carries a comment saying this was
