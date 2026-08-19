@@ -60,14 +60,49 @@ export function lockPath(alignDir: string): string {
 }
 
 function readHolder(file: string): LockHolder | undefined {
+  let parsed: unknown;
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf8')) as LockHolder;
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch {
     // Unreadable or malformed: treat as "held by someone unidentifiable" rather than as absent.
     // Absence is the one thing it definitely is not — the file is there. (ADR 028's discipline,
     // applied to a lock: corrupt is not absent.)
     return undefined;
   }
+  return isLockHolder(parsed) ? parsed : undefined;
+}
+
+/**
+ * The shape check that D029's fix was missing (LEDGER D036).
+ *
+ * D029 taught this file that a lock it cannot understand must still be breakable by age — otherwise
+ * a damaged file bricks every writing command in the repository, permanently. But the only damage it
+ * handled was `JSON.parse` THROWING. A file that parses to `{}`, `null`, `123` or `"x"` sailed past
+ * the `holder === undefined` arm as a "valid" holder, and then:
+ *
+ *   - `Date.parse(undefined)` is `NaN`, `!Number.isFinite(age)` returns false, and the lock is
+ *     unbreakable at any age — exactly the outcome D029 exists to prevent, reached by a different door;
+ *   - `null` is worse: `holder.acquiredAt` throws a raw `TypeError` out of the whole lock helper.
+ *
+ * Anything that is not a well-formed holder is therefore "unidentifiable", which routes to the age
+ * fallback D029 already built and tested. The guarded sibling is `readTelemetryState`
+ * (`align-dir.ts`), which shape-validates before trusting parsed JSON; this is that discipline, and
+ * `align-lock.ts` is a file align creates, owns and deletes, so failing open on age is the safe
+ * direction here exactly as it is there.
+ *
+ * `acquiredAt` must be a parseable date, not merely a string: an unparseable one produces the same
+ * `NaN` age, so admitting it would leave the identical hole one field further in.
+ */
+function isLockHolder(value: unknown): value is LockHolder {
+  if (value === null || typeof value !== 'object') return false;
+  const h = value as Partial<LockHolder>;
+  return (
+    typeof h.pid === 'number' &&
+    typeof h.host === 'string' &&
+    typeof h.command === 'string' &&
+    typeof h.acquiredAt === 'string' &&
+    Number.isFinite(Date.parse(h.acquiredAt))
+  );
 }
 
 /** Whether `pid` is alive *on this host*. `kill(pid, 0)` throws ESRCH when it is not, EPERM when it
@@ -145,14 +180,20 @@ function isBreakable(holder: LockHolder | undefined, now: number, staleAfterMs: 
  * and the acquire itself is still atomic (`link`), so the worst case is two processes both breaking
  * and only one acquiring.
  */
-function breakLock(file: string, identity: string | undefined): void {
-  if (identity === undefined) return; // vanished already; the next acquire attempt just succeeds
-  if (identityOf(file) !== identity) return; // someone else's lock now — never remove it
+function breakLock(file: string, identity: string | undefined): boolean {
+  if (identity === undefined) return true; // vanished already; the next acquire attempt just succeeds
+  if (identityOf(file) !== identity) return false; // someone else's lock now — never remove it
   try {
     fs.rmSync(file, { force: true });
   } catch {
-    // Lost the race to another breaker. Harmless: the acquire below is create-if-absent.
+    // Lost the race to another breaker, or the file cannot be removed at all (a directory at the
+    // lock path, an immutable file). Harmless in the first case — the acquire below is
+    // create-if-absent — and in the second the caller must NOT spin; see the call site (LEDGER D036).
+    return false;
   }
+  // `rmSync` with `force` is silent about a path it could not remove for reasons other than absence,
+  // so the honest report is whether the file is actually gone.
+  return identityOf(file) === undefined;
 }
 
 /** Identity of the file at `file`, as inode + creation time. `undefined` when it does not exist. */
@@ -273,20 +314,32 @@ export function withAlignDirLock<T>(alignDir: string, command: string, fn: () =>
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
 
       const holder = readHolder(file);
-      if (isBreakable(holder, Date.now(), staleAfterMs, file)) {
+      // `continue` ONLY on a break that actually happened (LEDGER D036). This used to break-and-
+      // continue unconditionally, with the deadline check on the far side of the `continue` — so a
+      // lock that was judged breakable but could NOT be removed (a directory at the lock path, an
+      // immutable file) spun this loop forever: no timeout, one core at 100%, and an unbounded stderr
+      // flood that fills a CI log. `WAIT_TIMEOUT_MS` never fired, because the only path to it was the
+      // one the `continue` jumped over. Measured at 25s and still running against a 10s timeout.
+      //
+      // A failed break also covers the benign case — another waiter replaced the lock between our
+      // staleness decision and our removal — and falling through to the deadline-and-sleep below is
+      // right for both: retry politely, then give up loudly.
+      if (isBreakable(holder, Date.now(), staleAfterMs, file) && breakLock(file, identityOf(file))) {
         // Named on stderr, never silently: a broken lock means another align died mid-write, which
-        // is exactly the moment a user wants to know the file may be mid-history.
+        // is exactly the moment a user wants to know the file may be mid-history. Announced AFTER the
+        // break rather than before, so the sentence describes something that happened — the earlier
+        // ordering printed "breaking …" once per poll while breaking nothing.
+        //
         // Two different claims, so two different sentences. On this host align has CHECKED that the
         // process is gone; on another host it has only waited, and saying "no longer running" there
         // would assert something it cannot know (LEDGER D029).
         console.error(
           holder !== undefined && holder.host !== os.hostname()
-            ? `align: breaking a .align/ lock left by ${describe(holder)} — it is on another machine, so align cannot ` +
+            ? `align: broke a .align/ lock left by ${describe(holder)} — it is on another machine, so align cannot ` +
                 'check whether that process is alive, and the lock is older than any legitimate hold. If this repository ' +
                 'shares .align/ over a network mount and that machine is genuinely mid-write, stop this command.'
-            : `align: breaking a stale .align/ lock left by ${describe(holder)} — that process is no longer running.`,
+            : `align: broke a stale .align/ lock left by ${describe(holder)} — that process is no longer running.`,
         );
-        breakLock(file, identityOf(file));
         continue;
       }
       if (Date.now() >= deadline) {

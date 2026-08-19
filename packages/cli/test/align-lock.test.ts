@@ -110,7 +110,7 @@ describe('withAlignDirLock', () => {
     const result = withAlignDirLock(d, 'align check', () => 'proceeded', { staleAfterMs: 1_000, waitTimeoutMs: 2_000, pollIntervalMs: 5 });
 
     expect(result).toBe('proceeded');
-    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('breaking a stale .align/ lock'));
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('broke a stale .align/ lock'));
     expect(fs.existsSync(lockPath(d))).toBe(false);
   });
 
@@ -196,7 +196,7 @@ describe('withAlignDirLock', () => {
     // Reproduced before the fix: this timed out and failed, FOREVER, at any age — every later align
     // in the repository bricked until a human deleted the file.
     expect(result).toBe('proceeded');
-    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('breaking a stale .align/ lock'));
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('broke a stale .align/ lock'));
   });
 
   it('a zero-byte lock is NOT broken before the staleness floor', () => {
@@ -267,5 +267,76 @@ describe('withAlignDirLock', () => {
     expect(withAlignDirLock(d, 'first', () => 1)).toBe(1);
     expect(withAlignDirLock(d, 'second', () => 2)).toBe(2);
     expect(withAlignDirLock(d, 'third', () => 3)).toBe(3);
+  });
+});
+
+/**
+ * LEDGER **D036** — the two halves of D029's fix that were still open.
+ *
+ * D029 established the principle for this file: `.align/.lock` is something align creates, owns and
+ * deletes, so "never break it" is the UNSAFE direction — a damaged lock that cannot be cleared bricks
+ * every writing command in the repository. The fix covered the shape it was found with. These are the
+ * shapes it did not.
+ */
+describe('a damaged lock is unidentifiable, not authoritative (D036)', () => {
+  // Every one of these PARSES as JSON, so D029's fix — which keyed on `JSON.parse` throwing — waved
+  // them through as valid holders. `Date.parse(undefined)` is then `NaN`, `!Number.isFinite(age)`
+  // returns false, and the lock is unbreakable at any age; `null` was worse, throwing a raw TypeError
+  // out of the helper. Table-driven because the property is a UNIVERSAL — no damaged shape survives —
+  // and a per-case test invites the next shape to be added without a case.
+  const DAMAGED: readonly { readonly why: string; readonly bytes: string }[] = [
+    { why: 'an empty object', bytes: '{}' },
+    { why: 'JSON null (the shape that threw a raw TypeError)', bytes: 'null' },
+    { why: 'a bare number', bytes: '123' },
+    { why: 'a bare string', bytes: '"whoever"' },
+    { why: 'a holder missing its pid', bytes: JSON.stringify({ host: 'h', command: 'c', acquiredAt: new Date(0).toISOString() }) },
+    { why: 'a holder whose acquiredAt is not a date', bytes: JSON.stringify({ pid: 1, host: 'h', command: 'c', acquiredAt: 'soon' }) },
+  ];
+
+  for (const { why, bytes } of DAMAGED) {
+    it(`breaks a stale lock that is ${why}`, () => {
+      const d = repo();
+      fs.mkdirSync(path.dirname(lockPath(d)), { recursive: true });
+      fs.writeFileSync(lockPath(d), bytes);
+      fs.utimesSync(lockPath(d), new Date(0), new Date(0));
+
+      expect(withAlignDirLock(d, 'align check', () => 'ran', { staleAfterMs: 5, waitTimeoutMs: 500, pollIntervalMs: 5 })).toBe(
+        'ran',
+      );
+    });
+  }
+
+  it('still respects a WELL-FORMED lock that is young — the guarantee the fix must not trade away', () => {
+    // Calibration [S-05]: treating every unfamiliar shape as breakable would satisfy all six cases
+    // above while discarding the exclusion the lock exists for.
+    const d = repo();
+    fs.mkdirSync(path.dirname(lockPath(d)), { recursive: true });
+    fs.writeFileSync(
+      lockPath(d),
+      JSON.stringify({ pid: 999_999, host: 'some-other-host', command: 'align baseline accept', acquiredAt: new Date().toISOString() }),
+    );
+
+    expect(() => withAlignDirLock(d, 'align check', () => 'never', { waitTimeoutMs: 100, pollIntervalMs: 5 })).toThrow(
+      /timed out/,
+    );
+  });
+});
+
+describe('a lock that is breakable but cannot be removed times out instead of spinning (D036)', () => {
+  it('gives up at the deadline rather than looping forever', () => {
+    // The deadline check used to sit on the far side of the `continue` that followed the break
+    // attempt, so a lock judged breakable but not removable — a DIRECTORY at the lock path, or an
+    // immutable file — spun this loop with no timeout, one core at 100%, and one stderr line per
+    // poll. Measured at 25s against a 10s timeout before the fix.
+    const d = repo();
+    fs.mkdirSync(lockPath(d), { recursive: true }); // a directory, which `rmSync` will not remove
+    const started = Date.now();
+
+    expect(() =>
+      withAlignDirLock(d, 'align check', () => 'never', { staleAfterMs: 5, waitTimeoutMs: 300, pollIntervalMs: 5 }),
+    ).toThrow(/timed out/);
+
+    // The point is termination, not the exact duration: without the fix this never returns at all.
+    expect(Date.now() - started).toBeLessThan(5_000);
   });
 });
