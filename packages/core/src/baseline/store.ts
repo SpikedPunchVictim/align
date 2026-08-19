@@ -1,6 +1,7 @@
 import type { RepoRelativePath, RuleId, ViolationId } from '../types/branded.js';
 import type { FileExistenceProbe } from '../types/file-existence.js';
 import type { ScanBlindSpot } from '../types/graph.js';
+import type { ScanHistoryProbe } from '../types/scan-history.js';
 import type { Violation } from '../types/violation.js';
 import { computeContentFingerprint } from './fingerprint.js';
 import { isUnderAbsentDirectory, isUnderBlindSpot } from './scan-blind-spots.js';
@@ -86,7 +87,13 @@ export interface BaselineStore {
    * it. Treating a file under a blind spot as "still known" routes it to `unmatchedOrphans` instead
    * (the exact arm `prune`'s retention already protects), never to a content-fingerprint search.
    * REQUIRED — see `prune`'s note above for why the optional version was itself the
-   * defect-propagation hazard. */
+   * defect-propagation hazard.
+   *
+   * The store's injected `ScanHistoryProbe` (ADR 029 §6) adds one further refusal on top of all of
+   * the above: a candidate the PREVIOUS scan already reported as violating at that path is never a
+   * move target, because it existed before the orphan's file went missing (LEDGER D015). That gate is
+   * a property of the store rather than of this call — it is the same probe for every domain and
+   * every caller — which is why it is a constructor argument and not a fifth parameter here. */
   reconcileMoves(
     currentViolations: readonly Violation[],
     knownFiles: ReadonlySet<RepoRelativePath>,
@@ -146,6 +153,17 @@ interface MoveResult {
  * means the old file is gone (a real rename), not merely "some other file has matching text". This
  * does not regress the rename case: a rename removes the old path from the scan by construction, so
  * the entry stays eligible and still transfers.
+ *
+ * ADR 029 §6 (2026-08-18, LEDGER D015): FRAGILE #7's fix asks about the ORPHAN's file and is blind to
+ * the CANDIDATE's past, which leaves a file-level sibling of D010 that needs no partial checkout —
+ * baseline `src/api/old.ts`, add a content-identical never-reviewed violation at `src/api/new.ts`,
+ * delete `old.ts`, and a plain `align check` transfers the human's consent onto the unreviewed
+ * violation and exits 0 green. No single snapshot separates that from a rename, because content
+ * fingerprint IS identity here. `alreadyObservedViolating` supplies the second snapshot: a candidate
+ * the PREVIOUS scan already reported as violating, at that path, existed before the orphan's file
+ * disappeared and therefore cannot be where the violation moved to. It is a refusal only — a probe
+ * that recalls nothing (`noScanHistory()`, an absent or unreadable record, a different align version,
+ * a redefined rule) leaves every decision here exactly as it was before this paragraph existed.
  */
 export class InMemoryBaselineStore implements BaselineStore {
   private readonly entries = new Map<ViolationId, BaselineEntry>();
@@ -165,6 +183,19 @@ export class InMemoryBaselineStore implements BaselineStore {
      * `fs`-backed probe from `cli/src/file-existence.ts`, and tests inject a fake.
      */
     private readonly fileExists: FileExistenceProbe,
+    /**
+     * ADR 029 §6, the `applyMoves` consumer — the temporal reference that closes LEDGER D015.
+     *
+     * REQUIRED, no default, for the identical reason `fileExists` above is: a default of
+     * `noScanHistory()` would compile at every site and silently reopen D015 — a forged transfer of a
+     * human's `acceptedAt`/`acceptedBy` onto a violation nobody reviewed, from a plain `align check`,
+     * at exit 0 — while every existing test kept passing. A site with genuinely no history says so by
+     * calling `noScanHistory()`, which is greppable; a site that forgot says nothing at all.
+     *
+     * Injected exactly like `fileExists`: the CLI reads `.align/last-scan.json` and builds the probe
+     * (`cli/src/scan-history.ts`), core does the reasoning and imports `node:fs` nowhere.
+     */
+    private readonly scanHistory: ScanHistoryProbe,
   ) {
     for (const entry of initial) this.entries.set(entry.fingerprint, entry);
   }
@@ -294,7 +325,67 @@ export class InMemoryBaselineStore implements BaselineStore {
 
       const content = entry.contentFingerprint;
       const candidates = content === undefined ? undefined : candidatesByContent.get(content);
-      const matchIdx = candidates?.findIndex((v) => v.file !== entry.file) ?? -1;
+      // ADR 029 §6 / LEDGER D015, the refusal this store gained on 2026-08-18. A candidate that was
+      // ALREADY REPORTED as this violation, at this path, by the previous scan cannot be where this
+      // violation moved to: it was there before the orphan's file disappeared. What remains is the
+      // forgery — the old file was deleted (or went unobserved) while a content-identical,
+      // never-reviewed violation already existed elsewhere — and transferring onto it moves a real
+      // human's `acceptedAt`/`acceptedBy` onto something nobody looked at, turning a red repository
+      // green at exit 0.
+      //
+      // Filtered per CANDIDATE rather than refused per orphan, and the difference is load-bearing:
+      // two files can carry the same content fingerprint, and rejecting the whole orphan because the
+      // first bucket entry was already observed would refuse a transfer onto the second, which may
+      // be the genuine move target. `findIndex` takes the first candidate that is both in a
+      // different file and not already-observed.
+      //
+      // `known: false` — no record, another align version, a redefined rule — falls through to the
+      // pre-ADR-029 behaviour by construction (ADR 029 §5: history is admissible as a refusal, never
+      // as a permission).
+      //
+      // **State the invariant precisely, because the obvious phrasing is false.** This predicate only
+      // ever REMOVES candidates from a bucket, so no orphan is offered a target it would not have been
+      // offered before, and the verdict can never come out greener. But matching is greedy WITH
+      // CONSUMPTION (the `splice` below), so removing one candidate shifts every later orphan onto a
+      // different one. Measured, 2 orphans and 3 fingerprint-identical candidates c0/c1/c2, with the
+      // record naming c0 as already-observed:
+      //
+      //     before:  old1 -> c0,  old2 -> c1     (c2 stays red)
+      //     after:   old1 -> c1,  old2 -> c2     (c0 stays red)
+      //
+      // Two transfers either way, and the after-state is the SOUNDER one — consent lands on candidates
+      // that appeared since the last scan rather than on one that predates it. But "a transfer that
+      // would not have happened before" did happen, onto c2. So the honest guarantee is: the transfer
+      // set never grows and the verdict never greens; WHICH candidate an orphan lands on can change,
+      // and a hand-edited record can steer that. See `scan-history.ts`'s `createScanHistoryProbe` for
+      // the same correction to the attacker model.
+      //
+      // **Stopping one is not free under `prune`, and that is stated here rather than derived.** An
+      // orphan with no match is left alone by `reconcileMoves` and DELETED by `prune`, so on the prune
+      // path this refusal turns a transfer into a deletion. Correct — the orphan's file is genuinely
+      // absent, all three ADR 028 mechanisms already declined above, and removing entries for
+      // violations that are gone is what `prune` is for, behind consent and ADR 023's guards — but it
+      // is a destructive consequence of a safety check, so it is pinned by its own test rather than
+      // left for a reader to reconstruct from two doc comments.
+      // **BOTH SIDES, and the second one is what makes the first mean anything** (LEDGER D024, found
+      // by adversarial review the day the refusal shipped). The inference being drawn is "the
+      // candidate predates the orphan's disappearance", and that is a claim about two things being
+      // true AT ONCE — so it needs the previous scan to have seen the orphan violating at its own
+      // recorded path as well. Asking only about the candidate reads "observed at some point" as
+      // "observed before", and those come apart the moment the record advances past the baseline: a
+      // run that transfers writes the moved violation at its NEW path, so if that baseline write is
+      // then lost or reverted, the next run finds its own predecessor's record and refuses a rename
+      // it had already made — permanently, since every later run re-records the same thing.
+      // `check.ts` tolerates a failed `persistMovedBaseline` on the stated ground that "the next
+      // `align check` re-derives and re-persists the same transfer unconditionally"; this is what
+      // keeps that true.
+      const orphanWasObservedViolating = content !== undefined && this.observedViolatingAt(entry.file, entry.ruleId, content);
+      const matchIdx =
+        candidates?.findIndex(
+          (v) =>
+            v.file !== entry.file &&
+            !(orphanWasObservedViolating && this.observedViolatingAt(v.file, v.ruleId, computeContentFingerprint(v.ruleId, v.snippet))),
+        ) ?? -1;
       const matched = matchIdx === -1 || candidates === undefined ? undefined : candidates[matchIdx];
 
       if (matched === undefined) {
@@ -327,6 +418,27 @@ export class InMemoryBaselineStore implements BaselineStore {
     }
 
     return { moved, unmatchedOrphans };
+  }
+
+  /**
+   * "Did the previous scan already report exactly this violation, at exactly this path?" — the one
+   * question `applyMoves` asks the history (ADR 029 §3: consumers ask narrow named questions, nobody
+   * reads the record). Asked TWICE per orphan: once about the orphan's own recorded path and once
+   * about the candidate, because only the conjunction establishes that the two coexisted.
+   *
+   * TRUE is the only actionable answer, and it is a positive recollection rather than an inference
+   * from absence: align *reported* this violation here, so the candidate predates whatever happened
+   * to the orphan's file. `known: false` and `value: false` are both "no reason to refuse" — the
+   * second says only that the record does not mention it, which for a file the previous scan never
+   * looked at (a partial checkout, a blind spot, a path outside the scan scope) is not evidence of
+   * anything. Treating that absence as "so it must be new, so the transfer is safe" is precisely the
+   * permission-shaped inference ADR 029 §5 forbids, and it is why ADR 006's whole-directory exception
+   * — `isUnderAbsentDirectory`, in the four-disjunct guard ABOVE this point in `applyMoves` — survives
+   * this change rather than being retired by it.
+   */
+  private observedViolatingAt(file: RepoRelativePath, ruleId: RuleId, contentFingerprint: ViolationId): boolean {
+    const observed = this.scanHistory.wasViolationObservedAt(file, ruleId, contentFingerprint);
+    return observed.known && observed.value;
   }
 
   show(filter?: { readonly ruleId?: RuleId }): readonly BaselineEntry[] {

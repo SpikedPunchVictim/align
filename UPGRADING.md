@@ -240,6 +240,57 @@ and re-persisted by the next run, so `check` reports the collision on stderr and
 results and its usual exit code. Commands whose purpose is the write — `baseline accept`, `baseline
 prune`, `init` — do fail, because for them nothing was recorded.
 
+### `align check` now leaves a `.align/last-scan.json` behind
+
+align has always been amnesiac: every run compares your code against the baseline and against
+nothing at all on the question of *what the previous scan could see*. That gap is what lets an
+absence — a file the scan did not observe — get read as a fact ("deleted", "fixed", "this component
+is empty"). From 0.2.0, `align check` records what it observed in `.align/last-scan.json`.
+
+**What you will notice.** One new file in `.align/`, written by `align check` and by the MCP server's
+`align_check`. Nothing else writes it, and it is rewritten only when the observation actually changes,
+so an unchanged repository does not churn it. One thing already reads it — see the next section.
+
+**It is gitignored, and for a correctness reason rather than to avoid diff noise.** A record written
+on one machine is not evidence about another machine's checkout: sparse checkouts, partial clones,
+an uninstalled workspace and volume case-sensitivity all change what a scan legitimately observes.
+Committing it would let one machine's observation authorize another machine's deletion.
+
+**If you ran `align init` before 0.2.0, your `.gitignore` does not have the entry yet** and the file
+will show up as untracked. Either re-run `align init` (idempotent — it appends only what is missing)
+or add the line yourself:
+
+```
+.align/last-scan.json
+```
+
+If the file is ever corrupted — an interrupted write, a bad merge — align ignores it, says so once on
+stderr, and replaces it on the same run. It is a cache align owns; it can never block a command.
+
+### A move-transfer is now refused when the target was already violating
+
+**This is the reason the record exists.** When a baselined file disappears, align looks for a
+current, not-yet-baselined violation with the same content elsewhere and transfers your acceptance
+onto it — that is how a rename avoids turning CI red for one cycle. But align matches by content, so
+it cannot tell a renamed file from one that was *deleted while an identical violation already existed
+somewhere else*. In that second case the transfer moves your recorded `acceptedBy` onto a violation
+nobody ever reviewed, and the repository goes from red to **green at exit 0**.
+
+From 0.2.0, `align check` asks the previous scan first: if that violation was already reported at that
+path last run, it existed before the file disappeared, so it cannot be where the violation moved to
+and the transfer is refused. Your accepted entry stays where you put it, and the other violation stays
+red and reviewable.
+
+**What you might notice.** A rename that used to transfer silently can now come back red, in one
+specific situation: the violation at the new path was already there and already red on the previous
+run. That is the situation align cannot tell from a forgery, and red is the recoverable direction —
+one `align baseline accept` resolves it, whereas a forged transfer is silent and destroys the record
+of what you consented to.
+
+**It needs two scans, and it is machine-local.** A first `align check` on a fresh checkout has no
+previous scan to consult, so it behaves exactly as 0.1.x did. Nothing about this refusal can make a
+run *greener* than before — the history is only ever a reason to decline.
+
 ### `align baseline prune` now asks before it deletes
 
 **Breaking for non-interactive use.** Every entry `prune` removes is an accepted consent decision — a

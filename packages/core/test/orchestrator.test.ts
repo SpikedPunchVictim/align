@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { GateOrchestrator } from '../src/orchestrator.js';
 import { InMemoryBaselineStore } from '../src/baseline/store.js';
+import { noScanHistory } from '../src/baseline/scan-history.js';
 import { StaticPluginRegistry, type LanguagePlugin } from '../src/plugin/registry.js';
 import { defineProject } from '../src/dsl/index.js';
 import type { HostPredicate } from '../src/rules/host-rules.js';
 import { blindSpot, edge, graph, neverOnDisk, node } from './helpers.js';
 import type { ScanInput } from '../src/scanner.js';
-import { toRepoRelativePath } from '../src/types/branded.js';
+import { toComponentName, toRepoRelativePath } from '../src/types/branded.js';
 import type { ManifestInventory, ManifestScanner } from '../src/types/manifest.js';
 
 function fakePlugin(build: (input: ScanInput) => ReturnType<typeof graph>): LanguagePlugin {
@@ -30,7 +31,7 @@ describe('GateOrchestrator', () => {
     const registry = new StaticPluginRegistry([
       fakePlugin(() => graph([node('application/api/a.ts', 'api'), node('application/ui/b.ts', 'ui')], [])),
     ]);
-    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
+    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
     const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     expect(run.verdict).toBe('green');
     expect(run.gates.map((g) => g.gate)).toEqual(['parse', 'architecture', 'security']);
@@ -49,7 +50,7 @@ describe('GateOrchestrator', () => {
         ),
       ),
     ]);
-    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
+    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
     const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     expect(run.verdict).toBe('red');
     const archGate = run.gates.find((g) => g.gate === 'architecture');
@@ -66,7 +67,7 @@ describe('GateOrchestrator', () => {
       [edge('application/api/a.ts', 'application/ui/b.ts', { specifier: '../ui/b', line: 3 })],
     );
     const registry = new StaticPluginRegistry([fakePlugin(() => scanGraph)]);
-    const baseline = new InMemoryBaselineStore([], neverOnDisk);
+    const baseline = new InMemoryBaselineStore([], neverOnDisk, noScanHistory());
     // seed baseline by evaluating once, out of band, then accepting
     const seedOrchestrator = new GateOrchestrator(registry, ruleset, baseline);
     const seedRun = await seedOrchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -87,7 +88,7 @@ describe('GateOrchestrator', () => {
         throw new Error('scanner crashed');
       }),
     ]);
-    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
+    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
     const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     expect(run.verdict).toBe('error');
     const parseGate = run.gates.find((g) => g.gate === 'parse');
@@ -112,7 +113,7 @@ describe('GateOrchestrator', () => {
     const registry = new StaticPluginRegistry([
       fakePlugin(() => graph([node('application/api/a.ts', 'api'), node('application/ui/b.ts', 'ui')], [])),
     ]);
-    const orchestrator = new GateOrchestrator(registry, staleRuleset, new InMemoryBaselineStore([], neverOnDisk));
+    const orchestrator = new GateOrchestrator(registry, staleRuleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
     const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     expect(run.verdict).toBe('error');
     const archGate = run.gates.find((g) => g.gate === 'architecture');
@@ -136,7 +137,7 @@ describe('GateOrchestrator', () => {
     const registry = new StaticPluginRegistry([
       fakePlugin(() => graph([node('application/api/a.ts', 'api')], [])),
     ]);
-    const orchestrator = new GateOrchestrator(registry, hostRuleset, new InMemoryBaselineStore([], neverOnDisk));
+    const orchestrator = new GateOrchestrator(registry, hostRuleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
     const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     expect(run.verdict).toBe('error');
     const archGate = run.gates.find((g) => g.gate === 'architecture');
@@ -159,7 +160,7 @@ describe('GateOrchestrator', () => {
       // selector-based validation cannot see.
       fakePlugin(() => graph([node('application/api/a.ts', 'api')], [])),
     ]);
-    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
+    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
     const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     expect(run.verdict).toBe('error');
     const archGate = run.gates.find((g) => g.gate === 'architecture');
@@ -177,7 +178,7 @@ describe('GateOrchestrator', () => {
     const registry = new StaticPluginRegistry([
       fakePlugin(() => graph([node('application/api/a.ts', 'api')], [])),
     ]);
-    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
+    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
     const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     expect(run.verdict).toBe('green');
   });
@@ -189,7 +190,7 @@ describe('GateOrchestrator', () => {
         rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
       });
       const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       expect(run.verdict).toBe('error');
       expect(run.ungroundedComponents).toEqual([]);
@@ -201,7 +202,7 @@ describe('GateOrchestrator', () => {
         rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
       });
       const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       expect(run.verdict).toBe('green');
       expect(run.ungroundedComponents).toEqual([{ name: 'ui', selector: 'application/ui/**', policy: 'allow' }]);
@@ -213,7 +214,7 @@ describe('GateOrchestrator', () => {
         rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
       });
       const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       expect(run.verdict).toBe('green');
       expect(run.ungroundedComponents).toEqual([{ name: 'ui', selector: 'application/ui/**', policy: 'until-populated' }]);
@@ -232,7 +233,7 @@ describe('GateOrchestrator', () => {
           ),
         ),
       ]);
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       // Populated -> the empty-check never fires, so the forbidden edge is evaluated normally and
       // fires red — the exact auto-arm behavior R2 requires, with zero extra state to track.
@@ -248,7 +249,7 @@ describe('GateOrchestrator', () => {
       const registry = new StaticPluginRegistry([
         fakePlugin(() => graph([node('application/api/a.ts', 'api'), node('application/ui/b.ts', 'ui')], [])),
       ]);
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       expect(run.verdict).toBe('green');
       expect(run.ungroundedComponents).toEqual([]);
@@ -271,7 +272,7 @@ describe('GateOrchestrator', () => {
           : graph([node('application/api/a.ts', 'api'), node('application/ui/b.ts', 'ui')], []),
       ),
     ]);
-    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
+    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
     const redRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     expect(redRun.verdict).toBe('red');
 
@@ -294,7 +295,7 @@ describe('GateOrchestrator', () => {
         ),
       ),
     ]);
-    const baseline = new InMemoryBaselineStore([], neverOnDisk);
+    const baseline = new InMemoryBaselineStore([], neverOnDisk, noScanHistory());
     const orchestrator = new GateOrchestrator(registry, ruleset, baseline);
 
     const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -329,7 +330,7 @@ describe('GateOrchestrator', () => {
       const registry = new StaticPluginRegistry([
         fakePlugin(() => graph([node('application/api/routes.ts', 'api')], [])),
       ]);
-      const baseline = new InMemoryBaselineStore([], neverOnDisk);
+      const baseline = new InMemoryBaselineStore([], neverOnDisk, noScanHistory());
       const orchestrator = new GateOrchestrator(registry, ruleset, baseline, new Map([['route-thinness', predicate]]));
 
       const redRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -373,7 +374,7 @@ describe('GateOrchestrator', () => {
       const orchestrator = new GateOrchestrator(
         registry,
         ruleset,
-        new InMemoryBaselineStore([], neverOnDisk),
+        new InMemoryBaselineStore([], neverOnDisk, noScanHistory()),
         new Map([['some-other-predicate', (): [] => []]]),
       );
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -395,7 +396,7 @@ describe('GateOrchestrator', () => {
       const orchestrator = new GateOrchestrator(
         registry,
         ruleset,
-        new InMemoryBaselineStore([], neverOnDisk),
+        new InMemoryBaselineStore([], neverOnDisk, noScanHistory()),
         new Map([['route-thinness', buggyPredicate]]),
       );
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -420,7 +421,7 @@ describe('GateOrchestrator', () => {
         ),
       ),
     ]);
-    const baseline = new InMemoryBaselineStore([], neverOnDisk);
+    const baseline = new InMemoryBaselineStore([], neverOnDisk, noScanHistory());
     const orchestrator = new GateOrchestrator(registry, ruleset, baseline);
     const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     baseline.accept(seedRun.gates.find((g) => g.gate === 'architecture')?.violations ?? [], 'init-seed');
@@ -461,7 +462,7 @@ describe('GateOrchestrator', () => {
         ),
       ),
     ]);
-    const baseline = new InMemoryBaselineStore([], neverOnDisk);
+    const baseline = new InMemoryBaselineStore([], neverOnDisk, noScanHistory());
     const orchestrator = new GateOrchestrator(registry, ruleset, baseline);
     const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
     baseline.accept(seedRun.gates.find((g) => g.gate === 'architecture')?.violations ?? [], 'init-seed');
@@ -501,7 +502,7 @@ describe('GateOrchestrator', () => {
           }),
         ),
       ]);
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       expect(run.verdict).toBe('green'); // a skip is advisory, never a failure
       const advisory = run.advisories.find((a) => a.kind === 'nested-checkout-skipped');
@@ -514,7 +515,7 @@ describe('GateOrchestrator', () => {
         rules: (c) => [c.arch.noCycles()],
       });
       const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       expect(run.advisories.find((a) => a.kind === 'nested-checkout-skipped')).toBeUndefined();
     });
@@ -528,7 +529,7 @@ describe('GateOrchestrator', () => {
       });
       let loc = 900;
       const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/big.ts', 'api', loc)], []))]);
-      const baseline = new InMemoryBaselineStore([], neverOnDisk);
+      const baseline = new InMemoryBaselineStore([], neverOnDisk, noScanHistory());
       const orchestrator = new GateOrchestrator(registry, ruleset, baseline);
 
       const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -561,7 +562,7 @@ describe('GateOrchestrator', () => {
       });
       let loc = 900;
       const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/big.ts', 'api', loc)], []))]);
-      const baseline = new InMemoryBaselineStore([], neverOnDisk);
+      const baseline = new InMemoryBaselineStore([], neverOnDisk, noScanHistory());
       const orchestrator = new GateOrchestrator(registry, ruleset, baseline);
 
       const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -584,7 +585,7 @@ describe('GateOrchestrator', () => {
       // for this file — then a legacy entry is constructed by hand (no `acceptedValue` field at
       // all, not even `undefined`), the exact shape a `.align/baseline.json` written before this
       // field existed would deserialize to (schema.test.ts covers the parse side).
-      const probe = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
+      const probe = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
       const probeRun = await probe.check({ rootDir: '/repo', excludes: [] });
       const violation = probeRun.gates.find((g) => g.gate === 'architecture')?.violations[0];
       expect(violation).toBeDefined();
@@ -592,7 +593,7 @@ describe('GateOrchestrator', () => {
 
       const legacyBaseline = new InMemoryBaselineStore([
         { fingerprint: violation.id, ruleId: violation.ruleId, file: violation.file, acceptedAt: 0, acceptedBy: 'init-seed' },
-      ], neverOnDisk);
+      ], neverOnDisk, noScanHistory());
       const orchestrator = new GateOrchestrator(registry, ruleset, legacyBaseline);
 
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -605,7 +606,7 @@ describe('GateOrchestrator', () => {
     it('is green with 0 manifests when no manifest scanner is injected (default, back-compat for every pre-existing caller)', async () => {
       const ruleset = defineProject({ components: { api: 'application/api/**' } });
       const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk));
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       expect(run.gates.map((g) => g.gate)).toEqual(['parse', 'architecture', 'security']);
       const securityGate = run.gates.find((g) => g.gate === 'security');
@@ -629,7 +630,7 @@ describe('GateOrchestrator', () => {
         ],
         lockfilePresent: true, blindSpots: [],
       });
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk), new Map(), manifestScanner);
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()), new Map(), manifestScanner);
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       expect(run.verdict).toBe('red');
       const securityGate = run.gates.find((g) => g.gate === 'security');
@@ -650,7 +651,7 @@ describe('GateOrchestrator', () => {
       const manifestScanner: ManifestScanner = {
         scan: () => ({ manifests: [{ file: toRepoRelativePath('package.json'), raw: '{}', dependencies: deps }], lockfilePresent: true, blindSpots: [] }),
       };
-      const baseline = new InMemoryBaselineStore([], neverOnDisk);
+      const baseline = new InMemoryBaselineStore([], neverOnDisk, noScanHistory());
       const orchestrator = new GateOrchestrator(registry, ruleset, baseline, new Map(), manifestScanner);
 
       const seedRun = await orchestrator.check({ rootDir: '/repo', excludes: [] });
@@ -688,7 +689,7 @@ describe('GateOrchestrator', () => {
         ],
         lockfilePresent: true, blindSpots: [],
       });
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk), new Map(), manifestScanner);
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()), new Map(), manifestScanner);
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       expect(run.verdict).toBe('error'); // parse gate still errors — verdict reflects the worst gate
       const securityGate = run.gates.find((g) => g.gate === 'security');
@@ -707,7 +708,7 @@ describe('GateOrchestrator', () => {
           throw new Error('manifest scan blew up');
         },
       };
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk), new Map(), brokenScanner);
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()), new Map(), brokenScanner);
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       const securityGate = run.gates.find((g) => g.gate === 'security');
       expect(securityGate?.status).toBe('error');
@@ -732,7 +733,7 @@ describe('GateOrchestrator', () => {
         manifests: [{ file: toRepoRelativePath('package.json'), raw: '{}', dependencies: [{ name: 'xlsx', specifier: 'https://cdn.sheetjs.com/xlsx.tgz', field: 'dependencies' }] }],
         lockfilePresent: true, blindSpots: [],
       });
-      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk), new Map(), manifestScanner);
+      const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()), new Map(), manifestScanner);
       const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
       const archGate = run.gates.find((g) => g.gate === 'architecture');
       const securityGate = run.gates.find((g) => g.gate === 'security');
@@ -749,7 +750,7 @@ describe('GateOrchestrator', () => {
           rules: (c) => [c.security.manifest.sourceHygiene()],
         });
         const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
-        const baseline = new InMemoryBaselineStore([], neverOnDisk);
+        const baseline = new InMemoryBaselineStore([], neverOnDisk, noScanHistory());
         const manifestScanner1 = fakeManifestScanner({
           manifests: [
             {
@@ -795,7 +796,7 @@ describe('GateOrchestrator', () => {
           rules: (c) => [c.security.manifest.sourceHygiene()],
         });
         const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
-        const baseline = new InMemoryBaselineStore([], neverOnDisk);
+        const baseline = new InMemoryBaselineStore([], neverOnDisk, noScanHistory());
         const manifestScanner1 = fakeManifestScanner({
           manifests: [
             {
@@ -842,10 +843,28 @@ describe('GateOrchestrator', () => {
         // missed transfer is loud and one `baseline accept` from resolved — mechanism 3 now gates the
         // transfer arm too, and the rename pays one red cycle.
         //
-        // THIS COST IS MEANT TO BE TEMPORARY. `docs/adr/029-2026-08-18-scan-observation-history.md` §6 closes
-        // D010 *without* it: with the previous scan on hand, "the match target was already observed
-        // last run" separates the forgery from the rename exactly, and this test should go back to
-        // asserting a transfer when that lands.
+        // **THAT INSTRUCTION IS WITHDRAWN (2026-08-18, LEDGER D023).** This comment used to say the
+        // cost was temporary and that ADR 029 §6 would let the assertion go back to a transfer. ADR
+        // 029 landed; the assertion stays `red`, and the reason is worth reading before anyone tries
+        // again.
+        //
+        // §6 is right that "the match target was already observed last run" separates the forgery
+        // from the rename — but that is a REFUSAL, and it is now wired (`applyMoves`'
+        // `alreadyObservedViolating`, `core/test/scan-history-move-refusal.test.ts`). Retiring the
+        // exception is the opposite operation: allowing a transfer that is refused today. The record
+        // offers exactly one fact for it, `wasViolationObservedAt(candidate) === false`, and that is
+        // an ABSENCE — it cannot distinguish "the candidate did not exist last scan" (rename) from
+        // "last scan never looked there" (partial checkout, blind spot), which is the distinction the
+        // whole exception exists to make. `wasFileObserved` cannot rescue it either: for a genuine
+        // rename the candidate's file is new, so a positive observation of it is exactly what a
+        // rename does NOT produce. ADR 029 §5 names this directly — history is admissible as a
+        // refusal, never as a permission — so §6's licence to retire the exception contradicts its
+        // own doctrine.
+        //
+        // And the case that would regress is the one with no record to consult at all. The record is
+        // gitignored and machine-local (§1), so a fresh CI checkout has none — which is precisely
+        // where D010 was reproduced. Retiring the exception would reopen a severity zero in its own
+        // environment to buy back one red cycle on whole-directory renames.
         expect(run.verdict).toBe('red');
         const gate = run.gates.find((g) => g.gate === 'security');
         // The violation at the NEW path is reported as new rather than silently inheriting consent.
@@ -907,7 +926,7 @@ describe('one walk per domain per check (ADR 028 Stage 3)', () => {
     const orchestrator = new GateOrchestrator(
       registry,
       ruleset,
-      new InMemoryBaselineStore([], neverOnDisk),
+      new InMemoryBaselineStore([], neverOnDisk, noScanHistory()),
       new Map(),
       manifestScanner,
     );
@@ -927,5 +946,105 @@ describe('one walk per domain per check (ADR 028 Stage 3)', () => {
     // consumers too, and its whole hazard was being an easy way to get a file set that no rule
     // evaluation had validated.
     expect((GateOrchestrator.prototype as unknown as Record<string, unknown>)['knownFiles']).toBeUndefined();
+  });
+});
+
+/**
+ * ADR 029 §2's two additions to `CheckRun`. Both exist for the same reason: the scan-observation
+ * record needs facts that lived only in `orchestrator.check`'s locals, and recovering either one
+ * outside this class would mean a second scan — the exact mistake `knownFiles()` was deleted for.
+ */
+describe('CheckRun carries what the observation record needs (ADR 029)', () => {
+  it('observedViolations includes a BASELINED violation that gates[].violations excludes', async () => {
+    // THE DISCRIMINATOR for the "baselined or not" half of §2, and the reason this is not just
+    // `gates.flatMap(g => g.violations)`. Being baselined is a property of the baseline at write
+    // time, not of the scan; a record built from the gate's list would silently start answering a
+    // different question the moment someone ran `align baseline accept`.
+    const ruleset = defineProject({
+      components: { api: 'application/api/**', ui: 'application/ui/**' },
+      rules: (c) => [c.arch.layer(c.api).cannotDependOn(c.ui)],
+    });
+    const scanGraph = graph(
+      [node('application/api/a.ts', 'api'), node('application/ui/b.ts', 'ui')],
+      [edge('application/api/a.ts', 'application/ui/b.ts', { specifier: '../ui/b', line: 3 })],
+    );
+    const registry = new StaticPluginRegistry([fakePlugin(() => scanGraph)]);
+    const baseline = new InMemoryBaselineStore([], neverOnDisk, noScanHistory());
+    const orchestrator = new GateOrchestrator(registry, ruleset, baseline);
+    baseline.accept((await orchestrator.check({ rootDir: '/repo', excludes: [] })).gates.find((g) => g.gate === 'architecture')?.violations ?? [], 'init-seed');
+
+    const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+
+    expect(run.verdict).toBe('green');
+    expect(run.gates.flatMap((g) => g.violations)).toHaveLength(0);
+    expect(run.observedViolations).toHaveLength(1);
+    expect(run.observedViolations[0]?.file).toBe('application/api/a.ts');
+    // The identity that survives a rename, which is the identity a move-transfer question needs.
+    expect(run.observedViolations[0]?.contentFingerprint).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it('observedViolations spans BOTH scan domains, not just the architecture gate', async () => {
+    // The security gate runs its own evaluation and its own `reconcileMoves` over a disjoint domain
+    // (ADR 013). Its violations reach the record only because `runSecurityGate` carries them out
+    // explicitly — a projection built from the graph alone would leave the manifest domain with no
+    // history at all, which is the domain whose fingerprint collisions are the NORM (ADR 028 F3).
+    const ruleset = defineProject({
+      components: { api: 'application/api/**' },
+      rules: (c) => [c.security.manifest.sourceHygiene()],
+    });
+    const registry = new StaticPluginRegistry([fakePlugin(() => graph([node('application/api/a.ts', 'api')], []))]);
+    const manifestScanner = fakeManifestScanner({
+      manifests: [
+        {
+          file: toRepoRelativePath('package.json'),
+          raw: '{}',
+          dependencies: [{ name: 'xlsx', specifier: 'https://cdn.sheetjs.com/xlsx-0.20.2/xlsx-0.20.2.tgz', field: 'dependencies' }],
+        },
+      ],
+      lockfilePresent: true,
+      blindSpots: [],
+    });
+    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()), new Map(), manifestScanner);
+
+    const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+
+    expect(run.observedViolations.map((v) => v.file)).toEqual(['package.json']);
+  });
+
+  it('componentMatchCounts counts every DECLARED component, zeros included', async () => {
+    // The zero is the interesting half: "matched 12 last scan, 0 now" is the regression ADR 029 §6
+    // reports, and a map built from `graph.nodes` alone cannot express its right-hand side.
+    // `empty: 'allow'` so the zero-match component is a legal state rather than a guard-step error.
+    const ruleset = defineProject({
+      components: { api: 'application/api/**', ui: { pattern: 'application/ui/**', empty: 'allow' } },
+    });
+    const registry = new StaticPluginRegistry([
+      fakePlugin(() => graph([node('application/api/a.ts', 'api'), node('application/api/b.ts', 'api')], [])),
+    ]);
+    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
+
+    const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+
+    expect(run.componentMatchCounts.get(toComponentName('api'))).toBe(2);
+    expect(run.componentMatchCounts.get(toComponentName('ui'))).toBe(0);
+  });
+
+  it('an errored run reports BOTH as empty — "unknown", never "none"', async () => {
+    // Same discipline as `blindSpots`/`observedFiles`, and enforced the same way: both fields are in
+    // `untrustworthyScanScope()`'s `Pick`, so the compiler lists every errored early return and each
+    // one has to answer. A record written from an errored run would claim a scan that never happened.
+    const ruleset = defineProject({ components: { api: 'application/api/**' } });
+    const registry = new StaticPluginRegistry([
+      fakePlugin(() => {
+        throw new Error('scanner crashed');
+      }),
+    ]);
+    const orchestrator = new GateOrchestrator(registry, ruleset, new InMemoryBaselineStore([], neverOnDisk, noScanHistory()));
+
+    const run = await orchestrator.check({ rootDir: '/repo', excludes: [] });
+
+    expect(run.verdict).toBe('error');
+    expect(run.observedViolations).toEqual([]);
+    expect(run.componentMatchCounts.size).toBe(0);
   });
 });

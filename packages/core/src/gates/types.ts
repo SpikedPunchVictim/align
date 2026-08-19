@@ -1,5 +1,6 @@
-import type { RepoRelativePath, RuleId } from '../types/branded.js';
+import type { ComponentName, RepoRelativePath, RuleId } from '../types/branded.js';
 import type { ScanBlindSpot } from '../types/graph.js';
+import type { ObservedViolation } from '../types/scan-history.js';
 import type { UngroundedComponent } from '../components/registry.js';
 import { CATEGORIES, type Violation } from '../types/violation.js';
 
@@ -82,4 +83,33 @@ export interface CheckRun {
     readonly source: ReadonlySet<RepoRelativePath>;
     readonly manifest: ReadonlySet<RepoRelativePath>;
   };
+  /** Every violation this run reported, **baselined or not** — the one fact on `CheckRun` that
+   * exists nowhere else on it (ADR 029 §2).
+   *
+   * `GateResult.violations` is the NOT-baselined subset, by design: it is what a human or CI is
+   * being asked to act on. The scan-observation record needs the whole set, and the "or not" is
+   * load-bearing rather than completist. Being baselined is a property of the baseline at the moment
+   * of writing, not of the scan — so a record holding only unbaselined violations would silently
+   * start answering a DIFFERENT question the moment someone ran `align baseline accept`, and the
+   * question it answers ("was this candidate already violating, at this path, last scan?") is the
+   * one guarding a destructive inference.
+   *
+   * Carried as the three fields that question needs and no more (`file`, `ruleId`,
+   * `contentFingerprint`); a full `Violation[]` would put snippets — source text — into a file on
+   * disk, which is a different decision with a different privacy argument.
+   *
+   * Same discipline as the three fields above: `[]` when a gate didn't fully evaluate. An errored
+   * run's violation set is not "none", it is "unknown", and the empty array is the reading every
+   * consumer errs safely on. */
+  readonly observedViolations: readonly ObservedViolation[];
+  /** How many files each declared component's selector matched this scan (ADR 029 §2), including
+   * the components that matched ZERO.
+   *
+   * A count rather than a boolean, because "matched 12 files last scan and 0 now" and "matched 0
+   * last scan and 0 now" are different situations and only the first is a regression — and the
+   * zero-match entries are exactly the ones that carry that signal, so a map built only from
+   * `graph.nodes` would omit the interesting half.
+   *
+   * Empty when the architecture gate didn't fully evaluate — see above. */
+  readonly componentMatchCounts: ReadonlyMap<ComponentName, number>;
 }

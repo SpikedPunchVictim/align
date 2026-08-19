@@ -70,6 +70,8 @@ export function checkRun(violations: readonly Violation[], overrides: Partial<Ch
     ungroundedComponents: [],
     blindSpots: [],
     observedFiles: { source: new Set(), manifest: new Set() },
+    observedViolations: [],
+    componentMatchCounts: new Map(),
     ...overrides,
   };
 }
@@ -85,5 +87,5 @@ export function errorCheckRun(): CheckRun {
     cacheHits: 0,
     dependsOn: [],
   };
-  return { verdict: 'error', gates: [gate], advisories: [], scannedAt: 0, ungroundedComponents: [], blindSpots: [], observedFiles: { source: new Set(), manifest: new Set() } };
+  return { verdict: 'error', gates: [gate], advisories: [], scannedAt: 0, ungroundedComponents: [], blindSpots: [], observedFiles: { source: new Set(), manifest: new Set() }, observedViolations: [], componentMatchCounts: new Map() };
 }

@@ -58,7 +58,8 @@ consumer must always be able to say which of the two it is relying on.
 **`.align/last-scan.json` records what the immediately preceding scan of this repository, on this
 machine, by this version of align, observed.** It is gitignored: `.align/` as a whole is not
 (`baseline.json` is a committed consent record), so the record needs its own entry, which widens
-`init/gitignore.ts`'s `ensureTelemetryGitignored` past telemetry and renames it.
+`init/gitignore.ts`'s `ensureTelemetryGitignored` past telemetry and renames it (done:
+`ensureAlignLocalFilesGitignored`).
 
 Gitignored **for identity, not for churn.** Diff noise would be a cost argument; this is a
 correctness one. A record written on machine A is not evidence about machine B's checkout — sparse
@@ -87,6 +88,16 @@ at this path, last scan?"* — if it was, it predates the source file's disappea
 where that violation moved to. That test needs violation identity across scans, which is exactly
 `contentFingerprint` (FRAGILE #7) and nothing more. It is bounded by violation count, not file
 count, so it is cheap on the repos where it matters least and proportionate where it matters most.
+
+*Amended 2026-08-18, while implementing it.* **The table above cannot implement §4.** Two of the four
+invalidation predicates below — "the cited rule's definition changed", "`c`'s selector changed" — are
+*comparisons*, and a record holds only one side of a comparison. The record therefore also carries:
+
+| Field | Why |
+|---|---|
+| `recordVersion` | a record whose shape a reader does not recognise must fail to parse rather than answer questions from fields that no longer mean what they meant. ADR 028's Consequences recorded the cost of `McpCheckPayload` having no such field; this is that lesson applied before the fact, for twenty bytes |
+| `ruleDefinitions[ruleId]` | a hash of each rule's definition, **provenance excluded** — `because`/`sourceFile`/`sourceLineRange`/`sourceQuote` cannot change what a rule matches, and `sourceLineRange` moves whenever anyone edits a line *above* the rule in a doc-built ruleset, which would silently disarm the mechanism on edits that changed nothing |
+| `components[name].selectorIdentity` | see the §4 amendment: a **prefix** hash, not a hash of the component's own selector |
 
 **Deliberately excluded**, each having been proposed and rejected:
 
@@ -144,6 +155,23 @@ A single global staleness flag would discard all four answers whenever any one o
 Per-question invalidation keeps the answers that are still sound, and — more importantly — keeps the
 invalidation predicate small enough that each consumer's author can check it.
 
+*Amended 2026-08-18, while implementing it.* Two rows above are wrong as written.
+
+**`observedMatchCount(c)` — "`c`'s selector changed" is not sufficient.** Classification is
+first-match-wins in declaration order (`components/registry.ts`'s `classifyFile`), so changing an
+*earlier* component's selector moves `c`'s count without touching `c`'s own definition — the exact
+shadowing case `validateClassifiedComponents`' error message names. The recorded identity is
+therefore a hash over the ordered `(name, selector)` list **up to and including** `c`: anything that
+could move `c`'s count invalidates it, and a component declared *after* `c` does not. That is
+strictly more precise than the whole-registry hash and strictly sounder than the per-component one.
+
+**`wasViolationObservedAt` is deliberately NOT gated on `scopeIdentity`,** and the asymmetry with
+`wasFileObserved` is the point. This question's `true` is a *positive observation* — a violation of
+this rule, with this content, was reported at this path — and narrowing or widening the scan cannot
+make a violation align actually reported stop having been reported. `wasFileObserved`'s `false`, by
+contrast, is an inference from absence, and a scope change is exactly what empties that absence of
+meaning. Gating both identically would discard the sound answer in order to protect the unsound one.
+
 ### 5. History is admissible as a refusal, never as a permission
 
 **The doctrinal core of this ADR.** A consumer may use the history to *decline* a destructive
@@ -165,14 +193,44 @@ ever add refusals cannot introduce a false green, whatever state the record is i
 - **`store.applyMoves` (D010, D015, ADR 027 F1) — refuse.** Before transferring an accepted entry
   onto a candidate violation, ask `wasViolationObservedAt(candidate)`. `known: true, value: true`
   ⇒ the candidate predates the disappearance ⇒ refuse the transfer, leaving the entry at its
-  original path. This **retires ADR 006's 2026-08-18 amendment**: the refusal becomes
+  original path. ~~This **retires ADR 006's 2026-08-18 amendment**: the refusal becomes
   violation-precise instead of directory-granular, so an ordinary whole-directory rename transfers
   again, and `packages/core/test/orchestrator.test.ts`'s "a manifest whose whole directory is
-  absent no longer transfers" goes back to asserting a transfer, as its comment already instructs.
+  absent no longer transfers" goes back to asserting a transfer, as its comment already instructs.~~
+
+  ***The refusal shipped 2026-08-18 and closes D015. The retirement is struck: it contradicts §5,
+  and this ADR did not notice*** (LEDGER D023). Wiring the refusal is sound and measured — with it
+  removed, the reproduction exits **0 green** with a human's `acceptedBy: manual` sitting on a
+  never-reviewed violation (`packages/cli/test/d015-move-forgery.test.ts`). Retiring ADR 006's
+  exception is the opposite operation: *allowing* a transfer that is refused today. The only fact
+  the record offers for it is `wasViolationObservedAt(candidate) === false`, and an absence from the
+  record cannot separate "the candidate did not exist last scan" (rename) from "last scan never
+  looked there" (partial checkout, blind spot) — which is the exact distinction ADR 006's exception
+  exists to make. `wasFileObserved` cannot stand in: for a genuine rename the candidate's file is
+  new, so a positive observation of it is what a rename does *not* produce. §5 already names this —
+  *history is admissible as a refusal, never as a permission* — so §6 as written contradicted §5 two
+  sections later.
+
+  Worse, the regression would land in the defect's own habitat: the record is gitignored and
+  machine-local (§1), so a fresh CI checkout has none, the new refusal cannot fire there, and only
+  ADR 006's exception stands between D010 and a green exit 0. What would actually retire it is
+  evidence of a file's past NON-EXISTENCE — which git has and this record structurally cannot hold.
+  See [ADR 006's amended section](006-2026-07-11-baseline.md#this-exception-was-intended-to-be-temporary-it-is-not).
 - **`store.prune` retention (D001, D008) — retain only.** The history may add retention; it may
   never license a deletion. `wasFileObserved` returning `known: true, value: false` for a file the
   baseline names is a reason to retain and report, never a reason to prune. **ADR 006's consent
   gate stays** — see §"What this does not close".
+
+  *Qualified 2026-08-18, while implementing the `applyMoves` consumer above.* "Never license a
+  deletion" is true of THIS consumer and false of the ADR as a whole, and the difference is a
+  consequence of `reconcileMoves` and `prune` sharing `applyMoves`. An orphan with no move match is
+  left alone by the first and DELETED by the second, so the `applyMoves` refusal — running inside
+  `prune` — converts a transfer into a deletion. That outcome is correct (the orphan's file is
+  genuinely absent, all three ADR 028 mechanisms have already declined, and removing entries for
+  violations that are gone is what `prune` is for, behind consent and ADR 023's guards) and it is
+  strictly better than the forgery it replaces, but it is a destructive consequence of consulting the
+  history and this ADR should not be read as promising there are none. Pinned deliberately by
+  `core/test/scan-history-move-refusal.test.ts`.
 - **Component grounding (D011) — report.** "Component `api` matched 12 files last scan and 0 now"
   replaces a generic incompleteness refusal with an actionable one. The ADR 023 tier-2 refusal
   itself is unchanged; only its message improves.
@@ -196,9 +254,64 @@ ever add refusals cannot introduce a false green, whatever state the record is i
    first and the record already shows the violation at its new path, so `check` refuses a legitimate
    rename. ADR 006's asymmetry makes that the survivable direction — loud and one `baseline accept`
    from resolved — but it is a real regression and the narrow writer avoids it.
+
+   *Amended 2026-08-18, while implementing it.* The damage argument is right; the enumeration is not.
+   The hazard is a surface that moves the reference forward **without having made a transfer decision
+   against it**, so the rule is: ~~a surface writes the record if and only if it consulted the record
+   for a transfer decision.~~ **a surface writes the record only if it consulted the record for a
+   transfer decision.**
+
+   ***The biconditional was struck later the same day***, by adversarial review, and this paragraph
+   contained its own counter-example two sentences on: `align upgrade` consults for a transfer decision
+   and deliberately does not write. `baseline prune` is a second — `store.prune` runs `applyMoves`, so
+   it consults and does not write either. Consulting is what makes the D015 refusal exist and is
+   available to any surface; WRITING is the half that moves the temporal reference forward for everyone
+   after it, and it is the half this rule restricts. A doctrine contradicted by the adjacent sentence is
+   [D023]'s shape recurring inside the document D023 is about, which is why it is recorded in [D024]
+   rather than quietly corrected.
+
+   The writer set is `align check` (both arms) *and BOTH MCP tools that call `freshCheck`* —
+   `align_check` **and `align_violations`** — each of which consults the same store, runs the same
+   `reconcileMoves` and persists the same transfer. Leaving MCP out would leave the mechanism
+   permanently inert for an agent-only workflow, the consumer align ships an MCP server for.
+   `align_violations` was missing from this list until adversarial review 2026-08-18: it shares
+   `freshCheck`, so it was a writer whether or not anyone had listed it, and the enumeration was a
+   sample presented as a census. Both are now pinned by `cli/test/mcp.test.ts`. `align upgrade` also transfers but is deliberately **not** a writer: it
+   is a rare one-shot migration, and a record it declined to advance is merely older, which every
+   question already handles.
 4. **A corrupt record throws; it never reads as empty.** BUG #1 is the precedent — a corrupted
    `.align/baseline.json` read as `[]`, and the next full-snapshot write destroyed every accepted
    entry. Same discipline, no exceptions.
+
+   ***Reversed 2026-08-18, while implementing it. A corrupt record reads as ABSENT, loudly.*** The
+   discipline is real and it belongs to `baseline.json`: irreplaceable human consent, where an empty
+   read is followed by a full-snapshot overwrite. None of that transfers. This file is a gitignored,
+   machine-local cache align creates and replaces on its own schedule, holding nothing a human
+   authored, and an absent read yields `known: false` from every question — which §5 defines as
+   *exactly today's behaviour*. Throwing would fail every `align check` in the repository, over a file
+   the user cannot see in `git status`, until they deleted it by hand.
+
+   **Measured 2026-08-18**, by implementing §7.4 as specified and running the integration scenario
+   against real binaries: with a truncated record planted, `align check` leaves it truncated *forever*
+   — every later read throws, the writer's own catch swallows it, and the mechanism is silently dead
+   with no warning ever printed. The harsher outcome, the command failing outright, is **inferred**:
+   today the record is read only inside a guarded writer, but §3's probe is built from it *before* the
+   scan, so once the consumers of §6 land the throw is uncontained.
+
+   This is the same misapplication ADR 030 §4 was amended for **one day earlier**, about `.align/.lock`
+   — a lock that refused to be broken at any age because "corrupt is not absent", and bricked the
+   repository it was protecting. For a file align owns, never-treat-as-absent is the *unsafe*
+   direction. Recorded as its own defect ([D021]) and its own shape ([S-12], *a discipline
+   transplanted from the artifact that earned it*), because getting it wrong twice in two days is the
+   signal, not the instance.
+
+5. **Never write from an errored run.** *Added 2026-08-18, while implementing it — not in the
+   original §7.* An errored run reports empty `observedFiles`, `observedViolations` and
+   `componentMatchCounts` deliberately, because it has no trustworthy scan scope to report
+   (`untrustworthyScanScope`). Persisting that converts "this run knows nothing" into the positive
+   claim "the previous scan observed nothing", which IS admissible next run — a component that
+   matched 12 files would read as having always matched 0, silencing the exact regression §6 exists
+   to report. And it would destroy a sound record to do it.
 
 This makes the known non-atomic `.align/` write (full-snapshot `writeFileSync`, no temp-and-rename,
 no lock — recorded in ADR 028's closing section) a **prerequisite** of implementation rather than a
@@ -211,10 +324,51 @@ apply, and per CLAUDE.md rules 1 and 2 the feature is not complete without them.
 scenario must cover: no record → today's behaviour; a record from a different `scopeIdentity` →
 today's behaviour; and the D015 reproduction staying red.
 
+*Amended 2026-08-18, after implementation.* Two of the three shipped: `scan-history-record-written`
+covers "no record → today's behaviour", and `scan-history-refuses-forged-transfer` covers the D015
+reproduction (calibrated `expectFailOn: ['0.1.4']`, where it lands `acceptedBy: manual` on a
+never-reviewed violation at exit 0). **The `scopeIdentity` scenario is deliberately declined**, and
+that is a correction to this section rather than a gap: `wasViolationObservedAt` is the only question
+with a consumer, and it is deliberately NOT gated on `scopeIdentity` (§4) — so the scenario this
+section imagines would assert that a scope change does nothing, which is true but is the *absence* of
+a property rather than a property. The asymmetry is pinned where it is decided, in
+`core/test/scan-history-probe.test.ts` and again from the consumer's side in
+`core/test/scan-history-move-refusal.test.ts`. Re-open this if a scope-gated question gains a
+consumer.
+
 ## What this does not close
 
 Recorded explicitly because the proposal this ADR supersedes claimed more, and a reader who adopts
 the claim rather than the mechanism will build on sand.
+
+*Three residuals added 2026-08-18 by adversarial review of the implementation, because each is a way
+the mechanism is quietly weaker than this ADR reads.*
+
+- **An INCOMPLETE run writes a thinner record over a sounder one, and nothing says so.** §7.5 refuses
+  to write from an *errored* run, and that guard names one cause of "this run knows less than the
+  repository contains" while missing the other: a run that is merely incomplete (unresolved
+  specifiers, an ungrounded component — `isRunComplete`, two-axis since D011) reports fewer violations
+  and overwrites the record with them. The next run then answers `known: true, value: false` about a
+  violation the previous *complete* scan had seen, so the D015 refusal silently does not fire. It is
+  never *unsound* — fewer refusals is exactly pre-ADR-029 behaviour, and no wrong refusal or false
+  green can result — but the protection is variable in a way a user cannot observe. Concretely: run
+  `align check` once without installing dependencies and the next run's D015 guard is disarmed for any
+  violation that dropped out. Not fixed here because the obvious fix (refuse to write when incomplete)
+  would make the mechanism permanently inert on any repository with a standing uncertainty advisory —
+  which includes align's own — and choosing between "variable protection" and "no protection" deserves
+  its own decision rather than being folded into this one.
+- **A forged record can steer which candidate inherits a transfer.** §5 guarantees no *additional*
+  transfer and no greener verdict, and that holds. But `applyMoves` matches greedily and consumes each
+  candidate, so declaring one candidate already-observed shifts later orphans onto different targets
+  within the same content-fingerprint bucket (measured; see the invariant comment in
+  `core/src/baseline/store.ts`). The consent still lands on a never-reviewed violation — just not the
+  same one. Harmless while every consumer is a refusal; not harmless for a consumer whose answers are
+  not.
+- **§1's identity argument rests entirely on one `.gitignore` line.** The record carries no machine
+  identity and `computeScopeIdentity` deliberately excludes `rootDir`, so a record committed by
+  accident is fully admissible on another machine. Every repository `align init`'d before 0.2.0 lacks
+  the ignore entry (UPGRADING.md says so). Harmless today because the only consumer is refusal-only;
+  a live hazard for `observedMatchCount` and `wasFileObserved`, which §6 licenses next.
 
 - **D001 and D008 remain ambiguous.** History says a directory was observed last scan and is absent
   now. A deliberate deletion says exactly the same thing. What history adds is the ability to

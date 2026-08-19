@@ -9,6 +9,7 @@ import {
   type BaselineEntry,
   type HostPredicateRegistry,
   type RulesetIR,
+  type ScanHistoryProbe,
 } from '@spikedpunch/align-core';
 import { NodeManifestScanner, TypeScriptPlugin } from '@spikedpunch/align-plugin-typescript';
 import { createFileExistenceProbe } from './file-existence.js';
@@ -27,12 +28,26 @@ export function createOrchestrator(
   ruleset: RulesetIR,
   baselineEntries: readonly BaselineEntry[],
   hostPredicates: HostPredicateRegistry = new Map(),
+  /**
+   * ADR 029 §6 — the temporal reference `InMemoryBaselineStore.applyMoves` consults before it
+   * transfers a human's acceptance onto another file (LEDGER D015).
+   *
+   * REQUIRED and positioned AFTER a parameter that has a default, deliberately: `hostPredicates`
+   * could keep its default because forgetting it costs a caller nothing but host rules, while
+   * forgetting this one would silently reopen a severity-zero forged transfer. A defaulted parameter
+   * followed by a required one is legal, but the default stops being reachable — so every caller now
+   * states both, which is the point (all eight already passed `hostRules` explicitly, so this is not
+   * a silent behaviour change for any of them).
+   * `openScanHistory` (`scan-history.ts`) builds the real one; `noScanHistory()` is the honest answer
+   * for a caller that has no repository to read it from.
+   */
+  scanHistory: ScanHistoryProbe,
 ): {
   readonly orchestrator: GateOrchestrator;
   readonly baselineStore: InMemoryBaselineStore;
 } {
   const registry = new StaticPluginRegistry([new TypeScriptPlugin()]);
-  const baselineStore = new InMemoryBaselineStore(baselineEntries, createFileExistenceProbe(rootDir));
+  const baselineStore = new InMemoryBaselineStore(baselineEntries, createFileExistenceProbe(rootDir), scanHistory);
   const manifestScanner = new NodeManifestScanner();
   const orchestrator = new GateOrchestrator(registry, ruleset, baselineStore, hostPredicates, manifestScanner);
   return { orchestrator, baselineStore };

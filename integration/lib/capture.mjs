@@ -6,7 +6,12 @@ import * as path from 'node:path';
 import { readTextOrUndefined } from './fs-utils.mjs';
 import { normalizeJson, normalizeText, makeNormalizeContext } from './normalize.mjs';
 
-const ALIGN_DIR_FILES = ['baseline.json', 'generated-rules.json', 'rules.lock.json', 'ruleset-ir.json', 'version.json'];
+// `last-scan.json` (ADR 029) is here so a scenario can `assert` against it like any other `.align/`
+// artifact. It is the first MACHINE-LOCAL file in this list — telemetry deliberately is not, being
+// opt-in and off in every scenario that does not enable it — and its `observedAt` is normalized in
+// `normalize.mjs`'s `VOLATILE_JSON_KEYS` for the same reason `scannedAt` is: without that, two runs
+// of one scenario produce different `normalized.json` and the determinism diff reports noise.
+const ALIGN_DIR_FILES = ['baseline.json', 'generated-rules.json', 'rules.lock.json', 'ruleset-ir.json', 'version.json', 'last-scan.json'];
 const CLAUDE_START = '<!-- align:start -->';
 const CLAUDE_END = '<!-- align:end -->';
 

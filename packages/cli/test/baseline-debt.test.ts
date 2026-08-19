@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeBaselineDebt } from '../src/commands/check.js';
+import { computeBaselineDebt } from '../src/baseline-debt.js';
 import type { BaselineEntry, CheckRun, FileExistenceProbe, GateResult, RepoRelativePath, ScanBlindSpot } from '@spikedpunch/align-core';
 
 /** N opaque entries, for the cases that read only `.length`. Entries that must be located on disk
@@ -36,6 +36,8 @@ function runWith(
     ungroundedComponents: [],
     blindSpots: extra.blindSpots ?? [],
     observedFiles: { source: new Set((extra.observed ?? []) as RepoRelativePath[]), manifest: new Set() },
+    observedViolations: [],
+    componentMatchCounts: new Map(),
   };
 }
 

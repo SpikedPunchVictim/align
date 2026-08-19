@@ -1,4 +1,11 @@
-import { InMemoryBaselineStore, describeMovedEntries, toRuleId, type BaselineEntry, type RepoRelativePath } from '@spikedpunch/align-core';
+import {
+  InMemoryBaselineStore,
+  describeMovedEntries,
+  noScanHistory,
+  toRuleId,
+  type BaselineEntry,
+  type RepoRelativePath,
+} from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaselineSnapshot, writeBaseline, type BaselineToken } from '../align-dir.js';
@@ -8,6 +15,7 @@ import { describeRetainedEntries, partitionBlindSpotCandidates, retainedEntries 
 import { parseForgetUnscannedPrefix, splitForgotten } from '../forget-unscanned.js';
 import { describeForgetPrefixMatchedNothing, describeForgottenEntries, describePruneOutcome } from '../prune-report.js';
 import { createFileExistenceProbe } from '../file-existence.js';
+import { openScanHistory } from '../scan-history.js';
 import { describeUnverifiablePrunes, selectUnverifiablePrunes } from '../unverified-prune.js';
 import { computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
 import { defaultConfirm } from '../prompt.js';
@@ -38,7 +46,13 @@ async function currentViolations(rootDir: string) {
   const { ruleset, excludes, includeNestedCheckouts, hostRules, telemetry } = await loadConfig(rootDir);
   // An empty baseline store surfaces every violation as "red" regardless of what's actually
   // baselined on disk — exactly the full current violation set `prune`/`accept` need.
-  const { orchestrator } = createOrchestrator(rootDir, ruleset, [], hostRules);
+  const { orchestrator } = createOrchestrator(
+    rootDir,
+    ruleset,
+    [],
+    hostRules,
+    openScanHistory(rootDir, { ruleset, excludes, includeNestedCheckouts }).probe,
+  );
   const run = await orchestrator.check({ rootDir, excludes, includeNestedCheckouts });
   return { violations: run.gates.flatMap((g) => g.violations), ruleset, telemetry };
 }
@@ -57,11 +71,17 @@ export async function baselineAccept(rootDir: string, ruleId?: string, telemetry
   const targeted = ruleId === undefined ? violations : violations.filter((v) => v.ruleId === toRuleId(ruleId));
   const previous = tryReadBaseline(rootDir, 'align baseline accept');
   if (!previous.ok) return previous.code;
-  // Add-only (CLAUDE.md rule 4's exemption): `accept` never deletes and never transfers, so the
-  // probe is never consulted on this path. The real one is passed anyway rather than a stub — a
+  // Add-only (CLAUDE.md rule 4's exemption): `accept` never deletes and never transfers, so neither
+  // probe is consulted on this path. The real `fileExists` is passed anyway rather than a stub — a
   // `() => false` here would be a false statement about the working tree that merely happens not to
   // matter today, and the exemption is pinned by a test rather than by this comment.
-  const store = new InMemoryBaselineStore(previous.entries, createFileExistenceProbe(rootDir));
+  //
+  // `noScanHistory()` and NOT the real record, which is the one place these two arguments diverge:
+  // building the real probe needs the scan scope (ADR 029 §4's `scopeIdentity`), and `collectCurrent`
+  // does not hand `excludes` back. Widening its return type to satisfy an argument `applyMoves` can
+  // never reach on this path would be shape S-06 — machinery whose only justification is symmetry.
+  // The claim being made is narrow and checkable: this store never transfers. Pinned by a test.
+  const store = new InMemoryBaselineStore(previous.entries, createFileExistenceProbe(rootDir), noScanHistory());
   store.accept(targeted, 'manual');
   // `writeBaseline` stamps `alignVersion` (ADR 022's write discipline, `align-dir.ts`) and can
   // throw on a corrupted `.align/version.json` — same corrupt-≠-absent discipline as `tryReadBaseline`
@@ -200,8 +220,13 @@ export async function baselinePrune(rootDir: string, options: PruneOptions = {})
   const { ruleset, excludes, includeNestedCheckouts, hostRules, telemetry } = loaded;
   const previous = tryReadBaseline(rootDir, 'align baseline prune');
   if (!previous.ok) return previous.code;
-  const store = new InMemoryBaselineStore(previous.entries, createFileExistenceProbe(rootDir));
-  const { orchestrator } = createOrchestrator(rootDir, ruleset, [], hostRules);
+  // ONE history for both: the store's `applyMoves` consults it (ADR 029 §6) and so does the run that
+  // produces the violations fed to it, so a second read here could disagree with the first if another
+  // align wrote in between. `prune` reads the record and never writes it — deletion is not a transfer
+  // decision, and ADR 029 §7.3 keeps the writer set to the surfaces that persist one.
+  const history = openScanHistory(rootDir, { ruleset, excludes, includeNestedCheckouts });
+  const store = new InMemoryBaselineStore(previous.entries, createFileExistenceProbe(rootDir), history.probe);
+  const { orchestrator } = createOrchestrator(rootDir, ruleset, [], hostRules, history.probe);
   const run = await orchestrator.check({ rootDir, excludes, includeNestedCheckouts });
   // Tier 1, BEFORE the store is consulted and before anything is written (see this function's doc
   // comment). No override — an errored scan evaluated no rules at all.
@@ -349,9 +374,10 @@ export async function baselinePrune(rootDir: string, options: PruneOptions = {})
 export async function baselineShow(rootDir: string, ruleId?: string): Promise<number> {
   const previous = tryReadBaseline(rootDir, 'align baseline show');
   if (!previous.ok) return previous.code;
-  // Read-only: `show` never mutates, so the probe is never consulted here either. Same reasoning as
-  // `baselineAccept` above for why it is the real one rather than a stub.
-  const store = new InMemoryBaselineStore(previous.entries, createFileExistenceProbe(rootDir));
+  // Read-only: `show` never mutates, so neither probe is consulted here either. Same reasoning as
+  // `baselineAccept` above — the real `fileExists`, and `noScanHistory()` because there is no scan
+  // scope in hand and nothing on this path could ask it a question.
+  const store = new InMemoryBaselineStore(previous.entries, createFileExistenceProbe(rootDir), noScanHistory());
   const entries = store.show(ruleId === undefined ? undefined : { ruleId: toRuleId(ruleId) });
   if (entries.length === 0) {
     console.log('Baseline is empty.');

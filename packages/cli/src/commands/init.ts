@@ -8,9 +8,10 @@ import { suggestLayers } from '../init/suggest-layers.js';
 import { renderConfig } from '../init/render-config.js';
 import { assertAgentInstructionsWellFormed, writeAgentInstructions } from '../init/claude-md.js';
 import { assertGeneratedRulesNoteWellFormed, writeGeneratedRulesNote } from '../init/config-comment.js';
-import { ensureTelemetryGitignored } from '../init/gitignore.js';
+import { ALIGN_LOCAL_GITIGNORE_ENTRIES, ensureAlignLocalFilesGitignored } from '../init/gitignore.js';
 import { offerAlignScript } from '../init/npm-script.js';
 import { createOrchestrator } from '../composition-root.js';
+import { openScanHistory } from '../scan-history.js';
 import { CONFIG_FILENAME, loadConfig } from '../config.js';
 import { writeBaseline, readBaselineSnapshot, recordBaselineReconciled, type BaselineToken } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
@@ -202,8 +203,10 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   }
   console.log('Wrote/updated CLAUDE.md agent-instructions block.');
 
-  if (ensureTelemetryGitignored(rootDir)) {
-    console.log('Wrote/updated .gitignore (excluded .align/telemetry.jsonl + .align/telemetry-state.json — opt-in, local-only).');
+  if (ensureAlignLocalFilesGitignored(rootDir)) {
+    console.log(
+      `Wrote/updated .gitignore (excluded align's machine-local files: ${ALIGN_LOCAL_GITIGNORE_ENTRIES.join(', ')}).`,
+    );
   }
 
   // loadConfig can fail six ways, including a corrupt `.align/generated-rules.json` (bug hunt
@@ -237,7 +240,18 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     return reportCliError('align init', new Error(`${message} Repair or delete the file, then re-run \`align init\`.`));
   }
 
-  const { orchestrator } = createOrchestrator(rootDir, ruleset, [], hostRules);
+  // The real probe, even though `init` scans with an EMPTY baseline and so has no orphan for
+  // `applyMoves` to transfer: the same reasoning as its `fileExists` argument (`commands/baseline.ts`).
+  // A `noScanHistory()` here would be a false statement about the repository that merely happens not
+  // to matter today, and the exemption is pinned by a test rather than by this comment. `init` reads
+  // the record and never writes it (ADR 029 §7.3).
+  const { orchestrator } = createOrchestrator(
+    rootDir,
+    ruleset,
+    [],
+    hostRules,
+    openScanHistory(rootDir, { ruleset, excludes, includeNestedCheckouts }).probe,
+  );
   const run = await orchestrator.check({ rootDir, excludes, includeNestedCheckouts });
   // `align init` is re-runnable on a repo that already has a baseline ("align.config.ts already
   // exists — leaving it as-is", above), and the zero-violations branch below writes `[]` over it.

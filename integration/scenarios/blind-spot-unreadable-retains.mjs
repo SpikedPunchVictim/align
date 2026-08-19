@@ -55,6 +55,10 @@ export default {
   // no entry beyond the two files inside it.
   tags: ['destructive'],
   writeSet: [
+    // ADR 029: every `align check` records what it observed in `.align/last-scan.json`. Declared
+    // rather than exempted — a machine-local cache is still a path align writes into someone
+    // else's repository, and ADR 026's set is what a reader consults to know that.
+    '.align/last-scan.json',
     'package.json',
     'package-lock.json',
     'align.config.ts',

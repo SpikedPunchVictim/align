@@ -1,6 +1,14 @@
 /**
  * Imperative shell around `@spikedpunch/align-core`'s pure `BaselineStore` (CODING_BEST_PRACTICES.md §15/16:
- * functional core, imperative shell) — all filesystem I/O for `.align/` lives here, not in core.
+ * functional core, imperative shell) — filesystem I/O for `.align/` lives in the CLI, never in core.
+ *
+ * This module owns the COMMITTED artifacts: baseline, generated rules, the rules lock, the exported
+ * IR, the version stamp and the build report. Three machine-local `.align/` files are deliberately
+ * elsewhere, each because it answers to a different discipline than the committed set —
+ * `.align/.lock` (`align-lock.ts`, ADR 030), `.align/last-scan.json` (`last-scan-file.ts`, ADR 029)
+ * and telemetry (below, ADR 015). If you are adding a `.align/` writer, decide which set it is in
+ * before deciding which file it goes in; `stampAlignVersion`'s doc comment is where that choice has
+ * consequences.
  */
 import * as fs from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -115,10 +123,10 @@ function writeVersionFile(rootDir: string, data: VersionFile): void {
 
 /**
  * The single choke point for `alignVersion` stamping (ADR 022's write discipline). Called from
- * every `.align/` artifact writer in THIS file — `writeBaseline`, `writeGeneratedRules`,
- * `writeRulesLock`, `writeRulesetIr` — which are already the only places under `.align/` any
- * command in this codebase writes to (this module's own doc comment: "all filesystem I/O for
- * .align/ lives here, not in core"). Piggybacking the stamp on those four writers, instead of
+ * every COMMITTED `.align/` artifact writer, all four of which are in THIS file — `writeBaseline`,
+ * `writeGeneratedRules`, `writeRulesLock`, `writeRulesetIr` (the module doc comment above lists the
+ * machine-local files that live elsewhere and why they are exempt). Piggybacking the stamp on those
+ * four writers, instead of
  * calling it separately at each of `init`, `build --apply`, `export-ir`, `baseline accept`/`prune`,
  * and `check`'s move-transfer path, makes the coverage argument STRUCTURAL rather than
  * enumerative: a new command that writes an `.align/` artifact has to call one of these functions
@@ -130,14 +138,19 @@ function writeVersionFile(rootDir: string, data: VersionFile): void {
  * Deliberately never touches `baselineReconciledBy` — see `recordBaselineReconciled` below for why that
  * field has exactly one writer (`init`) plus, later, `align upgrade`.
  *
- * Deliberately NOT wired into `writeTelemetryState`/`appendTelemetryLine`: telemetry is opt-in,
- * local-only, gitignored by default, and explicitly not a portable artifact (see those two
- * functions' own doc comments below) — it is outside the ".align/ artifact" set ADR 022 stamps.
+ * Deliberately NOT wired into `writeTelemetryState`/`appendTelemetryLine`, nor into
+ * `writeLastScanRecord` (ADR 029): all three are opt-in-or-derived, machine-local, gitignored, and
+ * explicitly not portable artifacts (see those functions' own doc comments) — they are outside the
+ * ".align/ artifact" set ADR 022 stamps. The structural argument above is therefore "every writer of
+ * a COMMITTED artifact stamps", not "every writer in this file stamps"; a new writer has to place
+ * itself in one of the two sets deliberately.
  *
- * A read-only `align check` never calls any of the four writers above (the ONLY writer `check`
- * ever touches is `writeBaseline`, and only on the move-transfer path — `persistMovedBaseline`,
- * `commands/check.ts`), so this function is never reached on a plain check — `.align/version.json`
- * is correctly never created by a check that doesn't mutate anything.
+ * A read-only `align check` never calls any of the four writers above (the only stamping writer
+ * `check` ever touches is `writeBaseline`, and only on the move-transfer path —
+ * `persistMovedBaseline`, `commands/check.ts`), so this function is never reached on a plain check —
+ * `.align/version.json` is correctly never created by a check that doesn't mutate anything. Since
+ * ADR 029 a plain check DOES write `.align/last-scan.json`, which is why that writer is in the
+ * exempt set: a check that changed nothing must not start claiming a version stamp it didn't earn.
  */
 function stampAlignVersion(rootDir: string): void {
   const current = readVersionFile(rootDir);

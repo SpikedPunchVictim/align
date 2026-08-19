@@ -4,6 +4,9 @@ out/
 .align/cache/
 .align/telemetry.jsonl
 .align/telemetry-state.json
+# ADR 029: the scan-observation record is evidence about THIS checkout on THIS machine, and
+# committing it would let one machine's observation authorize another machine's deletion.
+.align/last-scan.json
 test-apps/
 *.tsbuildinfo
 .DS_Store

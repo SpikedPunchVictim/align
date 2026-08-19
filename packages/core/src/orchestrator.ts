@@ -1,10 +1,12 @@
-import type { RepoRelativePath } from './types/branded.js';
+import type { ComponentName, RepoRelativePath } from './types/branded.js';
 import type { DependencyGraph, ScanBlindSpot } from './types/graph.js';
 import type { RulesetIR } from './types/ir.js';
 import type { Violation } from './types/violation.js';
 import { EMPTY_MANIFEST_INVENTORY, type ManifestScanner } from './types/manifest.js';
 import type { BaselineStore, MovedEntry } from './baseline/store.js';
 import { describeMovedEntries } from './baseline/scan-blind-spots.js';
+import { computeContentFingerprint } from './baseline/fingerprint.js';
+import type { ObservedViolation } from './types/scan-history.js';
 import type { Advisory, CheckRun, GateResult } from './gates/types.js';
 import {
   buildBaselineGrowthAdvisories,
@@ -72,6 +74,7 @@ export class GateOrchestrator {
     const {
       gateResult: securityGate,
       moved: securityMoves,
+      allViolations: securityViolations,
       observedFiles: manifestFiles,
       blindSpots: manifestBlindSpots,
     } = await this.runSecurityGate(options);
@@ -262,6 +265,14 @@ export class GateOrchestrator {
       // `prune` reasoned over a set `check` never used — merging also mis-classifies, since `.json`
       // is an asset extension to the source walker but a first-class file to the manifest walker.
       observedFiles: { source: knownFiles, manifest: manifestFiles },
+      // ADR 029 §2. BOTH domains, unioned, and unfiltered by baseline state — see `CheckRun`'s own
+      // doc comment for why "baselined or not" is the load-bearing half.
+      observedViolations: toObservedViolations([...allViolations, ...securityViolations]),
+      // Seeded from the DECLARED components rather than from `graph.nodes`, so a component that
+      // matched nothing this scan is present with `0` instead of missing. The zero entries are the
+      // ones carrying the signal — "matched 12 last scan, 0 now" is the regression ADR 029 §6 wants
+      // reported, and a map built from the nodes alone could never express its right-hand side.
+      componentMatchCounts: countMatchesPerComponent(this.ruleset.components, graph.nodes),
     };
   }
 
@@ -277,6 +288,11 @@ export class GateOrchestrator {
     /** The security gate's own transfers, carried whole rather than counted, so the advisory can
      * name what moved onto what (LEDGER D015). */
     readonly moved: readonly MovedEntry[];
+    /** This gate's own violations, baselined or not, carried onto `CheckRun.observedViolations`
+     * (ADR 029 §2). `gateResult.violations` is the not-baselined subset, so this is the only route
+     * by which a baselined manifest violation reaches the observation record. Empty when the
+     * manifest scan threw — same reasoning as `observedFiles` below. */
+    readonly allViolations: readonly Violation[];
     /** This gate's own observed file set, carried onto `CheckRun.observedFiles.manifest` (ADR 028
      * §5) so `align baseline prune` reads the manifest domain off the run instead of walking it a
      * second time. Empty when the manifest scan threw — an inventory that failed to build observed
@@ -308,6 +324,7 @@ export class GateOrchestrator {
           dependsOn: [],
         },
         moved: [],
+        allViolations: [],
         observedFiles: new Set<RepoRelativePath>(),
         blindSpots: [],
       };
@@ -356,6 +373,7 @@ export class GateOrchestrator {
         dependsOn: [],
       },
       moved: moves,
+      allViolations,
       observedFiles: knownFiles,
       blindSpots: inventory.blindSpots,
     };
@@ -407,6 +425,31 @@ export class GateOrchestrator {
   }
 }
 
+/** ADR 029 §2's violation projection: the three fields `wasViolationObservedAt` needs, and no more.
+ * A full `Violation` carries `snippet` — verbatim source text — and this list is written to a file
+ * on disk, so narrowing here is a privacy decision, not a size one. */
+function toObservedViolations(violations: readonly Violation[]): readonly ObservedViolation[] {
+  return violations.map((v) => ({
+    file: v.file,
+    ruleId: v.ruleId,
+    contentFingerprint: computeContentFingerprint(v.ruleId, v.snippet),
+  }));
+}
+
+/** Every declared component's match count, zeros included. Iterating the DECLARED components first
+ * is what puts the zeros in; the node loop only adds counts to names that classification produced,
+ * and `classifyFile` can only return a declared name (`components/registry.ts`), so the two key sets
+ * agree by construction rather than by coincidence. */
+function countMatchesPerComponent(
+  components: RulesetIR['components'],
+  nodes: DependencyGraph['nodes'],
+): ReadonlyMap<ComponentName, number> {
+  const counts = new Map<ComponentName, number>();
+  for (const name of Object.keys(components) as ComponentName[]) counts.set(name, 0);
+  for (const node of nodes) counts.set(node.component, (counts.get(node.component) ?? 0) + 1);
+  return counts;
+}
+
 /** Shared by every `architecture` gate `error` path (guard-step failures, predicate exceptions) —
  * ADR 008: `error` is categorically distinct from `red`, always halts and escalates, never enters
  * an LLM-facing payload as prose (only `errorMessage`, a plain string). */
@@ -441,10 +484,17 @@ function errorGate(err: unknown, archStart: number): GateResult {
  * not a runtime guarantee, and one shared instance handed to every caller is a cross-run aliasing
  * hazard for the sake of an allocation that happens only on error paths.
  */
-function untrustworthyScanScope(): Pick<CheckRun, 'blindSpots' | 'observedFiles'> {
+function untrustworthyScanScope(): Pick<CheckRun, 'blindSpots' | 'observedFiles' | 'observedViolations' | 'componentMatchCounts'> {
   return {
     blindSpots: [],
     observedFiles: { source: new Set<RepoRelativePath>(), manifest: new Set<RepoRelativePath>() },
+    // ADR 029's two fields join the Pick rather than being defaulted at each return, and that is the
+    // point of the Pick existing: widening it makes the COMPILER enumerate every errored-run early
+    // return, which is the same technique that proved `writeBaseline`'s opt-out had no users
+    // (ADR 030) and that D016's fix used. An errored run's violation set is not "none" but
+    // "unknown", and a record written from one would claim a scan that never happened.
+    observedViolations: [],
+    componentMatchCounts: new Map<ComponentName, number>(),
   };
 }
 

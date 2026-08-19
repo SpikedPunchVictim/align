@@ -123,6 +123,26 @@ export function removeArchViolationRule(workingDir, project) {
  * that produces a well-formed config whose *runtime evaluation* errors (a valid rule referencing
  * a now-empty component); this produces a config that fails to even PARSE/import.
  */
+/**
+ * Truncates `.align/last-scan.json` mid-object — the shape a process killed during a write leaves
+ * behind, and the exact input ADR 029 §7.4 originally said should throw (LEDGER D021).
+ *
+ * The property the scenario using this checks is that align keeps working: a gitignored,
+ * machine-local cache that align itself creates and replaces must never be able to block a command,
+ * because the user cannot see it in `git status` and has no reason to look for it. ADR 030 §4 was
+ * amended for the same misapplied rule one day earlier, on `.align/.lock`, where it bricked the
+ * repository it was protecting.
+ */
+export function corruptLastScanRecord(workingDir) {
+  const file = path.join(workingDir, '.align', 'last-scan.json');
+  if (!fs.existsSync(file)) {
+    // Loud, not a silent no-op: this mutation exists to corrupt a record a previous step created, so
+    // an absent file means the scenario is asserting against a state it never reached.
+    throw new Error(`corrupt-last-scan-record: ${file} does not exist — the preceding \`align check\` did not write it`);
+  }
+  fs.writeFileSync(file, '{"recordVersion":1,"observed":{"sou', 'utf8');
+}
+
 export function corruptConfig(workingDir) {
   const { file } = readConfig(workingDir);
   fs.writeFileSync(
@@ -427,6 +447,36 @@ function violatingSource(name) {
  * Must run AFTER the baseline is seeded: the point is that this violation was never reviewed, so a
  * transfer onto it forges consent (LEDGER D010, D015).
  */
+/**
+ * LEDGER D015, the file-level sibling of D010: delete ONE accepted file and leave its sibling behind.
+ *
+ * Every detail is chosen so that the three ADR 028 mechanisms decline and the transfer arm is
+ * genuinely reached — which is what makes a scenario using this an assertion about ADR 029's
+ * refusal rather than about a guard that already existed:
+ *
+ * - the file is really gone from disk, so mechanism 2 (the file-existence probe) answers false;
+ * - nothing was excluded, symlinked or made unreadable, so mechanism 1 records no blind spot;
+ * - `d.ts` stays, so `harness-tree/hidden/` still produces an observed file and mechanism 3 (the
+ *   missing-DIRECTORY test, ADR 006's amendment) does not fire. Deleting the whole directory would
+ *   make THAT the guard under test and this scenario would pass without ADR 029 existing [S-05].
+ *
+ * Uses `d.ts`'s survival rather than a second bait for the same reason `useHideableSubtreeWorld`
+ * keeps `keep.ts`: the cheapest way to hold one variable still.
+ */
+export function deleteOneAcceptedFile(workingDir) {
+  const victim = path.join(workingDir, HARNESS_TREE_DIRNAME, HARNESS_HIDEABLE_DIRNAME, 'c.ts');
+  if (!fs.existsSync(victim)) {
+    throw new Error(`mutation 'delete-one-accepted-file': ${victim} does not exist — run 'use-hideable-subtree-world' first`);
+  }
+  const survivor = path.join(workingDir, HARNESS_TREE_DIRNAME, HARNESS_HIDEABLE_DIRNAME, 'd.ts');
+  if (!fs.existsSync(survivor)) {
+    // Without the survivor the parent directory produces no observed file, mechanism 3 retains the
+    // orphan, and the scenario silently stops testing what it says it tests.
+    throw new Error(`mutation 'delete-one-accepted-file': ${survivor} must survive, or ADR 028 mechanism 3 becomes the guard under test`);
+  }
+  fs.rmSync(victim);
+}
+
 export function addTransferBait(workingDir) {
   const dir = path.join(workingDir, HARNESS_TREE_DIRNAME);
   if (!fs.existsSync(dir)) {
@@ -564,6 +614,7 @@ export const MUTATIONS = {
   'delete-single-component-tree': (ctx) => deleteSingleComponentTree(ctx.workingDir),
   'use-hideable-subtree-world': (ctx) => useHideableSubtreeWorld(ctx.workingDir),
   'add-transfer-bait': (ctx) => addTransferBait(ctx.workingDir),
+  'delete-one-accepted-file': (ctx) => deleteOneAcceptedFile(ctx.workingDir),
   'hide-subtree-as-symlink': (ctx) => hideSubtreeAsSymlink(ctx.workingDir),
   'hide-subtree-unreadable': (ctx) => hideSubtreeUnreadable(ctx.workingDir),
   'restore-subtree-readable': (ctx) => restoreSubtreeReadable(ctx.workingDir),
@@ -573,6 +624,7 @@ export const MUTATIONS = {
   'introduce-arch-violation': (ctx) => introduceArchViolation(ctx.workingDir, ctx.project),
   'remove-arch-violation-rule': (ctx) => removeArchViolationRule(ctx.workingDir, ctx.project),
   'corrupt-config': (ctx) => corruptConfig(ctx.workingDir),
+  'corrupt-last-scan-record': (ctx) => corruptLastScanRecord(ctx.workingDir),
   'add-no-cycles-rule': (ctx) => addNoCyclesRule(ctx.workingDir),
   'write-architecture-rules-doc': (ctx) => writeArchitectureRulesDoc(ctx.workingDir),
   'write-architecture-rules-doc-with-fenced-rule': (ctx) => writeArchitectureRulesDocWithFencedRule(ctx.workingDir),

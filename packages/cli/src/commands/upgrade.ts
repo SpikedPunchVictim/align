@@ -1,4 +1,11 @@
-import { InMemoryBaselineStore, type BaselineEntry, type CheckRun, type RepoRelativePath, type ScanBlindSpot } from '@spikedpunch/align-core';
+import {
+  InMemoryBaselineStore,
+  type BaselineEntry,
+  type CheckRun,
+  type RepoRelativePath,
+  type ScanBlindSpot,
+  type ScanHistoryProbe,
+} from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaselineSnapshot, readVersionFile, recordBaselineReconciled, type BaselineToken } from '../align-dir.js';
@@ -6,12 +13,14 @@ import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
 import { partitionBlindSpotCandidates } from '../scan-blind-spot-retention.js';
 import { createFileExistenceProbe } from '../file-existence.js';
+import { openScanHistory } from '../scan-history.js';
 import { defaultConfirm } from '../prompt.js';
 import { compareVersions } from '../version-skew.js';
 import { ALIGN_VERSION } from '../telemetry/process-context.js';
 import { allValidatorsForEntry, MIGRATION_REGISTRY, selectRange, type SelectRangeFrom, type Validator, type ValidatorFinding } from '../migrations/index.js';
 import { baselineAccept, baselinePrune } from './baseline.js';
-import { computeBaselineDebt, persistMovedBaseline } from './check.js';
+import { computeBaselineDebt } from '../baseline-debt.js';
+import { persistMovedBaseline } from './check.js';
 
 export interface UpgradeOptions {
   /** `--notes`: print the assembled notes + validator findings for the detected range and exit.
@@ -191,7 +200,12 @@ export async function runUpgrade(rootDir: string, options: UpgradeOptions): Prom
     return reportCliError('align upgrade', err);
   }
 
-  const { orchestrator, baselineStore } = createOrchestrator(rootDir, ruleset, previousBaseline, hostRules);
+  // `upgrade` transfers (it calls `persistMovedBaseline` below) so it CONSULTS the record, and it
+  // deliberately does not write one: ADR 029 §7.3 keeps it out of the writer set because a rare
+  // one-shot migration advancing the temporal reference buys nothing and costs a false refusal on
+  // the next legitimate rename. Consulting without writing is the safe half of that pair.
+  const history = openScanHistory(rootDir, { ruleset, excludes, includeNestedCheckouts });
+  const { orchestrator, baselineStore } = createOrchestrator(rootDir, ruleset, previousBaseline, hostRules, history.probe);
   const run: CheckRun = await orchestrator.check({ rootDir, excludes, includeNestedCheckouts });
   try {
     // Same unconditional move-transfer persistence a plain `align check` performs
@@ -246,7 +260,7 @@ export async function runUpgrade(rootDir: string, options: UpgradeOptions): Prom
     // hostRules)`) so nothing is filtered — reused here via a second scan for the same reason, so
     // the preview agrees exactly with what those commands will actually do when invoked.
     const acceptAtRisk = run.gates.flatMap((g) => g.violations).length;
-    const { orchestrator: fullOrchestrator } = createOrchestrator(rootDir, ruleset, [], hostRules);
+    const { orchestrator: fullOrchestrator } = createOrchestrator(rootDir, ruleset, [], hostRules, history.probe);
     const fullRun = await fullOrchestrator.check({ rootDir, excludes, includeNestedCheckouts });
     const allViolations = fullRun.gates.flatMap((g) => g.violations);
 
@@ -272,6 +286,7 @@ export async function runUpgrade(rootDir: string, options: UpgradeOptions): Prom
       allViolations,
       knownFiles,
       fullRun.blindSpots,
+      history.probe,
       options,
       isInteractive,
       yes,
@@ -341,6 +356,10 @@ async function reconcilePrune(
   allViolations: CheckRun['gates'][number]['violations'],
   knownFiles: ReadonlySet<RepoRelativePath>,
   blindSpots: readonly ScanBlindSpot[],
+  /** The SAME probe `baselinePrune` will build for itself (ADR 029 §6). Threaded in rather than
+   * rebuilt here for the reason this whole function exists: a preview that reasons from a different
+   * temporal reference than the outcome names a count that will not happen. */
+  scanHistory: ScanHistoryProbe,
   options: UpgradeOptions,
   isInteractive: boolean,
   yes: boolean,
@@ -349,7 +368,7 @@ async function reconcilePrune(
   // The PREVIEW must reason exactly as `baselinePrune` will, or the count it asks consent for is
   // not the count that happens. Same probe, same root — see the 2026-08-13 note below for what a
   // preview/outcome divergence cost last time.
-  const previewStore = new InMemoryBaselineStore(previousBaseline, createFileExistenceProbe(rootDir));
+  const previewStore = new InMemoryBaselineStore(previousBaseline, createFileExistenceProbe(rootDir), scanHistory);
   // Step 1, `baselinePrune`'s `store.prune(allViolations, knownFiles, run.blindSpots)`. Passing the
   // blind spots (ADR 027's F1 fix, generalized by ADR 028) keeps an orphan the walk never looked at
   // out of `applyMoves`'s content-fingerprint search, so it lands in `removed` instead of being

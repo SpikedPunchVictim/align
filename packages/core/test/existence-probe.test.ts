@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { InMemoryBaselineStore } from '../src/baseline/store.js';
+import { noScanHistory } from '../src/baseline/scan-history.js';
+import { UNKNOWN } from '../src/types/scan-history.js';
 import { computeContentFingerprint, computeFingerprint } from '../src/baseline/fingerprint.js';
 import { toComponentName, toRepoRelativePath, toRuleId } from '../src/types/branded.js';
 import type { Violation } from '../src/types/violation.js';
@@ -68,7 +70,7 @@ describe('FileExistenceProbe — the transfer arm (reached on every `align check
     const { accepted, liveUnaccepted, knownFiles } = stageCollision('src/unscanned.ts');
     // No blind spot at all — mechanism 1 is blind here, by construction. This is the
     // unknown-future-cause the probe exists for.
-    const store = new InMemoryBaselineStore([], onDisk('src/unscanned.ts'));
+    const store = new InMemoryBaselineStore([], onDisk('src/unscanned.ts'), noScanHistory());
     store.accept([accepted], 'manual');
 
     const moves = store.reconcileMoves([liveUnaccepted], knownFiles, []);
@@ -83,7 +85,7 @@ describe('FileExistenceProbe — the transfer arm (reached on every `align check
     const { accepted, liveUnaccepted, knownFiles } = stageCollision('locked/service.ts');
     // `neverOnDisk` models exactly what `fs.existsSync` reports for a file inside a `chmod 000`
     // directory: ABSENT. The probe cannot save this one — the record has to.
-    const store = new InMemoryBaselineStore([], neverOnDisk);
+    const store = new InMemoryBaselineStore([], neverOnDisk, noScanHistory());
     store.accept([accepted], 'manual');
 
     const moves = store.reconcileMoves([liveUnaccepted], knownFiles, [
@@ -96,7 +98,7 @@ describe('FileExistenceProbe — the transfer arm (reached on every `align check
 
   it('DOES still transfer a genuine rename — the file is gone from the scan AND gone from disk', () => {
     const { accepted, liveUnaccepted, knownFiles } = stageCollision('src/old-name.ts', 'src/new-name.ts');
-    const store = new InMemoryBaselineStore([], neverOnDisk); // old-name.ts really is gone
+    const store = new InMemoryBaselineStore([], neverOnDisk, noScanHistory()); // old-name.ts really is gone
     store.accept([accepted], 'manual');
 
     const moves = store.reconcileMoves([liveUnaccepted], knownFiles, []);
@@ -112,7 +114,7 @@ describe('FileExistenceProbe — the transfer arm (reached on every `align check
     const { accepted, liveUnaccepted, knownFiles } = stageCollision('src/broken.ts', 'src/real.ts');
     // `fs.existsSync` follows symlinks, so a BROKEN one is `false`. That is the correct answer:
     // the target does not exist, so the entry is genuinely orphaned.
-    const store = new InMemoryBaselineStore([], onDisk('src/real.ts'));
+    const store = new InMemoryBaselineStore([], onDisk('src/real.ts'), noScanHistory());
     store.accept([accepted], 'manual');
 
     expect(store.reconcileMoves([liveUnaccepted], knownFiles, [])).toMatchObject([
@@ -124,7 +126,7 @@ describe('FileExistenceProbe — the transfer arm (reached on every `align check
 describe('FileExistenceProbe — the prune arm', () => {
   it('routes a probe-positive orphan to `removed` rather than `moved`, the arm CLI retention protects', () => {
     const { accepted, liveUnaccepted, knownFiles } = stageCollision('src/unscanned.ts');
-    const store = new InMemoryBaselineStore([], onDisk('src/unscanned.ts'));
+    const store = new InMemoryBaselineStore([], onDisk('src/unscanned.ts'), noScanHistory());
     store.accept([accepted], 'manual');
 
     const result = store.prune([liveUnaccepted], knownFiles, []);
@@ -135,7 +137,7 @@ describe('FileExistenceProbe — the prune arm', () => {
   });
 
   it('a genuinely deleted file with no content match still prunes — no over-retention', () => {
-    const store = new InMemoryBaselineStore([], neverOnDisk);
+    const store = new InMemoryBaselineStore([], neverOnDisk, noScanHistory());
     const v = makeViolation({ id: computeFingerprint(['gone']), file: toRepoRelativePath('src/deleted.ts') });
     store.accept([v], 'manual');
 
@@ -149,7 +151,7 @@ describe('FileExistenceProbe — the prune arm', () => {
     // retains every genuinely-fixed violation and makes `prune` a permanent no-op. The store gets
     // this right because `knownFiles` is tested first; `cli/src/scan-blind-spot-retention.ts`
     // needed the precondition stated explicitly.
-    const store = new InMemoryBaselineStore([], onDisk('src/fixed.ts'));
+    const store = new InMemoryBaselineStore([], onDisk('src/fixed.ts'), noScanHistory());
     const v = makeViolation({ id: computeFingerprint(['fixed']), file: toRepoRelativePath('src/fixed.ts') });
     store.accept([v], 'manual');
 
@@ -161,10 +163,14 @@ describe('FileExistenceProbe — the prune arm', () => {
 
   it('the probe is consulted only for files the scan did not observe (no needless filesystem work)', () => {
     const asked: string[] = [];
-    const store = new InMemoryBaselineStore([], (file) => {
-      asked.push(file);
-      return false;
-    });
+    const store = new InMemoryBaselineStore(
+      [],
+      (file) => {
+        asked.push(file);
+        return false;
+      },
+      noScanHistory(),
+    );
     const observed = makeViolation({ id: computeFingerprint(['obs']), file: toRepoRelativePath('src/observed.ts') });
     const unobserved = makeViolation({ id: computeFingerprint(['unobs']), file: toRepoRelativePath('src/unobserved.ts') });
     store.accept([observed, unobserved], 'manual');
@@ -182,14 +188,31 @@ describe('FileExistenceProbe — the prune arm', () => {
  * `accept`, `baselineShow` only reads. Each is handed the REAL probe anyway (a `() => false` stub
  * would be a false statement about the working tree that merely happens not to matter), so the
  * claim worth pinning is not "they pass a stub" but "these methods never consult it".
- */
+ *
+ * Since ADR 029 the store carries a SECOND injected probe, and those three sites hand it
+ * `noScanHistory()` rather than the real record — the one place the two arguments diverge, because
+ * building the real one needs a scan scope those call sites do not have. That makes the claim below
+ * load-bearing in a way it was not before: it is now the only thing standing between
+ * `commands/baseline.ts`'s comment and a stub that lies. Both probes are asserted here, in one test,
+ * so a future method that consults either fails on the same line. */
 describe('the add-only / read-only exemption (CLAUDE.md rule 4), pinned rather than asserted', () => {
-  it('accept, acceptByRule, show and snapshot never consult the existence probe', () => {
+  it('accept, acceptByRule, show and snapshot never consult either probe', () => {
     const asked: string[] = [];
-    const store = new InMemoryBaselineStore([], (file) => {
-      asked.push(file);
-      return true;
-    });
+    const askedHistory: string[] = [];
+    const store = new InMemoryBaselineStore(
+      [],
+      (file) => {
+        asked.push(file);
+        return true;
+      },
+      {
+        ...noScanHistory(),
+        wasViolationObservedAt: (file) => {
+          askedHistory.push(file);
+          return UNKNOWN;
+        },
+      },
+    );
     const v = makeViolation();
 
     store.accept([v], 'manual');
@@ -199,8 +222,9 @@ describe('the add-only / read-only exemption (CLAUDE.md rule 4), pinned rather t
     store.show({ ruleId: v.ruleId });
     store.snapshot();
 
-    // If this ever fails, one of those methods grew a destructive inference and needs the ADR 023
-    // guards and a write-set, not a quick edit to this expectation.
+    // If either of these ever fails, one of those methods grew a destructive inference and needs the
+    // ADR 023 guards and a write-set, not a quick edit to this expectation.
     expect(asked).toEqual([]);
+    expect(askedHistory).toEqual([]);
   });
 });

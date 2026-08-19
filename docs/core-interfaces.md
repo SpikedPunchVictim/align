@@ -550,6 +550,14 @@ interface CheckRun {
   /** What the scan actually saw, kept per-domain on purpose (ADR 028 §5) so a consumer merges them
    * explicitly rather than inheriting someone else's merge. */
   readonly observedFiles: { readonly source: ReadonlySet<RepoRelativePath>; readonly manifest: ReadonlySet<RepoRelativePath> };
+  /** ADR 029: every violation this run reported, BASELINED OR NOT — the only place the full set
+   * exists (`GateResult.violations` is the not-baselined subset). Projected to
+   * `{ file, ruleId, contentFingerprint }`, never the whole `Violation`, because this is written to
+   * disk and a `Violation` carries `snippet` (verbatim source text). */
+  readonly observedViolations: readonly ObservedViolation[];
+  /** ADR 029: files matched per declared component, ZEROS INCLUDED — "matched 12 last scan, 0 now"
+   * is the regression worth reporting, and a map built from the graph's nodes could not express it. */
+  readonly componentMatchCounts: ReadonlyMap<ComponentName, number>;
 }
 ```
 

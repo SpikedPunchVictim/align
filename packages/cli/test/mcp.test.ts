@@ -1,9 +1,51 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { ALIGN_VERSION } from '../src/telemetry/index.js';
-import { connectedClient, fixturesDir, textOf } from './mcp-test-helpers.js';
+import { connectedClient, copiedFixture, removeFixtureCopies, textOf } from './mcp-test-helpers.js';
+
+// Every server in this file runs against a disposable copy — see `copiedFixture` for the defect
+// that made that mandatory rather than merely tidy.
+afterAll(removeFixtureCopies);
+
+/**
+ * ADR 029 §7.3's writer set, from the MCP side — the half with no coverage until 2026-08-18, found by
+ * adversarial review (F2).
+ *
+ * The argument for making MCP a writer at all is that an agent-only workflow never runs the CLI
+ * command, so leaving it out would make the mechanism permanently inert for the consumer align ships
+ * an MCP server for. That argument was written into `scan-history.ts`'s doc comment and into ADR 029
+ * §7.3, and nothing executed it: `scan-observation-write.test.ts` covers `check`, `check --untrusted`
+ * and `doctor` only, and no integration scenario invokes `align_check`. A justification that
+ * elaborate, resting on an untested call site, is the shape this project keeps finding.
+ *
+ * BOTH tools, not just `align_check`: `align_violations` shares `freshCheck`, which is what makes it a
+ * writer too — and that sharing is exactly why the writer census in `scan-history.ts` said "three"
+ * when the answer was four.
+ */
+describe('the MCP server records what it observed (ADR 029 §7.3)', () => {
+  for (const tool of ['align_check', 'align_violations'] as const) {
+    it(`${tool} writes .align/last-scan.json`, async () => {
+      const dir = copiedFixture('simple-app-violation');
+      expect(fs.existsSync(path.join(dir, '.align/last-scan.json'))).toBe(false);
+      const client = await connectedClient(dir);
+
+      await client.callTool({ name: tool, arguments: {} });
+      await client.close();
+
+      const record = JSON.parse(fs.readFileSync(path.join(dir, '.align/last-scan.json'), 'utf8')) as {
+        readonly recordVersion: number;
+        readonly violations: readonly { readonly file: string }[];
+      };
+      expect(record.recordVersion).toBe(1);
+      // Not merely "a file appeared": the record must carry the violation this fixture contains, or a
+      // writer that persisted an empty observation would satisfy the assertion while leaving the next
+      // run with a record that positively claims the scan saw nothing.
+      expect(record.violations.map((v) => v.file)).toEqual(['src/api/service.ts']);
+    });
+  }
+});
 
 /**
  * Builds `dir/node_modules` the same way the whole-directory `fs.symlinkSync(realNodeModules, ...)`
@@ -60,7 +102,7 @@ function writeMinimalAlignRepo(dir: string): void {
 
 describe('align mcp — align_check', () => {
   it('returns a structured-only payload with the expected shape on a red fixture', async () => {
-    const client = await connectedClient(path.join(fixturesDir, 'simple-app-violation'));
+    const client = await connectedClient(copiedFixture('simple-app-violation'));
     const result = await client.callTool({ name: 'align_check', arguments: {} });
     const payload = JSON.parse(textOf(result)) as {
       verdict: string;
@@ -76,14 +118,14 @@ describe('align mcp — align_check', () => {
   });
 
   it('never includes a mermaid field — diagrams are explain-only (ADR 007 pull-on-demand)', async () => {
-    const client = await connectedClient(path.join(fixturesDir, 'simple-app-violation'));
+    const client = await connectedClient(copiedFixture('simple-app-violation'));
     const result = await client.callTool({ name: 'align_check', arguments: {} });
     const text = textOf(result);
     expect(text).not.toContain('mermaid');
   });
 
   it('green fixture reports zero violations and passCount, not per-item text', async () => {
-    const client = await connectedClient(path.join(fixturesDir, 'simple-app'));
+    const client = await connectedClient(copiedFixture('simple-app'));
     const result = await client.callTool({ name: 'align_check', arguments: {} });
     const payload = JSON.parse(textOf(result)) as { verdict: string; violations: unknown[] };
     expect(payload.verdict).toBe('green');
@@ -91,7 +133,7 @@ describe('align mcp — align_check', () => {
   });
 
   it('a red response for a small violation set stays well under ~1K tokens (ADR 007 budget, ~4 chars/token heuristic)', async () => {
-    const client = await connectedClient(path.join(fixturesDir, 'simple-app-violation'));
+    const client = await connectedClient(copiedFixture('simple-app-violation'));
     const result = await client.callTool({ name: 'align_check', arguments: {} });
     const text = textOf(result);
     const approxTokens = text.length / 4;
@@ -177,7 +219,7 @@ describe('align mcp — version-skew advisory carried into the payload (BUG #17)
 
 describe('align mcp — align_violations', () => {
   it('returns violations and pagination fields only', async () => {
-    const client = await connectedClient(path.join(fixturesDir, 'simple-app-violation'));
+    const client = await connectedClient(copiedFixture('simple-app-violation'));
     const result = await client.callTool({ name: 'align_violations', arguments: {} });
     const payload = JSON.parse(textOf(result)) as { violations: unknown[] };
     expect(payload.violations).toHaveLength(1);
@@ -186,7 +228,7 @@ describe('align mcp — align_violations', () => {
 
 describe('align mcp — align_explain_rule', () => {
   it('explains a known rule with its components and because text', async () => {
-    const client = await connectedClient(path.join(fixturesDir, 'simple-app-violation'));
+    const client = await connectedClient(copiedFixture('simple-app-violation'));
     const result = await client.callTool({
       name: 'align_explain_rule',
       arguments: { ruleId: 'arch.no-dependency:api->ui' },
@@ -198,13 +240,13 @@ describe('align mcp — align_explain_rule', () => {
   });
 
   it('reports an error for an unknown rule id rather than throwing', async () => {
-    const client = await connectedClient(path.join(fixturesDir, 'simple-app-violation'));
+    const client = await connectedClient(copiedFixture('simple-app-violation'));
     const result = await client.callTool({ name: 'align_explain_rule', arguments: { ruleId: 'no-such-rule' } });
     expect(result.isError).toBe(true);
   });
 
   it('includes a fenced Mermaid diagram for a rule with a live violation', async () => {
-    const client = await connectedClient(path.join(fixturesDir, 'simple-app-violation'));
+    const client = await connectedClient(copiedFixture('simple-app-violation'));
     const result = await client.callTool({
       name: 'align_explain_rule',
       arguments: { ruleId: 'arch.no-dependency:api->ui' },
@@ -216,7 +258,7 @@ describe('align mcp — align_explain_rule', () => {
   });
 
   it('omits mermaid for a rule with no current violation to diagram', async () => {
-    const client = await connectedClient(path.join(fixturesDir, 'simple-app'));
+    const client = await connectedClient(copiedFixture('simple-app'));
     const result = await client.callTool({ name: 'align_explain_rule', arguments: { ruleId: 'arch.no-cycles:repo' } });
     const payload = JSON.parse(textOf(result)) as { mermaid?: string };
     expect(payload.mermaid).toBeUndefined();
@@ -225,7 +267,7 @@ describe('align mcp — align_explain_rule', () => {
 
 describe('align mcp — align_propose_rules (ADR 011 two-pass clarification)', () => {
   it('pass 1 (doc_path only) classifies sections and never invents concerns for prose', async () => {
-    const client = await connectedClient(path.join(fixturesDir, 'build-app-mcp'));
+    const client = await connectedClient(copiedFixture('build-app-mcp'));
     const result = await client.callTool({
       name: 'align_propose_rules',
       arguments: { doc_path: 'docs/ARCHITECTURE-RULES.md' },
@@ -245,7 +287,7 @@ describe('align mcp — align_propose_rules (ADR 011 two-pass clarification)', (
   });
 
   it('pass 2 (proposals, no apply) validates, grounds, and dry-runs without writing', async () => {
-    const rootDir = path.join(fixturesDir, 'build-app-mcp');
+    const rootDir = copiedFixture('build-app-mcp');
     const client = await connectedClient(rootDir);
     const result = await client.callTool({
       name: 'align_propose_rules',
@@ -267,7 +309,7 @@ describe('align mcp — align_propose_rules (ADR 011 two-pass clarification)', (
   });
 
   it('flags an ungroundable proposal instead of accepting it', async () => {
-    const client = await connectedClient(path.join(fixturesDir, 'build-app-mcp'));
+    const client = await connectedClient(copiedFixture('build-app-mcp'));
     const result = await client.callTool({
       name: 'align_propose_rules',
       arguments: {
@@ -294,7 +336,7 @@ describe('align mcp — align_propose_rules (ADR 011 two-pass clarification)', (
     // align.config.ts DOES register 'route-thinness' (see the sibling test below) — this test
     // uses a genuinely different, never-registered name to prove "unregistered still errors"
     // survived adding the registration surface.
-    const client = await connectedClient(path.join(fixturesDir, 'build-app-mcp'));
+    const client = await connectedClient(copiedFixture('build-app-mcp'));
     const result = await client.callTool({
       name: 'align_propose_rules',
       arguments: {
@@ -320,7 +362,7 @@ describe('align mcp — align_propose_rules (ADR 011 two-pass clarification)', (
     // This fixture's align.config.ts exports `hostRules: { 'route-thinness': ... }` — proposing
     // the SAME shape as the test above, but with the name it actually registers, must now ground
     // successfully instead of being flagged.
-    const client = await connectedClient(path.join(fixturesDir, 'build-app-mcp'));
+    const client = await connectedClient(copiedFixture('build-app-mcp'));
     const result = await client.callTool({
       name: 'align_propose_rules',
       arguments: {
@@ -344,7 +386,7 @@ describe('align mcp — align_propose_rules (ADR 011 two-pass clarification)', (
 
   it('{ apply: true } writes generated-rules.json, rules.lock.json, and the audit report', async () => {
     const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-mcp-build-test-'));
-    fs.cpSync(path.join(fixturesDir, 'build-app-mcp'), rootDir, { recursive: true });
+    fs.cpSync(copiedFixture('build-app-mcp'), rootDir, { recursive: true });
     try {
       const client = await connectedClient(rootDir);
       const result = await client.callTool({
@@ -364,7 +406,7 @@ describe('align mcp — align_propose_rules (ADR 011 two-pass clarification)', (
 
 describe('align mcp — server instructions (Stage 5, condensed fixing skill)', () => {
   it('declares non-empty instructions within the ~30-line MCP budget, mentioning the fix-loop protocol', async () => {
-    const client = await connectedClient(path.join(fixturesDir, 'simple-app'));
+    const client = await connectedClient(copiedFixture('simple-app'));
     const instructions = client.getInstructions();
     expect(instructions).toBeDefined();
     expect(instructions).not.toHaveLength(0);

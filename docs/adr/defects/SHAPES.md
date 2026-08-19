@@ -42,14 +42,28 @@ comment side.
 
 ## S-03 — A comment asserting a fact about other code, unverified
 
-**Instances**: D007, and the three CLAUDE.md rule 5 cites ("three separate times in four days").
-**Rung**: brief.
+**Instances**: D007, D024(b) — five at once, in text hours old — and the three CLAUDE.md rule 5 cites
+("three separate times in four days"). **Rung**: brief.
 
 A doc comment stating what some *other* module does. It is correct when written and rots silently,
 and it is trusted precisely because it is specific.
 
 > **Ask**: for every comment claiming another file's behaviour, open that file and confirm. Cited
 > line numbers decay fastest.
+
+**D024(b) shows the shape does not need time to rot.** Every one of those five was false *the moment
+it was written*, by an author who had just implemented the code it described — a safety guarantee that
+greedy-with-consumption matching does not provide, a threat model omitting the one destructive outcome
+an attacker can reach, and a writer census of three where a shared helper made it four. So "decay" is
+the wrong mental model for the dangerous half of this shape: the dangerous half is a comment written
+at the moment of *maximum* confidence, asserting the property the author intended rather than the one
+the code has.
+
+> **Ask, sharpened**: for every comment asserting a SAFETY property ("cannot", "never", "only",
+> "nothing can"), construct the counter-example before accepting the sentence. If the property is
+> worth stating absolutely it is worth a test; if you cannot write that test, weaken the sentence to
+> what you can defend. Enumerations ("the set is X, Y and Z") are the same failure wearing a list —
+> derive them with a grep, not from memory, and say which grep.
 
 ---
 
@@ -197,9 +211,9 @@ on the old path, which is how this shape reproduces itself.
 
 ## S-10 — Absence treated as evidence
 
-**Instances**: BUG #1, BUG #18 (both S0), and the whole of ADR 028. **Rung**: **invariant**
-(partially) — ADR 023's two tiers and ADR 028's three retention mechanisms are executable; the
-underlying inference is not eliminated, only guarded.
+**Instances**: BUG #1, BUG #18 (both S0), D023 (S0, never implemented), and the whole of ADR 028.
+**Rung**: **invariant** (partially) — ADR 023's two tiers and ADR 028's three retention mechanisms
+are executable; the underlying inference is not eliminated, only guarded.
 
 The project's most productive shape, and the reason ADR 028 exists. Something is missing — a file, a
 violation, a config — and the missing-ness is read as a fact ("deleted", "fixed", "empty") when it
@@ -208,15 +222,77 @@ only ever meant "this run did not observe it".
 > **Ask**: for every `if (!found)` on a destructive path, what are the reasons `found` could be
 > false? Enumerate them all. How many mean what the code assumes?
 
+**D023 is the first instance found in a design document rather than in code, and that is the part
+worth carrying forward.** ADR 029 §5 states the antidote to this shape as doctrine — *history is
+admissible as a refusal, never as a permission* — and ADR 029 §6, sixteen lines later, licenses a
+consumer to do the forbidden thing, because the absence of a violation from the record was read as
+"so it did not exist". Both sections were reviewed and accepted; the contradiction surfaced only when
+someone tried to write the code. A record of what a run OBSERVED is a fresh supply of absences, so
+every consumer of one is a candidate instance of this shape.
+
+> **Ask, for a design document**: the doctrine section and the worked-example section of an ADR are
+> written at different moments and are not checked against each other by anything. For each consumer
+> the document licenses, name the positive fact that authorizes it. If the answer is "X is not in the
+> record", the licence is this shape wearing the document's authority.
+
 ---
 
 ## S-11 — A writer trusted to stay inside its own region
 
-**Instances**: BUG #10 (S0). **Rung**: **invariant** — ADR 026's declared write-sets, universal and
-fail-closed.
+**Instances**: BUG #10 (S0), D022 (S3). **Rung**: **invariant** — ADR 026's declared write-sets at
+the integration level; `connectedClient`'s fixture refusal at the unit level.
 
-A command that writes into a file it shares with a human, trusted by construction to touch only its
-own part.
+A command that writes into a file — or a tree — it shares with someone else, trusted by construction
+to touch only its own part.
 
 > **Ask**: what does this command write, and what did it declare? A new writer without a declared
 > write-set and an integration scenario is incomplete by definition (CLAUDE.md rules 1 and 2).
+
+**Second instance, 2026-08-18 (D022), one level below where the invariant lives.** ADR 026 covers
+integration scenarios; nothing covered unit tests. `mcp.test.ts` started MCP servers against
+`test/fixtures/simple-app*` **in place**, which was safe for exactly as long as no MCP tool wrote
+anything — and ADR 029 made `align_check` a writer. `pnpm test` then began leaving
+`.align/last-scan.json` inside committed fixture directories. Note the shape survives the change of
+scale: the "region" was a directory rather than a marker block, and the trust was still structural
+rather than checked.
+
+> **Ask (added)**: which tests point a real command at a tree they do not own? A fixture the suite
+> shares with git is the same trust relationship as a config file shared with a human.
+
+---
+
+## S-12 — A discipline transplanted from the artifact that earned it
+
+**Instances**: ADR 030 §4 (`.align/.lock`, measured: repository bricked), D021 (ADR 029 §7.4,
+`.align/last-scan.json`, caught before it shipped). **Rung**: brief — see the declined promotion
+below.
+
+A safety rule is derived, correctly and at cost, for one artifact. It then gets applied to a second
+artifact **by name rather than by re-derivation**, and at the second one its failure mode is
+inverted, so the rule now causes the class of harm it was written to prevent.
+
+Both instances are the same rule: *corrupt is never read as absent* (BUG #1 — a corrupted
+`.align/baseline.json` read as `[]`, then destroyed by the next full-snapshot write). That is right
+for `baseline.json`, which holds irreplaceable human consent nobody can regenerate. Applied to a
+file **align itself creates, owns and replaces on every run**, the same rule means an unreadable file
+the user cannot see in `git status` blocks every command until they delete it by hand — a bricked
+repository, to protect data that did not exist.
+
+> **Ask**: this rule was written for a specific artifact. For the artifact you are applying it to
+> now: who authored the data, can align regenerate it, and what happens if the rule fires wrongly?
+> If the answers differ from the original, re-derive the rule instead of citing it.
+
+**The criterion already existed, which is what makes this shape worth a register entry.** `readBaseline`'s
+doc comment states it in one line — *"Mirrors `readRulesetIr`'s discipline, not `readTelemetryState`'s
+— this file holds irreplaceable human consent decisions, not a regenerable cache"* — and
+`readTelemetryState` four functions below it is the worked example. Both instances of this shape were
+written by someone with that text in the repository. A shape whose antidote is already documented and
+still recurs is not an information problem; it is a *reflex* problem, which is exactly what a review
+brief is for.
+
+**Promotion declined, and the reason recorded.** The obvious executable form — "every reader of a
+machine-local `.align/` file returns absent on corruption" — would today be a list of two readers
+(`readLastScanRecord`, `readTelemetryState`), both already pinned by their own tests, and the
+enumeration itself would be the thing that goes stale. The generalizable half is not the rule but the
+*question*, which is what the Ask above encodes. Revisit if a third machine-local artifact appears:
+at three, the list stops being a list and starts being a class.

@@ -22,6 +22,7 @@ import {
 } from '@spikedpunch/align-agent';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
+import { openScanHistory } from '../scan-history.js';
 import { readBaseline } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
@@ -53,7 +54,11 @@ function buildEffects(
   return {
     fixProvider,
     runCheck: async () => {
-      const { orchestrator } = createOrchestrator(rootDir, ruleset, readBaseline(rootDir), hostRules);
+      // Consults the record, never writes it (ADR 029 §7.3): `agent run` re-checks after every fix,
+      // and a surface that advanced the temporal reference mid-loop would make the NEXT run refuse a
+      // legitimate rename it had itself just observed.
+      const history = openScanHistory(rootDir, { ruleset, excludes, includeNestedCheckouts });
+      const { orchestrator } = createOrchestrator(rootDir, ruleset, readBaseline(rootDir), hostRules, history.probe);
       return orchestrator.check({ rootDir, excludes, includeNestedCheckouts });
     },
     scanGraph: () => plugin.scanner.scan({ rootDir, components: ruleset.components, excludes, includeNestedCheckouts }),

@@ -21,7 +21,10 @@ export default {
   // every path: `add-no-cycles-rule`/`introduce-arch-violation` are `mutate` steps editing
   // align.config.ts (already declared); `baseline show` is read-only.
   tags: ['destructive'],
-  writeSet: ['package.json', 'package-lock.json', 'align.config.ts', 'CLAUDE.md', '.gitignore', '.align/baseline.json', '.align/version.json'],
+  // `.align/last-scan.json`: every `align check` records what it observed (ADR 029). Declared
+  // rather than exempted — a machine-local cache is still a path align writes into someone
+  // else's repository, and ADR 026's set is what a reader consults to know that.
+  writeSet: ['package.json', 'package-lock.json', 'align.config.ts', 'CLAUDE.md', '.gitignore', '.align/baseline.json', '.align/version.json', '.align/last-scan.json'],
   steps: [
     { install: 'target' },
     { run: 'init --accept-existing', expect: { exit: 0, stdoutContains: 'Detected 9 component(s)' } },

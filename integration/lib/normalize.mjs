@@ -33,7 +33,13 @@ const PLACEHOLDER_VERSION = '<normalized-version>';
  * "unchanged" assertions compare `fingerprint`/`ruleId`/`file`/`acceptedBy` — the fields this
  * list deliberately does NOT touch — never the whole entry as an opaque blob.
  */
-const VOLATILE_JSON_KEYS = new Set(['acceptedAt', 'exportedAt', 'builtAt', 'generatedAt', 'scannedAt']);
+// `observedAt` (ADR 029's `.align/last-scan.json`) joins the list for the same reason `scannedAt` is
+// on it — and note what blanking it means for an `assert`: a `fileUnchanged` on that record compares
+// the OBSERVATION and not the write, which is precisely ADR 029 §7.1's own comparison. The stronger
+// claim, that no write happened at all, is pinned at the unit level on the file's inode
+// (`packages/cli/test/scan-observation-write.test.ts`), because a harness that normalizes the
+// timestamp structurally cannot see the difference.
+const VOLATILE_JSON_KEYS = new Set(['acceptedAt', 'exportedAt', 'builtAt', 'generatedAt', 'scannedAt', 'observedAt']);
 
 /**
  * `generatedRulesContentHash` (increment 2, found via the harness's own two-run determinism check,

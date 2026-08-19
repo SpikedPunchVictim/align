@@ -7,6 +7,7 @@ import {
   groundFragment,
   InMemoryBaselineStore,
   mergeGeneratedRules,
+  noScanHistory,
   proposeRulesFromDoc,
   sha256Hex,
   toRepoRelativePath,
@@ -285,10 +286,12 @@ export function writeBuildArtifacts(
 
   if (options.acceptNewIntoBaseline && result.impact.addedNew.length > 0) {
     // Add-only (CLAUDE.md rule 4's exemption): this path only ever calls `accept` + `snapshot`, so
-    // the probe is never consulted. Passed for real anyway — see `commands/baseline.ts`'s
-    // `baselineAccept` for why a stub would be a false statement rather than a harmless one.
+    // neither probe is consulted. The real `fileExists` is passed anyway — see `commands/baseline.ts`'s
+    // `baselineAccept` for why a stub would be a false statement rather than a harmless one, and for
+    // why the scan-history probe is the one exception to that (no scan scope in hand, no reachable
+    // question).
     const baseline = readBaselineSnapshot(rootDir);
-    const store = new InMemoryBaselineStore(baseline.entries, createFileExistenceProbe(rootDir));
+    const store = new InMemoryBaselineStore(baseline.entries, createFileExistenceProbe(rootDir), noScanHistory());
     store.accept(result.impact.addedNew, 'manual');
     writeBaseline(rootDir, store.snapshot(), baseline.token);
   }

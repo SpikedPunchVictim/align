@@ -11,6 +11,8 @@ export * from './gates/deep-imports.js';
 export * from './baseline/store.js';
 export * from './baseline/fingerprint.js';
 export * from './baseline/schema.js';
+export * from './baseline/scan-history-schema.js';
+export * from './baseline/scan-history.js';
 export * from './baseline/scan-blind-spots.js';
 export * from './plugin/registry.js';
 export * from './orchestrator.js';

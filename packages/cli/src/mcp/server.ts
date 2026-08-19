@@ -17,8 +17,9 @@ import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaselineSnapshot, writeBaseline } from '../align-dir.js';
 import { buildExplainPayload } from '../commands/explain.js';
-import { computeBaselineDebt } from '../commands/check.js';
+import { computeBaselineDebt } from '../baseline-debt.js';
 import { createFileExistenceProbe } from '../file-existence.js';
+import { openScanHistory, persistScanObservation } from '../scan-history.js';
 import { DEFAULT_DOC_PATH, proposeFromClientSubmission, writeBuildArtifacts, type DryRunResult } from '../commands/build.js';
 import { renderCondensedFixingSkill } from '../skill/condensed.js';
 import { withVersionSkew } from '../version-skew.js';
@@ -45,11 +46,18 @@ async function freshCheck(rootDir: string): Promise<{ readonly run: CheckRun; re
   // `align_check` while a human runs `align baseline accept` in a terminal is the concrete way a
   // consent decision gets lost, and it is the case ADR 030 was written for.
   const { entries: previousBaseline, token: baselineToken } = readBaselineSnapshot(rootDir);
-  const { orchestrator, baselineStore } = createOrchestrator(rootDir, ruleset, previousBaseline, hostRules);
+  const history = openScanHistory(rootDir, { ruleset, excludes, includeNestedCheckouts });
+  const { orchestrator, baselineStore } = createOrchestrator(rootDir, ruleset, previousBaseline, hostRules, history.probe);
   const run = withVersionSkew(await orchestrator.check({ rootDir, excludes, includeNestedCheckouts }), rootDir);
   if (run.advisories.some((a) => a.kind === 'baseline-moved')) {
     writeBaseline(rootDir, baselineStore.snapshot(), baselineToken);
   }
+  // ADR 029. MCP's `align_check` is a writer for the same reason the CLI command is and no other
+  // surface is: it consulted the record, made a transfer decision, and persisted it. See
+  // `scan-history.ts` for why §7.3's enumeration is widened rather than followed literally — an
+  // agent-only workflow never runs the CLI command, so excluding this call site would leave the
+  // whole mechanism inert for the consumer align ships an MCP server for.
+  persistScanObservation(rootDir, run, history);
   // Shared, error-run-guarded computation (check.ts) — NOT an inline `Σ baselinedCount`, which
   // fabricates a `−N` debt drop on error runs (gates report 0 baselined then). This was the third
   // copy the first fix missed (NEW-1), and it is now guarded against a SECOND cause of the same

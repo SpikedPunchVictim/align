@@ -291,6 +291,8 @@ describe('isRunComplete', () => {
       ungroundedComponents: [],
       blindSpots: [],
       observedFiles: { source: new Set(), manifest: new Set() },
+      observedViolations: [],
+      componentMatchCounts: new Map(),
     };
   }
 

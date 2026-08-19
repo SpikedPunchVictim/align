@@ -45,6 +45,8 @@ function runWith(violations: Violation[], overrides: Partial<CheckRun> = {}): Ch
     ungroundedComponents: [],
     blindSpots: [],
     observedFiles: { source: new Set(), manifest: new Set() },
+    observedViolations: [],
+    componentMatchCounts: new Map(),
     ...overrides,
   };
 }

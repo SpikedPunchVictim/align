@@ -8,7 +8,7 @@ import { baselineAccept, baselinePrune } from '../src/commands/baseline.js';
 import { persistMovedBaseline, runCheck } from '../src/commands/check.js';
 import { runInit } from '../src/commands/init.js';
 import { refuseIfRunIncomplete } from '../src/errored-run.js';
-import { InMemoryBaselineStore, toRuleId, toRepoRelativePath, toViolationId, type CheckRun, type FileExistenceProbe } from '@spikedpunch/align-core';
+import { InMemoryBaselineStore, noScanHistory, toRuleId, toRepoRelativePath, toViolationId, type CheckRun, type FileExistenceProbe } from '@spikedpunch/align-core';
 import { seedBaseline } from './seed-baseline.js';
 import { readBaselineSnapshot } from '../src/align-dir.js';
 /** ADR 028 mechanism 2's probe, answering "absent" for everything — this test's world is exactly
@@ -268,7 +268,7 @@ describe('the other mutating consumers of a run’s violations', () => {
           acceptedAt: 1,
           acceptedBy: 'manual',
         },
-      ], neverOnDisk);
+      ], neverOnDisk, noScanHistory());
       const erroredRunWithMove: CheckRun = {
         verdict: 'error',
         gates: [
@@ -290,6 +290,8 @@ describe('the other mutating consumers of a run’s violations', () => {
         ungroundedComponents: [],
         blindSpots: [],
         observedFiles: { source: new Set(), manifest: new Set() },
+        observedViolations: [],
+        componentMatchCounts: new Map(),
       };
 
       // No refusal mechanism exists in this function's signature (unlike `baselinePrune`/`runInit`,
@@ -315,6 +317,8 @@ describe('`refuseIfRunIncomplete` (ADR 023 tier 2, unit-level)', () => {
       ungroundedComponents: [],
       blindSpots: [],
       observedFiles: { source: new Set(), manifest: new Set() },
+      observedViolations: [],
+      componentMatchCounts: new Map(),
     };
   }
 

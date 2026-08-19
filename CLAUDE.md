@@ -46,7 +46,7 @@ failing test.
 ### Verifying a change
 
 ```
-pnpm build && pnpm typecheck && pnpm test      # ~26s, 1104 tests — the fast gate, run it always
+pnpm build && pnpm typecheck && pnpm test      # ~26s, 1441 tests — the fast gate, run it always
 node packages/cli/dist/index.js check          # must be green; red is blocking
 node packages/cli/dist/index.js doctor         # advisory only, always exits 0
 node integration/run.mjs --targets local       # Docker; real project, real command sequences
@@ -60,9 +60,10 @@ integration level. A release-gate scenario the release-gate command does not exe
 calibration; this was found by review on 2026-08-18 (`docs/adr/defects/LEDGER.md` D012) after the
 consent gate broke that scenario and nothing reported it.
 
-The full cross-version matrix (`--targets 0.1.4,local`) is a release gate — **seven** scenarios carry
-`expectFailOn: ['0.1.4']` as its calibration (recounted 2026-08-18; it was three when this line was
-written, and grows whenever a defect is pinned against a published version), and if those ever pass against 0.1.4 the harness has
+The full cross-version matrix (`--targets 0.1.4,local`) is a release gate — **eight** scenarios carry
+`expectFailOn: ['0.1.4']` as its calibration (recounted 2026-08-18 after `scan-history-refuses-forged-transfer`
+was calibrated; it was three when this line was written, and grows whenever a defect is pinned against a
+published version), and if those ever pass against 0.1.4 the harness has
 stopped working and nothing it reports can be trusted.
 
 ## 1. Rigour on load-bearing claims
