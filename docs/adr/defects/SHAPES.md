@@ -308,3 +308,30 @@ machine-local `.align/` file returns absent on corruption" — would today be a 
 enumeration itself would be the thing that goes stale. The generalizable half is not the rule but the
 *question*, which is what the Ask above encodes. Revisit if a third machine-local artifact appears:
 at three, the list stops being a list and starts being a class.
+
+---
+
+## S-13 — A defect that disables the instrument that would find it
+
+**Instances**: D033 (S3, three files at once). **Rung**: **invariant** — promoted immediately, see below.
+
+Most defects are found by an instrument. This shape is the one that breaks the instrument first, so its
+own detection probability drops to near zero and stays there. D033 is the clean example: three source
+files contained a raw NUL byte, which makes `grep` skip the file silently and `git diff` render it as
+`Bin … bytes, 0 insertions, 0 deletions`. The code was correct. What broke was the ability to *review*
+the code — and specifically the two instruments this project names most often, a human reading a diff
+and a grep receipt for a negative claim (CLAUDE.md rule 3).
+
+It surfaced only because an agent's grep returned nothing for a symbol it could see in the file, and it
+chased the contradiction instead of recording the absence.
+
+> **Ask**: for any artifact this project reasons about — source files, diffs, logs, reports, the ledger
+> itself — what would make it *invisible* to the tool we check it with, rather than merely wrong in it?
+> An absence result that surprises you is the signal; treat "grep found nothing" as a claim to verify,
+> not an answer.
+
+**Promoted on the first instance, which is a departure worth stating.** This register's rule is to
+promote on the second, because the cost of an executable invariant usually is not justified before
+then. Two things overrode it here: there were already three occurrences in one finding, and the
+invariant is fifteen lines with no runtime cost. The rule is a heuristic about cost versus evidence —
+when the cost collapses, so does the threshold.
