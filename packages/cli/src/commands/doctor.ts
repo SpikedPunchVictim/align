@@ -134,6 +134,52 @@ function buildStaleSkillAdvisory(rootDir: string, program: Command | undefined):
   return undefined;
 }
 
+/**
+ * Source files that are BINARY to git and grep — a control byte outside tab/newline/CR, almost
+ * always a NUL pasted where an escape was meant (LEDGER D033, shape [S-13]).
+ *
+ * **Why doctor and not a rule.** A control byte is not an architecture violation, so failing
+ * `align check` over one would miscategorise it; and a `custom.host` predicate would not survive
+ * `align check --untrusted` (ADR 014/017). It is repo hygiene that happens to disable the tools a
+ * reviewer uses, which is exactly doctor's remit: read-only, always exit 0, "why is my result weird".
+ *
+ * **What it costs the repository it fires on.** `grep -rn` silently skips the file — no match, no
+ * warning — so every claim of absence made about it is unverified while reading as verified. `git
+ * diff` renders every change to it as `Bin ... bytes, 0 insertions(+), 0 deletions(-)`, so it cannot
+ * be code-reviewed. align found three such files in its own tree, one of them holding the function
+ * its move-transfer matches on; the code was correct in all three and the reviewability was not.
+ *
+ * Scoped to `graph.nodes` — the files align actually scanned, already narrowed by the repo's own
+ * `excludes` — so a deliberately binary fixture outside the scan cannot trip it. One advisory per
+ * file, so the generic per-kind display cap applies the same way it does to every other kind.
+ */
+function buildBinarySourceAdvisories(rootDir: string, files: readonly string[]): Advisory[] {
+  const out: Advisory[] = [];
+  for (const file of files) {
+    let bytes: Buffer;
+    try {
+      bytes = fs.readFileSync(path.join(rootDir, file));
+    } catch {
+      // Unreadable is already an ADR 028 blind spot with its own advisory; doctor never throws.
+      continue;
+    }
+    const at = bytes.findIndex((b) => b < 0x09 || b === 0x0b || b === 0x0c || (b > 0x0d && b < 0x20));
+    if (at === -1) continue;
+    const line = bytes.subarray(0, at).toString('latin1').split('\n').length;
+    const hex = bytes[at]?.toString(16).padStart(2, '0') ?? '??';
+    out.push({
+      kind: 'binary-source-file',
+      message:
+        `${file}:${line} contains a raw control byte (0x${hex}), which makes git and grep treat the whole file as ` +
+        'BINARY: `grep` skips it silently and every diff of it renders as "Bin ... bytes, 0 insertions, 0 deletions", ' +
+        'so it cannot be code-reviewed. Almost always a control character pasted where an escape was meant — ' +
+        'replacing it with the escape (for example the six characters backslash-u-0-0-0-0 for NUL) changes nothing at ' +
+        'runtime.',
+    });
+  }
+  return out;
+}
+
 async function collectDoctorReport(rootDir: string, program: Command | undefined): Promise<DoctorReport> {
   const advisories: Advisory[] = [];
   let uncertain: readonly UncertaintyMarker[] = [];
@@ -177,6 +223,8 @@ async function collectDoctorReport(rootDir: string, program: Command | undefined
       uncertain = graph.uncertain;
       advisories.push(...buildUncertaintyAdvisories(graph.uncertain));
       advisories.push(...buildScanBlindSpotAdvisories(graph.blindSpots));
+
+      advisories.push(...buildBinarySourceAdvisories(rootDir, graph.nodes.map((n) => n.file)));
 
       const unmapped = graph.nodes.filter((n) => n.component === UNMAPPED_COMPONENT);
       if (unmapped.length > 0) {
