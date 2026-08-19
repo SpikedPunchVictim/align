@@ -73,7 +73,17 @@ function readLockfile(rootDir: string, record: (path: string, reason: ScanBlindS
     return undefined;
   }
   try {
-    return parseYaml(raw) as PnpmLockfile;
+    const parsed: unknown = parseYaml(raw);
+    // The same "it parsed" ≠ "it is the thing" gap as `manifestShapeError` below (LEDGER D039), and
+    // it matters here for the reason this function's header already states: `lockfilePresent` must
+    // distinguish three states, and an empty or comment-only `pnpm-lock.yaml` parses to `null`,
+    // which would have been reported as a lockfile align successfully read. It is not a crash —
+    // every read below is optional-chained — but it is the invariant this function exists to hold.
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      record('pnpm-lock.yaml', { kind: 'unparseable', error: 'expected a mapping at the top level of pnpm-lock.yaml' });
+      return undefined;
+    }
+    return parsed as PnpmLockfile;
   } catch (err) {
     record('pnpm-lock.yaml', { kind: 'unparseable', error: err instanceof Error ? err.message : String(err) });
     return undefined;
@@ -94,6 +104,51 @@ function findDependencyLine(raw: string, depName: string): number | undefined {
   const lines = raw.split('\n');
   for (let i = 0; i < lines.length; i += 1) {
     if (re.test(lines[i] ?? '')) return i + 1;
+  }
+  return undefined;
+}
+
+/** A plain, non-null, non-array object — the only shape either a manifest or a dependency map can
+ * legally have. `typeof null === 'object'` and arrays are objects, so both need saying explicitly;
+ * the array case is the one that produced a SILENT wrong answer rather than a crash. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Validates what `JSON.parse` never promised (LEDGER D039).
+ *
+ * `JSON.parse` succeeding means the bytes were JSON, not that they were a manifest, and this walker
+ * used to read `pkg[field]` and `Object.entries(declared)` outside the `try` on that assumption.
+ * Three shapes threw a raw `TypeError` — `"dependencies": null`, the same for the other two fields,
+ * and a top-level `null` — which `orchestrator.ts` turns into an ERRORED SECURITY GATE for the whole
+ * repository, with a message naming no file and `blindSpots: []` discarding everything the walk had
+ * already recorded.
+ *
+ * The shape that did NOT throw was worse. `"dependencies": "oops"` reached `Object.entries` of a
+ * string, which yields its characters, so align invented four dependencies named `0`,`1`,`2`,`3` and
+ * evaluated `security.manifest.*` rules against them; `"dependencies": []` yielded zero and reported
+ * a package that declares nothing. A wrong answer at exit 0 outranks a crash in this project.
+ *
+ * Returns the reason as prose rather than throwing, so the caller records it exactly like a JSON
+ * syntax error: corrupt, not absent. That routing is what keeps `prune` from deleting the entries
+ * under an unreadable manifest as "fixed".
+ */
+function manifestShapeError(parsed: unknown): string | undefined {
+  if (!isPlainObject(parsed)) {
+    return `expected an object at the top level, found ${Array.isArray(parsed) ? 'an array' : String(parsed === null ? 'null' : typeof parsed)}`;
+  }
+  for (const field of DEP_FIELDS) {
+    const declared = parsed[field];
+    if (declared === undefined) continue;
+    if (!isPlainObject(declared)) {
+      return `"${field}" must be an object mapping package names to version specifiers, found ${Array.isArray(declared) ? 'an array' : String(declared === null ? 'null' : typeof declared)}`;
+    }
+    for (const [name, specifier] of Object.entries(declared)) {
+      if (typeof specifier !== 'string') {
+        return `"${field}"."${name}" must be a version specifier string, found ${String(specifier === null ? 'null' : typeof specifier)}`;
+      }
+    }
   }
   return undefined;
 }
@@ -136,7 +191,16 @@ function buildManifestRecord(
 
   let pkg: RawPackageJson;
   try {
-    pkg = JSON.parse(raw) as RawPackageJson;
+    const parsed: unknown = JSON.parse(raw);
+    // INSIDE the try, with the parse (LEDGER D039). "It was JSON" and "it was a manifest" are two
+    // different facts, and reading the second off the first is what let a `TypeError` escape this
+    // function into the orchestrator's gate-level catch.
+    const shapeError = manifestShapeError(parsed);
+    if (shapeError !== undefined) {
+      record(relFile, { kind: 'unparseable', error: shapeError });
+      return undefined;
+    }
+    pkg = parsed as RawPackageJson;
   } catch (err) {
     // Corrupt, not absent. The file is right there and the user can fix it; treating its entries as
     // fixed would delete consent records over a typo in a JSON file.

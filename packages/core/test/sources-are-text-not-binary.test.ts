@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 /**
- * No tracked source file may contain a raw control byte that makes git and grep treat it as BINARY.
+ * No tracked source or Markdown file may contain a raw control byte that makes git and grep treat it
+ * as BINARY.
  *
  * **Three instances, so it is an invariant rather than a note** (CLAUDE.md section 2: a shape with a
  * second instance has earned promotion). Found 2026-08-19 by two independent bug-hunt lens passes:
@@ -30,6 +31,20 @@ import { describe, expect, it } from 'vitest';
  * `align doctor` advisory — read-only, always exit 0, repo hygiene rather than conformance. For THIS
  * repository the right surface is this test, which is stricter and costs nothing.
  *
+ * **Widened to `.md` and to `.agents/` on 2026-08-19, on a FOURTH instance.** The first version of
+ * this test covered TypeScript and JavaScript only, and skipped `.agents/`. Both exclusions were
+ * wrong for the same reason, and the proof was as pointed as this shape gets: the bug-hunt report
+ * that DOCUMENTS the NUL defect contained a raw NUL of its own, at the exact spot where it wrote
+ * "instead of the escape `\u0000`" — so the report explaining why files must not be binary was
+ * itself binary to git and grep, and had been since the day it was committed. It was found by
+ * reading `git diff --stat` on an unrelated edit and noticing `Bin 10157 -> 12487 bytes`.
+ *
+ * This project's reasoning lives in Markdown at least as much as in TypeScript: `LEDGER.md` is the
+ * record of how we were wrong, `SHAPES.md` generates review briefs, and CLAUDE.md §1.2's discipline
+ * ("read your own tool output") is worthless against a file grep silently skips. A NUL in any of
+ * them would be invisible in exactly the same way. Swept before widening: one offender in the whole
+ * repository, now fixed.
+ *
  * **Walked rather than `git ls-files`-ed**, deliberately: `node:child_process` is forbidden inside
  * `packages/core/**` by align's own ruleset (`align.config.ts`, ADR 017's dogfood migration), and a
  * test that had to be exempted from the rules it ships would be a poor advertisement.
@@ -40,9 +55,9 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 /** Directories that are not ours to police: dependencies, build output, caches, and the integration
  * harness's scratch space. `fixtures` is deliberately NOT skipped — a fixture is source too, and a
  * fixture that needs real binary content should carry a non-source extension. */
-const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.cache', 'results', 'coverage', '.agents', 'test-apps']);
+const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.cache', 'results', 'coverage', 'test-apps']);
 
-const SOURCE_EXT = new Set(['.ts', '.mts', '.cts', '.mjs', '.cjs', '.js']);
+const SOURCE_EXT = new Set(['.ts', '.mts', '.cts', '.mjs', '.cjs', '.js', '.md']);
 
 /**
  * The bytes that make git call a file binary. NUL is the one that has actually bitten us; the rest

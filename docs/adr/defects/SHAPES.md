@@ -150,7 +150,19 @@ discovered in production — or, if you are lucky, on a scenario's first run.
 ## S-09 — Fixed one arm, missed the other
 
 **Instances**: ADR 027 F1 (S0), **D010 (S0)**, D016 (S1), D017 (S1), **D020 (S2, twice over)**,
-D024(a) (S1), **D025 (S2)**. **Rung**: brief, **plus one executable technique** — see below.
+D024(a) (S1), **D025 (S2)**, D028 (S1), **D030 (S0)**, **D034 (S0)**, **D035 (S0)**, D037 (S2),
+D038 (S2), D039 (S1). **Rung**: brief, **plus two executable invariants** — see below.
+
+**This is the project's dominant shape, and the number is measured, not impressionistic.** Recounted
+from `LEDGER.md`'s Shape column on 2026-08-19: **13 of 39 rows**, one in three, and all three defects
+of that day's phase 4 (D037/D038/D039) were instances. No other shape is close. Recount before
+quoting — this register went stale by six rows between 2026-08-17 and 2026-08-19, which is the second
+time this exact file has been a sample presenting as a census (see the paragraph below). The count
+that matters is the Shape column specifically. `grep -c S-09 LEDGER.md` returns 16 for three
+different reasons at once: 13 rows carry it as their Shape, one more (D018) mentions it in another
+column without being an instance, and two hits are not rows at all — the undated ADR 027 F1 entry and
+a line of the file's own prose. Four ways to be off by a little, in a register whose whole failure
+mode is being read as exact.
 
 **D025 is the sharpest instance yet and the cheapest to have avoided**: a guard refusing to write the
 scan record from an ERRORED run, shipped hours before review asked what *else* makes a run know less
@@ -177,6 +189,24 @@ the fix was framed as a bug rather than a class. CLAUDE.md rule 6 in one line: *
 the instance.*
 
 > **Ask**: grep for every caller of the thing you just fixed. Which of them has the same shape?
+
+**Second executable invariant, 2026-08-19 (D037) — the register pattern.** The first technique below
+mechanises one *property*. This one mechanises the *decision*, and it is the more transferable of the
+two, because S-09's hard cases are the ones where the two arms should behave DIFFERENTLY and no single
+assertion can be right for both. `cli/test/baseline-writers-classify-concurrency.test.ts` enumerates
+every module that writes `.align/baseline.json` and requires each to appear in one of two declared
+maps — degrade on a concurrent align, or fail loudly — with a written reason. Neither answer is
+imposed; what is imposed is that a NEW writer cannot inherit either by saying nothing, which is
+precisely how this shape reproduces (ADR 027's note on optional parameters makes the same argument).
+
+The trigger for promoting it: `freshCheck`'s own doc comment had already named this as the function
+"that keeps getting missed", listing two prior misses — and it was missed a third time anyway. **A
+comment naming a recurring miss is evidence the miss will recur, not a control against it.** When you
+find one, that is the promotion signal.
+
+> **Ask, when the two arms should legitimately differ**: can the *choice* be made declarable, so an
+> unclassified call site fails a test? A register with reasons beats an assertion that must be wrong
+> for somebody.
 
 **Second instance, 2026-08-18 (D016), and the promotion decision.** `computeBaselineDebt` already
 refused to report a debt drop on an errored run, with a comment naming that exact hazard. ADR 028
@@ -313,7 +343,8 @@ at three, the list stops being a list and starts being a class.
 
 ## S-13 — A defect that disables the instrument that would find it
 
-**Instances**: D033 (S3, three files at once). **Rung**: **invariant** — promoted immediately, see below.
+**Instances**: D033 (S3, three files at once), **D040 (S3 — in the report about D033)**. **Rung**:
+**invariant**, widened on the second instance.
 
 Most defects are found by an instrument. This shape is the one that breaks the instrument first, so its
 own detection probability drops to near zero and stays there. D033 is the clean example: three source
@@ -329,6 +360,26 @@ chased the contradiction instead of recording the absence.
 > itself — what would make it *invisible* to the tool we check it with, rather than merely wrong in it?
 > An absence result that surprises you is the signal; treat "grep found nothing" as a claim to verify,
 > not an answer.
+
+**Second instance, 2026-08-19 (D040), and it is the sharpest illustration this register will get: the
+report documenting D033 contained a raw NUL of its own**, at the exact spot where it wrote "instead of
+the escape `\u0000`". The file explaining why sources must not be binary to git and grep was itself
+binary to git and grep, from the day it was committed — so its diffs, including a status section added
+weeks later, all landed as `Bin … bytes, 0 insertions, 0 deletions`.
+
+The invariant promoted for D033 did not catch it, because it was scoped to `.ts`/`.js` and skipped
+`.agents/`. **A guard scoped narrower than the property it protects is one arm by construction** —
+which is S-09's ask pointed at a guard rather than a call site, and worth noting as the cheapest
+cross-check between these two shapes. The scope is now every `.ts`/`.js`/`.md` file outside build
+output and vendored trees, which is where this project's reasoning actually lives: `LEDGER.md` is the
+record of how we were wrong and `SHAPES.md` generates the review briefs.
+
+Found by reading `git diff --stat` on an unrelated edit and noticing the `Bin` line — the same way the
+first instance surfaced, and the reason the Ask above is phrased around *surprising tool output* rather
+than around NUL bytes.
+
+> **Ask, when promoting any invariant**: name the property, then name every artifact that has it. If
+> the guard's file-extension list is shorter than that answer, the guard is already one arm.
 
 **Promoted on the first instance, which is a departure worth stating.** This register's rule is to
 promote on the second, because the cost of an executable invariant usually is not justified before

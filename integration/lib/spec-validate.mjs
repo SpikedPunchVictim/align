@@ -30,6 +30,10 @@ const KNOWN_ASSERT_KEYS_BY_KIND = {
   jsonArrayLength: new Set(['kind', 'file', 'path', 'equals']),
   exists: new Set(['kind', 'file', 'equals']),
   jsonArrayEveryHasField: new Set(['kind', 'file', 'path', 'field', 'equals']),
+  // How many entries carry a specific VALUE for a field (LEDGER D038). `jsonArrayEveryHasField`
+  // could not see this class: `align baseline accept` rewrote `acceptedBy` on entries that already
+  // had it, so presence was identical before and after the defect.
+  jsonArrayFieldValueCount: new Set(['kind', 'file', 'path', 'field', 'value', 'equals']),
 };
 // increment 2 (ADR 025 §7 `mcp` row / ADR 024): a step that calls one MCP tool over a real `align
 // mcp` child process (lib/mcp-client.mjs) instead of running the CLI directly. Kept as its own step

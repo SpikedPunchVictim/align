@@ -23,7 +23,44 @@ import { openScanHistory, persistScanObservation } from '../scan-history.js';
 import { DEFAULT_DOC_PATH, proposeFromClientSubmission, writeBuildArtifacts, type DryRunResult } from '../commands/build.js';
 import { renderCondensedFixingSkill } from '../skill/condensed.js';
 import { withVersionSkew } from '../version-skew.js';
+import { isConcurrentAlignWriteError } from '../concurrent-write-error.js';
 import { decideMcpBaselineWrite } from './baseline-gate.js';
+
+/**
+ * Runs a `.align/` write that this call's ANSWER does not depend on, and turns a concurrent-align
+ * refusal into an advisory on the run instead of an exception (LEDGER D037, ADR 030).
+ *
+ * The CLI says this on stderr. MCP cannot: an agent reads the tool result, not the server's stderr,
+ * so the note has to become payload data or it is not said at all. `align_violations` renders only
+ * `{violations, pagination}` and will not show it — that is acceptable and deliberate, because the
+ * violations it returns are correct either way; `align_check`, which reports the baseline debt the
+ * deferred write would have changed, does show it.
+ *
+ * Anything that is NOT a concurrency refusal still propagates. The tool handlers turn those into
+ * `isError: true`, which is right — a corrupt `.align/version.json` is not a transient collision and
+ * an agent that kept going would be acting on a repository align could not read.
+ */
+function deferBaselineWriteOnConcurrentAlign(run: CheckRun, write: () => void): CheckRun {
+  try {
+    write();
+    return run;
+  } catch (err) {
+    if (!isConcurrentAlignWriteError(err)) throw err;
+    return {
+      ...run,
+      advisories: [
+        {
+          kind: 'baseline-write-deferred',
+          message:
+            'another align changed .align/baseline.json while this check was running, so the move-transfer ' +
+            'this run computed was not written. The results below are unaffected — the next call redoes the ' +
+            'transfer unconditionally. Nothing was lost and nothing needs to be re-run by hand.',
+        },
+        ...run.advisories,
+      ],
+    };
+  }
+}
 
 /** Shared by `align_check`/`align_violations`: runs a fresh check and persists any move-transfer
  * (ADR 006) the run performed, so a renamed file's baselined violation doesn't need a separate
@@ -48,10 +85,19 @@ async function freshCheck(rootDir: string): Promise<{ readonly run: CheckRun; re
   const { entries: previousBaseline, token: baselineToken } = readBaselineSnapshot(rootDir);
   const history = openScanHistory(rootDir, { ruleset, excludes, includeNestedCheckouts });
   const { orchestrator, baselineStore } = createOrchestrator(rootDir, ruleset, previousBaseline, hostRules, history.probe);
-  const run = withVersionSkew(await orchestrator.check({ rootDir, excludes, includeNestedCheckouts }), rootDir);
-  if (run.advisories.some((a) => a.kind === 'baseline-moved')) {
-    writeBaseline(rootDir, baselineStore.snapshot(), baselineToken);
-  }
+  const scanned = withVersionSkew(await orchestrator.check({ rootDir, excludes, includeNestedCheckouts }), rootDir);
+  // A concurrent align is NOT a failed check — the same judgement `commands/check.ts` makes on BOTH
+  // of its arms, and the whole reason `ConcurrentAlignWriteError` is a type rather than a message
+  // (LEDGER D037). This run's verdict never depended on the write: `baselineStore` applied the
+  // move-transfer in memory before any of this, and the next call re-derives and re-persists it
+  // unconditionally. Letting the refusal escape sent the tool handler's catch-all an error, and the
+  // agent got no verdict, no gates and no violations for a run that had completed green — which is
+  // exactly the failure this class was introduced to stop, on the one surface that never got it.
+  const run = deferBaselineWriteOnConcurrentAlign(scanned, () => {
+    if (scanned.advisories.some((a) => a.kind === 'baseline-moved')) {
+      writeBaseline(rootDir, baselineStore.snapshot(), baselineToken);
+    }
+  });
   // ADR 029. MCP's `align_check` is a writer for the same reason the CLI command is and no other
   // surface is: it consulted the record, made a transfer decision, and persisted it. See
   // `scan-history.ts` for why §7.3's enumeration is widened rather than followed literally — an

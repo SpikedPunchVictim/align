@@ -73,7 +73,9 @@ export function evaluateMcpExpect(expect, mcpResult) {
  * vocabulary — extend deliberately, not by convention, since an unrecognized kind throws rather
  * than silently passing. (Increment 1 needed exactly four; `jsonArrayEveryHasField` was added for
  * the `init`-strips-contentFingerprint scenario, which has to assert on a FIELD's presence across
- * every baseline entry — no existing kind could see inside an array's elements.) */
+ * every baseline entry — no existing kind could see inside an array's elements. `jsonArrayFieldValueCount`
+ * followed for LEDGER D038: presence is not enough there, because the defect rewrote a field that was
+ * present both before and after — only its VALUE changed.) */
 /**
  * The array a `jsonArray*` assertion is about — "the list, wherever THIS version of align keeps it".
  *
@@ -189,6 +191,40 @@ export function evaluateAssert(assertSpec, snapshots, currentState) {
           failures: [
             `expected every one of ${assertSpec.file}'s ${value.length} entries to ` +
               `${assertSpec.equals === true ? 'HAVE' : 'LACK'} '${assertSpec.field}', but ${withField} of them have it`,
+          ],
+        };
+  }
+  if (kind === 'jsonArrayFieldValueCount') {
+    const raw = resolveNormalized(currentState, assertSpec.file);
+    if (raw === undefined) return { pass: false, failures: [`'${assertSpec.file}' is not present`] };
+    const value = arrayUnderPath(JSON.parse(raw), assertSpec.path);
+    if (!Array.isArray(value)) {
+      return { pass: false, failures: [`'${assertSpec.file}'${describePath(assertSpec.path)} is not a JSON array`] };
+    }
+    // Same vacuous-pass guard as `jsonArrayEveryHasField` above, and for the same reason: an empty
+    // array satisfies `equals: 0` while observing nothing at all. A scenario whose seed step silently
+    // produced no entries must fail loudly rather than report that it checked something.
+    if (value.length === 0) {
+      return {
+        pass: false,
+        failures: [
+          `assert jsonArrayFieldValueCount: '${assertSpec.file}' is an EMPTY array — the step that was ` +
+            'supposed to seed entries produced none, so this assertion would observe nothing.',
+        ],
+      };
+    }
+    const nonObjects = value.filter((e) => e === null || typeof e !== 'object').length;
+    if (nonObjects > 0) {
+      return { pass: false, failures: [`'${assertSpec.file}' has ${nonObjects} entr(ies) that are not objects`] };
+    }
+    const matching = value.filter((e) => e[assertSpec.field] === assertSpec.value).length;
+    return matching === assertSpec.equals
+      ? { pass: true, failures: [] }
+      : {
+          pass: false,
+          failures: [
+            `expected ${assertSpec.equals} of ${assertSpec.file}'s ${value.length} entries to have ` +
+              `'${assertSpec.field}' === ${JSON.stringify(assertSpec.value)}, got ${matching}`,
           ],
         };
   }

@@ -207,16 +207,47 @@ export class InMemoryBaselineStore implements BaselineStore {
   accept(violations: readonly Violation[], mode: BaselineEntry['acceptedBy']): void {
     const now = Date.now();
     for (const v of violations) {
+      // PROVENANCE IS NOT RESTAMPED on an entry that was already accepted (LEDGER D038). This used
+      // to `set` unconditionally, and since the CLI hands `accept` every CURRENT violation rather
+      // than only the unbaselined ones, every re-run rewrote `acceptedAt` to now and `acceptedBy` to
+      // whatever mode was passed. An entry a person accepted manually in 2023 came back looking as
+      // though it had been accepted moments ago — the exact defect `align init` had, fixed and
+      // pinned there (`cli/test/init-seed-provenance.test.ts`) and left standing here, which is
+      // shape S-09. `acceptedAt` is the age of a piece of accepted debt and `align baseline show`
+      // prints it; resetting it on every accept means debt can never be seen to be old.
+      const prior = this.entries.get(v.id);
       this.entries.set(v.id, {
         fingerprint: v.id,
         ruleId: v.ruleId,
         file: v.file,
-        acceptedAt: now,
-        acceptedBy: mode,
+        acceptedAt: prior?.acceptedAt ?? now,
+        acceptedBy: prior?.acceptedBy ?? mode,
         contentFingerprint: computeContentFingerprint(v.ruleId, v.snippet),
         // Only `metric`-kind violations carry a meaningful measured value — never invent one for
         // kinds that have none (FRAGILE #8's growth advisory relies on absence here to skip
         // cleanly, same discipline as `contentFingerprint`'s optionality above).
+        //
+        // ALWAYS the current value, deliberately NOT carried from `prior` like the two fields above.
+        // The growth advisory tells the user to "re-accept to record the new size" (`gates/
+        // advisories.ts`), so re-accepting IS the documented remedy for a grown metric violation.
+        //
+        // The asymmetry looks arbitrary, so it was measured rather than argued. Both variants were
+        // built and driven through the real CLI on `simple-app-metric-violation` — accept at 7 lines,
+        // grow the file to 37, then follow the advisory's own instruction:
+        //
+        //     step                       carried (frozen)     current (shipped)
+        //     grown to 37 lines          advisory PRESENT     advisory PRESENT
+        //     baseline accept            advisory PRESENT     advisory absent    <- the remedy works
+        //     baseline accept (again)    advisory PRESENT     advisory absent
+        //     baseline prune --yes       advisory PRESENT     advisory absent
+        //
+        // Carrying it makes the advisory PERMANENTLY unclearable: no command align ships resolves it,
+        // because the entry is a live violation `prune` will not remove and every `accept` path runs
+        // through here. The user's only exit would be hand-editing `.align/baseline.json` — align
+        // telling someone to do something align then refuses to let them do.
+        //
+        // `acceptedAt` is preserved under BOTH variants, so freezing this field buys nothing for debt
+        // age; recording a new size is not a new decision to tolerate the violation.
         ...(v.kind === 'metric' ? { acceptedValue: v.value } : {}),
       });
     }

@@ -60,11 +60,14 @@ integration level. A release-gate scenario the release-gate command does not exe
 calibration; this was found by review on 2026-08-18 (`docs/adr/defects/LEDGER.md` D012) after the
 consent gate broke that scenario and nothing reported it.
 
-The full cross-version matrix (`--targets 0.1.4,local`) is a release gate — **nine** scenarios carry
-`expectFailOn: ['0.1.4']` as its calibration (recounted 2026-08-18 after `usage-error-is-not-a-red-verdict`
-was calibrated; it was three when this line was written, and grows whenever a defect is pinned against a
-published version), and if those ever pass against 0.1.4 the harness has
-stopped working and nothing it reports can be trusted.
+The full cross-version matrix (`--targets 0.1.4,local`) is a release gate — **ten** scenarios carry
+`expectFailOn: ['0.1.4']` as its calibration (recounted 2026-08-19 after
+`accept-does-not-restamp-provenance` was calibrated; it was three when this line was written, and
+grows whenever a defect is pinned against a published version), and if those ever pass against 0.1.4
+the harness has stopped working and nothing it reports can be trusted. Recount with
+`grep -c '^  expectFailOn' integration/scenarios/*.mjs` rather than from memory — the comment blocks
+in those files mention `expectFailOn` far more often than the field is actually declared, so a
+grep for the bare word overcounts by four.
 
 ## 1. Rigour on load-bearing claims
 
