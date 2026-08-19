@@ -488,11 +488,39 @@ function violatingSource(name) {
  * branch.
  */
 export function plantForeignHostLock(workingDir) {
+  plantLock(workingDir, '2024-01-01T00:00:00.000Z');
+}
+
+/**
+ * The same lock, but ACQUIRED JUST NOW — i.e. another align that is genuinely mid-write, rather than
+ * one that died. Below `FOREIGN_HOST_STALE_AFTER_MS`, so it is not breakable and the waiting command
+ * must time out and refuse.
+ *
+ * This is how the harness reaches "two aligns overlapping" without a background-step primitive: the
+ * lock IS align's representation of another align holding the repository, so planting a live one is a
+ * faithful stand-in for the process that would have taken it — and unlike real concurrency it is
+ * deterministic, because the outcome does not depend on which process wins a scheduling race.
+ */
+export function plantLiveForeignLock(workingDir) {
+  plantLock(workingDir, new Date().toISOString());
+}
+
+/** Releases it, the way the other align would on finishing — so a scenario can show that the refusal
+ * was about the lock and nothing else. */
+export function removeAlignLock(workingDir) {
+  const file = path.join(workingDir, '.align', '.lock');
+  if (!fs.existsSync(file)) {
+    throw new Error(`mutation 'remove-align-lock': ${file} does not exist — nothing to release`);
+  }
+  fs.rmSync(file);
+}
+
+function plantLock(workingDir, acquiredAt) {
   const dir = path.join(workingDir, '.align');
   fs.mkdirSync(dir, { recursive: true });
   writeText(
     path.join(dir, '.lock'),
-    `${JSON.stringify({ pid: 4821, host: 'buildbox-01', command: 'align baseline accept', acquiredAt: '2024-01-01T00:00:00.000Z' }, null, 2)}\n`,
+    `${JSON.stringify({ pid: 4821, host: 'buildbox-01', command: 'align baseline accept', acquiredAt }, null, 2)}\n`,
   );
 }
 
@@ -659,6 +687,8 @@ export const MUTATIONS = {
   'delete-one-accepted-file': (ctx) => deleteOneAcceptedFile(ctx.workingDir),
   'stamp-version-file-as-0.1.4': (ctx) => stampVersionFileAs014(ctx.workingDir),
   'plant-foreign-host-lock': (ctx) => plantForeignHostLock(ctx.workingDir),
+  'plant-live-foreign-lock': (ctx) => plantLiveForeignLock(ctx.workingDir),
+  'remove-align-lock': (ctx) => removeAlignLock(ctx.workingDir),
   'hide-subtree-as-symlink': (ctx) => hideSubtreeAsSymlink(ctx.workingDir),
   'hide-subtree-unreadable': (ctx) => hideSubtreeUnreadable(ctx.workingDir),
   'restore-subtree-readable': (ctx) => restoreSubtreeReadable(ctx.workingDir),
