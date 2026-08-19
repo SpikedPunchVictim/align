@@ -7,6 +7,10 @@ out/
 # ADR 029: the scan-observation record is evidence about THIS checkout on THIS machine, and
 # committing it would let one machine's observation authorize another machine's deletion.
 .align/last-scan.json
+# ADR 030's lock, gitignored 2026-08-19 (LEDGER D029). align creates and deletes it inside a single
+# command, so a committed copy is always a lock somebody lost — and one of those blocks every writing
+# align command on every machine that checks it out.
+.align/.lock
 test-apps/
 *.tsbuildinfo
 .DS_Store

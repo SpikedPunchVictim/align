@@ -478,6 +478,24 @@ function violatingSource(name) {
  * `init` has not set up what it thinks it has, and inventing the file would let it pass while testing
  * a state no user can be in.
  */
+/**
+ * Plants the lock a crashed align on ANOTHER machine would leave behind — and, since `.align/.lock`
+ * was gitignored nowhere until 2026-08-19, the lock a single `git add -A` would then commit into the
+ * repository for everyone (LEDGER D029).
+ *
+ * Two years old, deliberately: the point is that no amount of age used to clear it. `host` must not be
+ * this machine's, or the same-host liveness path would handle it and the scenario would pin the wrong
+ * branch.
+ */
+export function plantForeignHostLock(workingDir) {
+  const dir = path.join(workingDir, '.align');
+  fs.mkdirSync(dir, { recursive: true });
+  writeText(
+    path.join(dir, '.lock'),
+    `${JSON.stringify({ pid: 4821, host: 'buildbox-01', command: 'align baseline accept', acquiredAt: '2024-01-01T00:00:00.000Z' }, null, 2)}\n`,
+  );
+}
+
 export function stampVersionFileAs014(workingDir) {
   const file = path.join(workingDir, '.align', 'version.json');
   if (!fs.existsSync(file)) {
@@ -640,6 +658,7 @@ export const MUTATIONS = {
   'add-transfer-bait': (ctx) => addTransferBait(ctx.workingDir),
   'delete-one-accepted-file': (ctx) => deleteOneAcceptedFile(ctx.workingDir),
   'stamp-version-file-as-0.1.4': (ctx) => stampVersionFileAs014(ctx.workingDir),
+  'plant-foreign-host-lock': (ctx) => plantForeignHostLock(ctx.workingDir),
   'hide-subtree-as-symlink': (ctx) => hideSubtreeAsSymlink(ctx.workingDir),
   'hide-subtree-unreadable': (ctx) => hideSubtreeUnreadable(ctx.workingDir),
   'restore-subtree-readable': (ctx) => restoreSubtreeReadable(ctx.workingDir),

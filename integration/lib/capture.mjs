@@ -11,7 +11,19 @@ import { normalizeJson, normalizeText, makeNormalizeContext } from './normalize.
 // opt-in and off in every scenario that does not enable it — and its `observedAt` is normalized in
 // `normalize.mjs`'s `VOLATILE_JSON_KEYS` for the same reason `scannedAt` is: without that, two runs
 // of one scenario produce different `normalized.json` and the determinism diff reports noise.
-const ALIGN_DIR_FILES = ['baseline.json', 'generated-rules.json', 'rules.lock.json', 'ruleset-ir.json', 'version.json', 'last-scan.json'];
+// `.lock` (ADR 030) added 2026-08-19 with LEDGER D029: the harness could not SEE the one `.align/`
+// file whose presence after a command is always a defect. It is created and deleted inside a single
+// command, so a capture between steps must never find one — which makes it the cheapest possible
+// write-set assertion, applying to every scenario at once with no scenario having to declare it.
+const ALIGN_DIR_FILES = [
+  'baseline.json',
+  'generated-rules.json',
+  'rules.lock.json',
+  'ruleset-ir.json',
+  'version.json',
+  'last-scan.json',
+  '.lock',
+];
 const CLAUDE_START = '<!-- align:start -->';
 const CLAUDE_END = '<!-- align:end -->';
 

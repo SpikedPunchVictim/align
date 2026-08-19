@@ -125,17 +125,49 @@ describe('withAlignDirLock', () => {
     );
   });
 
-  it('never breaks a lock held by another HOST, however old', () => {
+  /**
+   * LEDGER **D029**. This block asserted the OPPOSITE until 2026-08-19 — "never breaks a lock held by
+   * another HOST, however old" — and the reasoning it carried was the same one the unidentifiable-holder
+   * case two lines below refutes: for a file align creates, owns and deletes on every run, never-break
+   * is the unsafe direction.
+   *
+   * What made it worse than the unidentifiable case was the transport. `.align/.lock` was gitignored
+   * NOWHERE, so a single `git add -A` after a SIGKILL committed a foreign-host holder into the
+   * repository, where it blocked every writing align command on every teammate's machine and every CI
+   * run — permanently, because no age could clear it. Measured before the fix: a planted two-year-old
+   * lock from `buildbox-01` made `align baseline accept` wait the full timeout and exit 1, every time.
+   *
+   * Both directions are pinned, because a fix that simply always broke foreign locks would satisfy the
+   * first test alone while discarding the guarantee the original rule existed for.
+   */
+  it('breaks a foreign-host lock once it is older than any legitimate hold', () => {
     const d = repo();
-    // A pid from another machine says nothing locally — `process.kill(pid, 0)` would answer about an
-    // unrelated local process of the same number. Refusing costs a confused user one `rm`; guessing
-    // costs them the baseline.
-    plantLock(d, { pid: DEAD_PID, host: 'some-other-host', ageMs: 10 * 60_000 });
+    plantLock(d, { pid: DEAD_PID, host: 'some-other-host', ageMs: 11 * 60_000 });
 
-    expect(() => withAlignDirLock(d, 'align check', () => 'never', { staleAfterMs: 1_000, waitTimeoutMs: 100, pollIntervalMs: 5 })).toThrow(
-      /timed out/,
-    );
+    expect(withAlignDirLock(d, 'align check', () => 'ran', { waitTimeoutMs: 500, pollIntervalMs: 5 })).toBe('ran');
+  });
+
+  it('still WAITS on a foreign-host lock that is young enough to be a real concurrent commit', () => {
+    // The guarantee the old rule was protecting, kept: `.align/` on a network mount with another
+    // machine mid-commit is unusual but not absurd, and ADR 030 holds the lock only around the commit
+    // — so a young foreign holder is exactly the case where guessing would corrupt something.
+    const d = repo();
+    plantLock(d, { pid: DEAD_PID, host: 'some-other-host', ageMs: 5_000 });
+
+    expect(() => withAlignDirLock(d, 'align check', () => 'never', { waitTimeoutMs: 100, pollIntervalMs: 5 })).toThrow(/timed out/);
     expect(fs.existsSync(lockPath(d))).toBe(true);
+  });
+
+  it('does not let the LOCAL staleness floor shorten the foreign one', () => {
+    // The floors are separate constants for a reason: locally align has a liveness check and age is a
+    // backstop; remotely age is all there is. A caller passing a short `staleAfterMs` (as several tests
+    // here do) must not thereby make foreign locks breakable in a second.
+    const d = repo();
+    plantLock(d, { pid: DEAD_PID, host: 'some-other-host', ageMs: 90_000 });
+
+    expect(() =>
+      withAlignDirLock(d, 'align check', () => 'never', { staleAfterMs: 1_000, waitTimeoutMs: 100, pollIntervalMs: 5 }),
+    ).toThrow(/timed out/);
   });
 
   it('treats an unreadable lock file as held by someone unidentifiable, not as absent', () => {

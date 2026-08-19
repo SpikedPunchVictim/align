@@ -46,7 +46,7 @@ failing test.
 ### Verifying a change
 
 ```
-pnpm build && pnpm typecheck && pnpm test      # ~26s, 1479 tests — the fast gate, run it always
+pnpm build && pnpm typecheck && pnpm test      # ~26s, 1481 tests — the fast gate, run it always
 node packages/cli/dist/index.js check          # must be green; red is blocking
 node packages/cli/dist/index.js doctor         # advisory only, always exits 0
 node integration/run.mjs --targets local       # Docker; real project, real command sequences

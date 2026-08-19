@@ -34,6 +34,17 @@ const LOCK_BASENAME = '.lock';
  * kills align mid-write is not locked out for a coffee break. The holder's liveness check below is
  * the primary signal; this is the backstop for the case where a pid was recycled. */
 const STALE_AFTER_MS = 60_000;
+/**
+ * The floor for a holder on ANOTHER HOST, where liveness cannot be checked at all and age is the only
+ * evidence available (LEDGER D029).
+ *
+ * Ten times the local floor, and still generous by three orders of magnitude against what the lock
+ * actually does: ADR 030 holds it only around the COMMIT — a token compare, a write, a rename — never
+ * across the scan. A legitimate cross-host holder measures in milliseconds. Ten minutes is not a
+ * guess about how long work takes; it is a bound past which "another machine is mid-commit" has
+ * stopped being a possible explanation.
+ */
+const FOREIGN_HOST_STALE_AFTER_MS = 10 * 60_000;
 const WAIT_TIMEOUT_MS = 10_000;
 const POLL_INTERVAL_MS = 25;
 
@@ -75,10 +86,23 @@ function processAlive(pid: number): boolean {
  * is deliberately hard to reach: the holder must be identifiable, on THIS host, demonstrably not
  * running, and older than the staleness floor.
  *
- * A holder on another host is never broken, whatever its age. `.align/` on a network filesystem is
- * unusual but not absurd (a shared build machine, a container mount), and a pid from another host
- * means nothing locally — `processAlive` would answer about an unrelated process of the same
- * number. Refusing there costs a confused user one manual `rm`; guessing costs them a baseline.
+ * A holder on another host cannot be liveness-checked — a pid from another machine means nothing
+ * locally, and `processAlive` would answer about an unrelated process of the same number. So age is
+ * the only evidence, and the floor for it is ten times the local one.
+ *
+ * ***Amended 2026-08-19 (LEDGER D029): this used to read "a holder on another host is never broken,
+ * whatever its age", and that was the same misapplied principle the branch immediately below refutes,
+ * two lines away.*** The reasoning there is exactly right and applies here verbatim: `.align/.lock` is
+ * a file align creates, owns and deletes on every run, holding no user data, so never-break is the
+ * UNSAFE direction. What made this one worse than the unidentifiable-holder case is the transport —
+ * the lock was gitignored nowhere, so a single `git add -A` after a SIGKILL committed a foreign-host
+ * holder that then blocked every writing command, on every teammate's machine and every CI run,
+ * permanently. Measured: a planted two-year-old lock from `buildbox-01` made `align baseline accept`
+ * wait the full 10s timeout and exit 1, every time.
+ *
+ * The residual risk this accepts, stated: a genuinely shared `.align/` on a network mount where
+ * another host's align is mid-commit ten minutes in. That is not a slow machine, it is a hung one, and
+ * a hung holder is exactly what the floor exists to clear.
  */
 function isBreakable(holder: LockHolder | undefined, now: number, staleAfterMs: number, file: string): boolean {
   if (holder === undefined) {
@@ -94,9 +118,15 @@ function isBreakable(holder: LockHolder | undefined, now: number, staleAfterMs: 
     // direction (a permanently bricked repository), unlike `baseline.json`, where it is the safe one.
     return ageOf(file, now) >= staleAfterMs;
   }
-  if (holder.host !== os.hostname()) return false;
   const age = now - Date.parse(holder.acquiredAt);
-  if (!Number.isFinite(age) || age < staleAfterMs) return false;
+  if (!Number.isFinite(age)) return false;
+  if (holder.host !== os.hostname()) {
+    // Age alone, at the higher floor — there is no liveness signal to combine it with. A lock that
+    // arrived through git rather than through a mount lands here too, and its `acquiredAt` is
+    // whenever the machine that lost it was interrupted, so it clears on the same rule.
+    return age >= FOREIGN_HOST_STALE_AFTER_MS;
+  }
+  if (age < staleAfterMs) return false;
   return !processAlive(holder.pid);
 }
 
@@ -227,7 +257,16 @@ export function withAlignDirLock<T>(alignDir: string, command: string, fn: () =>
       if (isBreakable(holder, Date.now(), staleAfterMs, file)) {
         // Named on stderr, never silently: a broken lock means another align died mid-write, which
         // is exactly the moment a user wants to know the file may be mid-history.
-        console.error(`align: breaking a stale .align/ lock left by ${describe(holder)} — that process is no longer running.`);
+        // Two different claims, so two different sentences. On this host align has CHECKED that the
+        // process is gone; on another host it has only waited, and saying "no longer running" there
+        // would assert something it cannot know (LEDGER D029).
+        console.error(
+          holder !== undefined && holder.host !== os.hostname()
+            ? `align: breaking a .align/ lock left by ${describe(holder)} — it is on another machine, so align cannot ` +
+                'check whether that process is alive, and the lock is older than any legitimate hold. If this repository ' +
+                'shares .align/ over a network mount and that machine is genuinely mid-write, stop this command.'
+            : `align: breaking a stale .align/ lock left by ${describe(holder)} — that process is no longer running.`,
+        );
         breakLock(file, identityOf(file));
         continue;
       }
