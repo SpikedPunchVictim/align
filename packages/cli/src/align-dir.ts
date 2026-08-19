@@ -18,7 +18,9 @@ import { ConcurrentAlignWriteError } from './concurrent-write-error.js';
 import * as path from 'node:path';
 import type { z } from 'zod';
 import {
-  baselineFileSchema,
+  BASELINE_SCHEMA_VERSION,
+  baselineEnvelopeSchema,
+  legacyBaselineArraySchema,
   exportedRulesetSchema,
   generatedRulesFileSchema,
   rulesLockSchema,
@@ -208,16 +210,52 @@ export function readBaseline(rootDir: string): BaselineEntry[] {
         'an unresolved git merge conflict. Resolve it, or restore the file from git.',
     );
   }
-  // `baselineFileSchema`'s inferred element type is plain strings (fingerprint/ruleId/file); `BaselineEntry`
-  // brands those same fields (`ViolationId`/`RuleId`/`RepoRelativePath`). `as BaselineEntry[]` alone doesn't
-  // satisfy TS's overlap check across a branded intersection type — the boundary cast goes through `unknown`,
-  // same as every other brand-construction site (`types/branded.ts`'s `toXxx` helpers).
+  // The brand cast below goes through `unknown` on both paths: the schemas' inferred element type is
+  // plain strings (fingerprint/ruleId/file) while `BaselineEntry` brands those same fields
+  // (`ViolationId`/`RuleId`/`RepoRelativePath`), and `as BaselineEntry[]` alone doesn't satisfy TS's
+  // overlap check across a branded intersection type — same as every other brand-construction site
+  // (`types/branded.ts`'s `toXxx` helpers).
+  //
+  // TWO SHAPES, discriminated on `Array.isArray` (ADR 006's 2026-08-19 amendment). A bare array is
+  // the pre-0.2.0 file, retroactively schema version 1; anything else must be the envelope and is
+  // version-checked BEFORE its contents are parsed, so a baseline from a future align reports THAT
+  // rather than a shape error about fields it was never going to understand.
+  if (Array.isArray(parsed)) {
+    return parseArtifact(
+      legacyBaselineArraySchema,
+      parsed,
+      file,
+      'an array of baseline entries (fingerprint, ruleId, file, acceptedAt, acceptedBy)',
+    ) as unknown as BaselineEntry[];
+  }
+  const declared = (parsed as { readonly schemaVersion?: unknown } | null)?.schemaVersion;
+  if (typeof declared !== 'number') {
+    throw new Error(
+      `${file} is neither a legacy baseline array nor a versioned baseline object with a numeric ` +
+        '`schemaVersion`. A corrupted baseline is never treated as empty — that would silently ' +
+        'discard accepted debt, and the next `align baseline accept` would overwrite the file. ' +
+        'Most likely cause: an unresolved git merge conflict, or a hand-edit. Restore it from git.',
+    );
+  }
+  if (declared !== BASELINE_SCHEMA_VERSION) {
+    // Fail, never guess. A NEWER version may have redefined what a fingerprint means, and this is the
+    // file where acting on a misread is destructive rather than merely wrong — reading a v3 entry as
+    // if it were v2 and then writing a full snapshot back is BUG #1 with extra steps.
+    throw new Error(
+      `${file} declares baseline schema version ${declared}, and this align understands ` +
+        `${BASELINE_SCHEMA_VERSION}. ` +
+        (declared > BASELINE_SCHEMA_VERSION
+          ? 'It was written by a newer align — upgrade this one rather than letting an older version ' +
+            'rewrite a baseline it cannot fully read.'
+          : 'That version is no longer readable by this align; run `align upgrade` on a version that still understands it.'),
+    );
+  }
   return parseArtifact(
-    baselineFileSchema,
+    baselineEnvelopeSchema,
     parsed,
     file,
-    'an array of baseline entries (fingerprint, ruleId, file, acceptedAt, acceptedBy)',
-  ) as unknown as BaselineEntry[];
+    `a baseline object { schemaVersion: ${BASELINE_SCHEMA_VERSION}, entries: [...] }`,
+  ).entries as unknown as BaselineEntry[];
 }
 
 /**
@@ -290,7 +328,15 @@ export function writeBaseline(rootDir: string, entries: readonly BaselineEntry[]
           'has been written. Re-run the command; it will pick up the current baseline.',
       );
     }
-    writeFileAtomic(baselinePath(rootDir), `${JSON.stringify(sorted, null, 2)}\n`);
+    // Always the CURRENT shape, never the shape that was read: a repository whose baseline is still a
+    // legacy array is migrated by the first write that touches it, and `readBaseline` above is what
+    // makes that safe to do silently — the entries are identical, only the container changed. Stated
+    // because "write back whatever you read" is the other reasonable choice, and it would leave the
+    // version marker absent forever on exactly the repositories that predate it.
+    writeFileAtomic(
+      baselinePath(rootDir),
+      `${JSON.stringify({ schemaVersion: BASELINE_SCHEMA_VERSION, entries: sorted }, null, 2)}\n`,
+    );
     stampAlignVersion(rootDir);
   });
 }

@@ -71,7 +71,7 @@ export default {
     // F6 discipline (prune-errored-run-destroys-baseline.mjs): pin the seed, so a change that stopped
     // the cycle rule finding anything fails LOUDLY here instead of degrading every assertion below
     // into a comparison of empty sets.
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 1 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 1 } },
     // Green before the deletion: the baseline covers the only violation, so whatever happens next is
     // caused by the missing tree and nothing else.
     { run: 'check', expect: { exit: 0 } },
@@ -100,7 +100,7 @@ export default {
         stdoutNotContains: 'Pruned 1 fixed violation',
       },
     },
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 1 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 1 } },
     { assert: { kind: 'fileUnchanged', file: '.align/baseline.json', since: 'after-accept' } },
     // The delegated path inherits the same protection: `upgrade` computes its own prune preview and
     // then calls `baselinePrune`, so retention has to hold through both. `--yes --allow-incomplete`

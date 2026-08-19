@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { baselineEntrySchema, baselineFileSchema } from '../../src/baseline/schema.js';
+import {
+  BASELINE_SCHEMA_VERSION,
+  baselineEntrySchema,
+  baselineEnvelopeSchema,
+  legacyBaselineArraySchema,
+} from '../../src/baseline/schema.js';
 
 // Bug hunt 2026-08-03, BUG #1: `readBaseline` (packages/cli/src/align-dir.ts) used to silently
 // read a corrupted `.align/baseline.json` as `[]`, and the next `align baseline accept` would then
@@ -98,23 +103,63 @@ describe('baselineEntrySchema', () => {
   });
 });
 
-describe('baselineFileSchema', () => {
+const ENTRY = { fingerprint: 'f1', ruleId: 'r', file: 'a.ts', acceptedAt: 0, acceptedBy: 'manual' };
+
+/** The pre-0.2.0 shape. Every 0.1.x repository still has it on disk, so these cases are not history —
+ * they are the contract for reading a file this align did not write (ADR 006's 2026-08-19
+ * amendment). */
+describe('legacyBaselineArraySchema — the bare array, retroactively schema version 1', () => {
   it('parses an array of entries', () => {
-    const parsed = baselineFileSchema.parse([
-      { fingerprint: 'f1', ruleId: 'r', file: 'a.ts', acceptedAt: 0, acceptedBy: 'manual' },
-    ]);
-    expect(parsed).toHaveLength(1);
+    expect(legacyBaselineArraySchema.parse([ENTRY])).toHaveLength(1);
   });
 
   it('parses an empty array', () => {
-    expect(baselineFileSchema.parse([])).toEqual([]);
+    expect(legacyBaselineArraySchema.parse([])).toEqual([]);
   });
 
   it('rejects a non-array root (e.g. an object)', () => {
-    expect(() => baselineFileSchema.parse({})).toThrow();
+    expect(() => legacyBaselineArraySchema.parse({})).toThrow();
   });
 
   it('rejects a non-array root (e.g. a string, the shape a truncated-mid-write file might produce)', () => {
-    expect(() => baselineFileSchema.parse('not an array')).toThrow();
+    expect(() => legacyBaselineArraySchema.parse('not an array')).toThrow();
+  });
+});
+
+describe('baselineEnvelopeSchema — the versioned shape align writes from 0.2.0', () => {
+  it('parses a versioned envelope and exposes its entries', () => {
+    const parsed = baselineEnvelopeSchema.parse({ schemaVersion: BASELINE_SCHEMA_VERSION, entries: [ENTRY] });
+    expect(parsed.entries).toHaveLength(1);
+    expect(parsed.schemaVersion).toBe(BASELINE_SCHEMA_VERSION);
+  });
+
+  it('parses an envelope with zero entries — a baseline can legitimately be empty', () => {
+    // Distinct from a MISSING file, which `readBaseline` reports as `[]` without parsing anything.
+    // Both are "no accepted debt"; only one of them is a statement the file makes.
+    expect(baselineEnvelopeSchema.parse({ schemaVersion: BASELINE_SCHEMA_VERSION, entries: [] }).entries).toEqual([]);
+  });
+
+  it('does NOT pin the version itself — that check belongs to the reader, with its own message', () => {
+    // `z.literal(2)` here would turn "written by a newer align" into a shape error listing fields,
+    // which is the least actionable thing align could say about it. `readBaseline` compares the
+    // number and explains what to do; this schema only asserts the number exists and is sane.
+    expect(baselineEnvelopeSchema.parse({ schemaVersion: 99, entries: [] }).schemaVersion).toBe(99);
+  });
+
+  it('rejects a non-numeric, zero or negative version', () => {
+    for (const schemaVersion of ['2', 0, -1, 1.5]) {
+      expect(() => baselineEnvelopeSchema.parse({ schemaVersion, entries: [] })).toThrow();
+    }
+  });
+
+  it('tolerates an unknown sibling field, so a later align adding one does not brick this one', () => {
+    // Same `.passthrough()` discipline as the entry schema, for the same reason: a stricter envelope
+    // would make every field a future align adds turn the file unreadable here — and unreadable, for
+    // THIS file, means a hard failure on every command rather than a degraded one.
+    expect(baselineEnvelopeSchema.parse({ schemaVersion: BASELINE_SCHEMA_VERSION, entries: [], writtenBy: 'x' }).entries).toEqual([]);
+  });
+
+  it('rejects an envelope whose entries are not baseline entries', () => {
+    expect(() => baselineEnvelopeSchema.parse({ schemaVersion: BASELINE_SCHEMA_VERSION, entries: [{ nope: true }] })).toThrow();
   });
 });

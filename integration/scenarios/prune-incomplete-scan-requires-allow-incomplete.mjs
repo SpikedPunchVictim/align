@@ -53,7 +53,7 @@ export default {
     { mutate: 'introduce-arch-violation' },
     { run: 'baseline accept', expect: { exit: 0, stdoutContains: 'Accepted 389 violation(s)' } },
     { snapshot: 'after-accept' },
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 389 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 389 } },
     // Confirms this project variant genuinely produces an incomplete scan, before relying on that
     // fact for the refusal below — the same "seed pinned, don't assume" discipline
     // `prune-errored-run-destroys-baseline.mjs` uses for its own count.
@@ -69,6 +69,6 @@ export default {
       expect: { exit: 0, stdoutContains: 'Pruned 371 fixed violation(s)' },
     },
     { assert: { kind: 'fileChanged', file: '.align/baseline.json', since: 'after-accept' } },
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 18 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 18 } },
   ],
 };

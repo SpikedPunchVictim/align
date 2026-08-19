@@ -11,11 +11,11 @@
 // `migration-notes-drift.test.ts` fails if UPGRADING_MD_CONTENT_HASH below no longer matches
 // the doc's current content — that is the drift detector, not a suggestion.
 //
-// Generated at: 2026-08-19T06:31:47.046Z
+// Generated at: 2026-08-19T08:05:52.022Z
 import type { MigrationNote } from './types.js';
 
 /** sha256Hex (16-char) of UPGRADING.md's full text at compile time. */
-export const UPGRADING_MD_CONTENT_HASH = "3c10225022eb7065";
+export const UPGRADING_MD_CONTENT_HASH = "c95ca475b54ed363";
 
 /** Migration notes compiled from UPGRADING.md, keyed by the exact version heading text
  * ("## <version>") it was compiled from. */
@@ -68,6 +68,10 @@ export const COMPILED_NOTES: Readonly<Record<string, readonly MigrationNote[]>> 
     {
       heading: "A move-transfer is now refused when the target was already violating",
       body: "**This is the reason the record exists.** When a baselined file disappears, align looks for a\ncurrent, not-yet-baselined violation with the same content elsewhere and transfers your acceptance\nonto it — that is how a rename avoids turning CI red for one cycle. But align matches by content, so\nit cannot tell a renamed file from one that was *deleted while an identical violation already existed\nsomewhere else*. In that second case the transfer moves your recorded `acceptedBy` onto a violation\nnobody ever reviewed, and the repository goes from red to **green at exit 0**.\n\nFrom 0.2.0, `align check` asks the previous scan first: if that violation was already reported at that\npath last run, it existed before the file disappeared, so it cannot be where the violation moved to\nand the transfer is refused. Your accepted entry stays where you put it, and the other violation stays\nred and reviewable.\n\n**What you might notice.** A rename that used to transfer silently can now come back red, in one\nspecific situation: the violation at the new path was already there and already red on the previous\nrun. That is the situation align cannot tell from a forgery, and red is the recoverable direction —\none `align baseline accept` resolves it, whereas a forged transfer is silent and destroys the record\nof what you consented to.\n\n**It needs two scans, and it is machine-local.** A first `align check` on a fresh checkout has no\nprevious scan to consult, so it behaves exactly as 0.1.x did. Nothing about this refusal can make a\nrun *greener* than before — the history is only ever a reason to decline.\n\n**A scan that could not resolve everything will not overwrite one that could.** If a run reports\nmissing dependencies or an ungrounded component, it sees fewer violations than a complete run would —\nso recording it would quietly narrow what the next run can compare against. align keeps the earlier,\ncomplete record instead and prints one line saying it did. Install the dependencies (or ground the\nempty component) and the next run brings the record up to date.",
+    },
+    {
+      heading: "`.align/baseline.json` now carries a schema version",
+      body: "**No action needed, and nothing to migrate by hand.** The file was a bare JSON array; it is now\n`{ \"schemaVersion\": 2, \"entries\": [...] }`. align reads the old shape unchanged and rewrites it in the\nnew one the first time something writes the baseline — `baseline accept`, `baseline prune`, `upgrade`,\nor a move-transfer on `check`. Until then your file stays exactly as it is.\n\n**Why:** it was the only structured file in `.align/` without a version marker, and the only one\nholding decisions nobody can regenerate. Every other one already had `irVersion` or `recordVersion`.\nWithout a marker, a future change to what a fingerprint *means* would have been unsignallable — old\nentries would keep parsing and quietly stand for something else.\n\n**The one thing to know:** a baseline written by 0.2.0 **cannot be read by 0.1.4**, which refuses it\nrather than misreading it. If part of your team is still on 0.1.x, upgrade together, or expect a clear\nerror on the older machines rather than a wrong answer. An unrecognised version always fails loudly\nand writes nothing.",
     },
     {
       heading: "A malformed command line now exits 2, not 1",

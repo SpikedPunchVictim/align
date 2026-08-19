@@ -28,7 +28,7 @@ export default {
   steps: [
     { install: 'target' },
     { run: 'init --accept-existing', expect: { exit: 0, stdoutContains: 'Detected 9 component(s)' } },
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 18 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 18 } },
     { mutate: 'introduce-arch-violation' },
     { mutate: 'add-no-cycles-rule' },
     { run: 'check', expect: { exit: 1 } },
@@ -36,14 +36,14 @@ export default {
       run: 'baseline accept --rule arch.no-dependency:core->common',
       expect: { exit: 0, stdoutContains: "Accepted 371 violation(s) for rule 'arch.no-dependency:core->common'" },
     },
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 389 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 389 } },
     // The scope held: arch.no-cycles:repo-2's 18 violations are still red, unbaselined.
     { run: 'check', expect: { exit: 1 } },
     // Bare `accept` re-processes the FULL current violation set (389 already-baselined + 18 new),
     // not just the incremental delta — "Accepted 407" is correct, not a miscount; the entry TOTAL
     // (below) is what proves the 18 new ones actually landed.
     { run: 'baseline accept', expect: { exit: 0, stdoutContains: 'Accepted 407 violation(s) into the baseline' } },
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 407 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 407 } },
     { run: 'check', expect: { exit: 0 } },
     { run: 'baseline show', expect: { exit: 0, stdoutContains: '407 baselined violation(s)' } },
     {

@@ -71,16 +71,16 @@ export default {
     // made this mutation yield zero violations, this fails LOUDLY here instead of letting the
     // field assertions below degrade. (`jsonArrayEveryHasField` also refuses an empty array for
     // exactly this reason, so the two checks are belt-and-braces.)
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 389 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 389 } },
     // Establishes the premise rather than assuming it: `baseline accept` really does write the
     // field. Without this step, a future change that stopped writing it at the SOURCE would make
     // the assertion after the re-run pass for entirely the wrong reason.
-    { assert: { kind: 'jsonArrayEveryHasField', file: '.align/baseline.json', field: 'contentFingerprint', equals: true } },
+    { assert: { kind: 'jsonArrayEveryHasField', file: '.align/baseline.json', path: 'entries', field: 'contentFingerprint', equals: true } },
     { snapshot: 'after-accept' },
     // The re-run. This is the whole scenario: `init` is re-runnable by design, and a re-run must
     // not degrade entries it is merely carrying forward.
     { run: 'init --accept-existing', expect: { exit: 0 } },
     // THE ASSERTION. Currently fails: every one of the 389 entries comes back without the field.
-    { assert: { kind: 'jsonArrayEveryHasField', file: '.align/baseline.json', field: 'contentFingerprint', equals: true } },
+    { assert: { kind: 'jsonArrayEveryHasField', file: '.align/baseline.json', path: 'entries', field: 'contentFingerprint', equals: true } },
   ],
 };

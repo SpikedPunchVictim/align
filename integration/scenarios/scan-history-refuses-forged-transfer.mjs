@@ -78,7 +78,7 @@ export default {
     { snapshot: 'after-accept' },
     // Pin the seed, so a change that stopped the rule finding anything fails LOUDLY here instead of
     // degrading every assertion below into a comparison of empty sets.
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 2 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 2 } },
     { run: 'check', expect: { exit: 0 } },
 
     // The bait: a third violation, never reviewed, fingerprint-identical to the two accepted ones.
@@ -107,6 +107,6 @@ export default {
     // an unmatched orphan alone, so the entry is retained at a path that no longer exists — the loud,
     // recoverable direction ADR 006's asymmetry chose.
     { assert: { kind: 'fileUnchanged', file: '.align/baseline.json', since: 'after-accept' } },
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 2 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 2 } },
   ],
 };

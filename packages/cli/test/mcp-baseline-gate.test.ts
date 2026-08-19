@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readBaseline } from '../src/align-dir.js';
 import { connectedClient, fixturesDir, textOf } from './mcp-test-helpers.js';
 
 /**
@@ -87,10 +88,12 @@ describe('align mcp — align_propose_rules baseline-write MCP gate (ADR 024)', 
       expect(result.isError).toBeFalsy();
       const payload = JSON.parse(textOf(result)) as { applied: boolean };
       expect(payload.applied).toBe(true);
-      const baselinePath = path.join(rootDir, '.align/baseline.json');
-      expect(fs.existsSync(baselinePath)).toBe(true);
-      const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8')) as { ruleId: string }[];
-      expect(baseline.some((e) => e.ruleId === 'arch.no-dependency:api->ui')).toBe(true);
+      expect(fs.existsSync(path.join(rootDir, '.align/baseline.json'))).toBe(true);
+      // Through `readBaseline`, not `JSON.parse`. This test hand-parsed the file as a bare array and
+      // was the only place in the suite that did — so it was also the only unit test the 0.2.0
+      // envelope broke (ADR 006's 2026-08-19 amendment). Reading through the real accessor is what
+      // this assertion always wanted: it is about what align accepted, not about the container.
+      expect(readBaseline(rootDir).some((e) => e.ruleId === 'arch.no-dependency:api->ui')).toBe(true);
     } finally {
       fs.rmSync(rootDir, { recursive: true, force: true });
     }

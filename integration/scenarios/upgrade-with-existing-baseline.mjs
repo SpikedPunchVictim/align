@@ -80,7 +80,7 @@ export default {
     // F6-style pin (matching prune-errored-run-destroys-baseline.mjs's own discipline): verified
     // empirically 2026-08-10 — 371 arch.no-dependency:core->common + 18 arch.no-cycles:repo (the
     // latter from init's own cycles-first starter ruleset, real cycles at the pinned commit).
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 389 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 389 } },
     // A real, published 0.1.4 predates ADR 022 — see this file's header comment.
     { assert: { kind: 'exists', file: '.align/version.json', equals: false } },
     { install: 'local' },
@@ -107,7 +107,7 @@ export default {
     // assertion below is `fileChanged`, not a count check.
     { run: 'upgrade --yes --allow-incomplete', expect: { exit: 0, stdoutContains: 'Reconciled — baseline is now recorded as reconciled under align' } },
     { assert: { kind: 'fileChanged', file: '.align/baseline.json', since: 'after-0.1.4-baseline' } },
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 389 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 389 } },
     { assert: { kind: 'exists', file: '.align/version.json', equals: true } },
   ],
 };

@@ -59,7 +59,7 @@ export default {
     // a rule-evaluation change that stopped producing entries fails LOUDLY here instead of silently
     // degrading every assertion below into a comparison of empty sets. 389 is the count that
     // scenario measures at this pinned commit; this one adds exactly one file with the same import.
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 390 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 390 } },
     // The entry is now unobservable, and NOT fixed: the file and its import are untouched on disk.
     { mutate: 'exclude-vendored-subtree' },
     {
@@ -69,7 +69,7 @@ export default {
       // reason — without it this output is indistinguishable from "nothing to prune".
       expect: { exit: 0, stdoutContains: 'Retained 1 entry', stdoutMatches: "matched the excludes pattern 'packages/core/harness-vendored/\\*\\*'" },
     },
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 390 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 390 } },
     // Snapshotted HERE, not after `baseline accept`: the retaining prune above legitimately rewrites
     // the file (retention re-appends the entry it saved, so the ordering changes), and the property
     // the refusal below must satisfy is "wrote nothing", measured against the state it inherited.
@@ -112,6 +112,6 @@ export default {
     },
     // Exactly one entry gone: the forfeiture is scoped to its prefix, and the 389 entries nest's own
     // files produced are untouched.
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 389 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 389 } },
   ],
 };

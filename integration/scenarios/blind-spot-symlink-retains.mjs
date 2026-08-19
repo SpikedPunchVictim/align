@@ -98,7 +98,7 @@ export default {
     // F6 discipline (prune-errored-run-destroys-baseline.mjs): pin the seed, so a change that stopped
     // the rule finding anything fails LOUDLY here instead of degrading every assertion below into a
     // comparison of empty sets.
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 2 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 2 } },
     // Green before anything is hidden: the baseline covers every violation, so whatever happens
     // after the mutations is caused by them and nothing else.
     { run: 'check', expect: { exit: 0 } },
@@ -135,6 +135,6 @@ export default {
         stdoutNotContains: 'Pruned 2 fixed violation',
       },
     },
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 2 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 2 } },
   ],
 };

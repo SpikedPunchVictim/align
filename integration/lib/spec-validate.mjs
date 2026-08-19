@@ -22,9 +22,14 @@ const KNOWN_EXPECT_KEYS = new Set(['exit', 'stdoutContains', 'stderrContains', '
 const KNOWN_ASSERT_KEYS_BY_KIND = {
   fileUnchanged: new Set(['kind', 'file', 'since']),
   fileChanged: new Set(['kind', 'file', 'since']),
-  jsonArrayLength: new Set(['kind', 'file', 'equals']),
+  // `path`: the array to measure is a PROPERTY of the parsed file rather than its root — added
+  // 2026-08-19, when `.align/baseline.json` gained its `{ schemaVersion, entries }` envelope (ADR
+  // 006's amendment). Optional, and deliberately not defaulted to 'entries': a scenario that forgets
+  // it on a versioned file gets "is not a JSON array", which is a loud failure, whereas a default
+  // would silently measure the wrong thing on any other file that happens to have an `entries` key.
+  jsonArrayLength: new Set(['kind', 'file', 'path', 'equals']),
   exists: new Set(['kind', 'file', 'equals']),
-  jsonArrayEveryHasField: new Set(['kind', 'file', 'field', 'equals']),
+  jsonArrayEveryHasField: new Set(['kind', 'file', 'path', 'field', 'equals']),
 };
 // increment 2 (ADR 025 §7 `mcp` row / ADR 024): a step that calls one MCP tool over a real `align
 // mcp` child process (lib/mcp-client.mjs) instead of running the CLI directly. Kept as its own step

@@ -74,6 +74,40 @@ export function evaluateMcpExpect(expect, mcpResult) {
  * than silently passing. (Increment 1 needed exactly four; `jsonArrayEveryHasField` was added for
  * the `init`-strips-contentFingerprint scenario, which has to assert on a FIELD's presence across
  * every baseline entry — no existing kind could see inside an array's elements.) */
+/**
+ * The array a `jsonArray*` assertion is about — "the list, wherever THIS version of align keeps it".
+ *
+ * Added 2026-08-19 for `.align/baseline.json`'s `{ schemaVersion, entries }` envelope (ADR 006's
+ * amendment), and the tolerance is the whole point rather than a convenience. **This harness runs the
+ * same scenario against multiple published versions.** 0.1.4 stores the baseline as a bare array;
+ * 0.2.0 stores it under `entries`. A strict `path` would make every assertion on that file fail
+ * against 0.1.4 — and eight of these scenarios carry `expectFailOn: ['0.1.4']`, so they would still
+ * "fail as pinned" while failing at the ASSERTION instead of at the defect they exist to demonstrate.
+ * The calibration would go hollow silently, which is precisely the wrong-reason-failure hazard those
+ * scenarios' own headers warn about (`run.mjs`'s check can only see pass/fail, never which step).
+ *
+ * So: an array at the root IS the list, whatever `path` says. Otherwise `path` names the property
+ * holding it.
+ *
+ * The footgun this accepts, stated rather than discovered: a mistyped `path` against a version that
+ * stores the list at the root passes anyway. That is the lesser evil against a harness that cannot
+ * assert one property across two formats at all, and the mistype is caught the moment the scenario
+ * runs against a version that DOES use an envelope.
+ *
+ * ONE level deep on purpose — a dotted path expression would be a second, untested accessor language
+ * living inside a test harness, and every artifact align writes that holds a list holds it at the top.
+ */
+function arrayUnderPath(parsed, path) {
+  if (Array.isArray(parsed)) return parsed;
+  if (path === undefined || parsed === null || typeof parsed !== 'object') return undefined;
+  return parsed[path];
+}
+
+/** ` at 'entries'` for a failure message, or nothing when the assertion was about the root. */
+function describePath(path) {
+  return path === undefined ? '' : ` at '${path}'`;
+}
+
 export function evaluateAssert(assertSpec, snapshots, currentState) {
   const { kind } = assertSpec;
   if (kind === 'fileUnchanged' || kind === 'fileChanged') {
@@ -112,8 +146,10 @@ export function evaluateAssert(assertSpec, snapshots, currentState) {
   if (kind === 'jsonArrayLength') {
     const raw = resolveNormalized(currentState, assertSpec.file);
     if (raw === undefined) return { pass: false, failures: [`'${assertSpec.file}' is not present`] };
-    const value = JSON.parse(raw);
-    if (!Array.isArray(value)) return { pass: false, failures: [`'${assertSpec.file}' is not a JSON array`] };
+    const value = arrayUnderPath(JSON.parse(raw), assertSpec.path);
+    if (!Array.isArray(value)) {
+      return { pass: false, failures: [`'${assertSpec.file}'${describePath(assertSpec.path)} is not a JSON array`] };
+    }
     return value.length === assertSpec.equals
       ? { pass: true, failures: [] }
       : { pass: false, failures: [`expected ${assertSpec.file} to have ${assertSpec.equals} entries, got ${value.length}`] };
@@ -121,8 +157,10 @@ export function evaluateAssert(assertSpec, snapshots, currentState) {
   if (kind === 'jsonArrayEveryHasField') {
     const raw = resolveNormalized(currentState, assertSpec.file);
     if (raw === undefined) return { pass: false, failures: [`'${assertSpec.file}' is not present`] };
-    const value = JSON.parse(raw);
-    if (!Array.isArray(value)) return { pass: false, failures: [`'${assertSpec.file}' is not a JSON array`] };
+    const value = arrayUnderPath(JSON.parse(raw), assertSpec.path);
+    if (!Array.isArray(value)) {
+      return { pass: false, failures: [`'${assertSpec.file}'${describePath(assertSpec.path)} is not a JSON array`] };
+    }
     // An empty array satisfies BOTH `equals: true` and `equals: false` vacuously — "every entry
     // has it" and "no entry has it" are each trivially true of nothing. That is precisely the
     // false-green F6 fixed for `jsonArrayLength` (a degraded assertion comparing [] with [] and

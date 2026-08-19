@@ -297,6 +297,23 @@ so recording it would quietly narrow what the next run can compare against. alig
 complete record instead and prints one line saying it did. Install the dependencies (or ground the
 empty component) and the next run brings the record up to date.
 
+### `.align/baseline.json` now carries a schema version
+
+**No action needed, and nothing to migrate by hand.** The file was a bare JSON array; it is now
+`{ "schemaVersion": 2, "entries": [...] }`. align reads the old shape unchanged and rewrites it in the
+new one the first time something writes the baseline — `baseline accept`, `baseline prune`, `upgrade`,
+or a move-transfer on `check`. Until then your file stays exactly as it is.
+
+**Why:** it was the only structured file in `.align/` without a version marker, and the only one
+holding decisions nobody can regenerate. Every other one already had `irVersion` or `recordVersion`.
+Without a marker, a future change to what a fingerprint *means* would have been unsignallable — old
+entries would keep parsing and quietly stand for something else.
+
+**The one thing to know:** a baseline written by 0.2.0 **cannot be read by 0.1.4**, which refuses it
+rather than misreading it. If part of your team is still on 0.1.x, upgrade together, or expect a clear
+error on the older machines rather than a wrong answer. An unrecognised version always fails loudly
+and writes nothing.
+
 ### A malformed command line now exits 2, not 1
 
 **Check your CI scripts if they branch on align's exit code.** `align check` exits 1 for a red

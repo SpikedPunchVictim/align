@@ -59,7 +59,7 @@ export default {
     // rule-evaluation change ever made 'introduce-arch-violation' yield zero violations, THIS
     // assertion fails loudly here — before the destruction assertion below would otherwise
     // silently degrade to comparing `[]` with `[]` and passing vacuously.
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 389 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 389 } },
     { mutate: 'shadow-component' },
     {
       run: 'baseline prune',

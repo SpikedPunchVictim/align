@@ -77,7 +77,7 @@ export default {
     { snapshot: 'after-accept' },
     // F6 discipline: pin the seed, so a change that stopped the rule finding anything fails LOUDLY
     // here rather than degrading every assertion below into a comparison of empty sets.
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 2 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 2 } },
     { run: 'check', expect: { exit: 0 } },
     { mutate: 'add-transfer-bait' },
     { run: 'check', expect: { exit: 1 } },
@@ -101,7 +101,7 @@ export default {
         stdoutNotContains: 'Pruned 2 fixed violation',
       },
     },
-    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', equals: 2 } },
+    { assert: { kind: 'jsonArrayLength', file: '.align/baseline.json', path: 'entries', equals: 2 } },
     // Restoring the mode restores the world: the retention was about THIS scan and leaves nothing
     // sticky behind. It is also required for the run to finish at all — ADR 026's write-set check
     // walks the whole working copy afterwards and a `chmod 000` directory makes that walk throw
