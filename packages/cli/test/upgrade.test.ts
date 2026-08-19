@@ -128,7 +128,11 @@ describe('align upgrade — happy path', () => {
   it('consents to both prune and accept, reconciles the baseline, and stamps both fields', async () => {
     tmpDir = copyFixture('simple-app-violation');
     seedBaseline(tmpDir, [staleEntry()]); // orphaned — the real api->ui violation is NOT yet baselined
-    writeVersionStamp(tmpDir, '0.1.0');
+    // BOTH fields, because that is what a real 0.1.0 repository looks like: `align init` writes
+    // `baselineReconciledBy` unconditionally on every run. Stamping only `alignVersion` models a
+    // repository whose baseline was never deliberately reconciled, which since LEDGER D028 correctly
+    // reads as `unknown` rather than as "reconciled at 0.1.0".
+    writeVersionStamp(tmpDir, '0.1.0', '0.1.0');
 
     const { result: code, logs } = await withCapturedConsole(() =>
       runUpgrade(tmpDir, { nonInteractive: false, confirm: alwaysYes }),
@@ -337,6 +341,60 @@ describe('align upgrade — incomplete scan (ADR 023 tier 2)', () => {
   });
 });
 
+/**
+ * LEDGER **D028**. `align upgrade` gated on `version.json.alignVersion` — "who last wrote anything
+ * under `.align/`" — instead of `baselineReconciledBy`, "the version under which the baseline was
+ * last DELIBERATELY reconciled". `baselineReconciledBy` had a writer, a schema and seven doc comments,
+ * and **zero readers**.
+ *
+ * `stampAlignVersion` runs inside every committed-artifact writer — `baseline accept`, `baseline
+ * prune`, `build --apply`, `export-ir`, and any `check` that move-transfers — so one of those under
+ * the new binary permanently convinced `upgrade` there was nothing to do. `version-file.ts` records
+ * that an earlier ADR draft specified last-writer-of-`baseline.json` and was rejected for exactly this
+ * reason; the field was built to avoid the hazard and the consumer was then wired to the hazard.
+ */
+describe('the reconciliation watermark, not the last writer (LEDGER D028)', () => {
+  it('still offers to reconcile after an unrelated command advanced alignVersion', async () => {
+    // The post-`align export-ir` state, exactly: `alignVersion` current because SOMETHING wrote an
+    // artifact, `baselineReconciledBy` still 0.1.0 because nothing reconciled the baseline. Before the
+    // fix this printed "Already at the current version — nothing to reconcile" and exited 0 with the
+    // stale entry untouched.
+    tmpDir = copyFixture('simple-app-violation');
+    seedBaseline(tmpDir, [staleEntry()]);
+    writeVersionStamp(tmpDir, ALIGN_VERSION, '0.1.0');
+
+    const { result: code, logs } = await withCapturedConsole(() =>
+      runUpgrade(tmpDir, { nonInteractive: true, yes: true }),
+    );
+
+    expect(code).toBe(0);
+    expect(logs.join('\n')).not.toMatch(/Already at the current version/);
+    expect(logs.join('\n')).toContain(`align upgrade: 0.1.0 → ${ALIGN_VERSION}`);
+    // ...and it actually reconciled, rather than merely printing a different header: the stale
+    // orphan is gone and the watermark has caught up.
+    expect(readBaseline(tmpDir).some((e) => e.fingerprint === toViolationId('stale-orphaned-entry'))).toBe(false);
+    expect(readVersionFile(tmpDir)?.baselineReconciledBy).toBe(ALIGN_VERSION);
+  });
+
+  it('treats a stamp with no watermark as unknown rather than as reconciled', async () => {
+    // The honest fallback, and the one place a "degraded" fix would have reintroduced the defect:
+    // substituting `alignVersion` asserts a reconciliation that may never have happened. An absent
+    // watermark means align does not know, and `unknown` is the state this command already has for
+    // that. Conservative direction — it offers to reconcile rather than skipping silently.
+    tmpDir = copyFixture('simple-app-violation');
+    seedBaseline(tmpDir, [staleEntry()]);
+    writeVersionStamp(tmpDir, ALIGN_VERSION);
+
+    const { result: code, logs } = await withCapturedConsole(() =>
+      runUpgrade(tmpDir, { notes: true, nonInteractive: true }),
+    );
+
+    expect(code).toBe(0);
+    expect(logs.join('\n')).toContain(`align upgrade: unknown → ${ALIGN_VERSION}`);
+    expect(logs.join('\n')).not.toMatch(/Already at the current version/);
+  });
+});
+
 describe('align upgrade — edge cases', () => {
   it('already current: a clear no-op message, exit 0, no mutation', async () => {
     tmpDir = copyFixture('simple-app-violation');
@@ -395,7 +453,9 @@ describe('align upgrade — edge cases', () => {
       runUpgrade(tmpDir, { notes: true, nonInteractive: true, from: '0.0.1' }),
     );
 
-    // Without --from this would have hit the "already current" branch; the override takes priority.
+    // The override takes priority over the stamp. (Before LEDGER D028 this comment said "without
+    // --from this would have hit the 'already current' branch" — no longer true: this fixture stamps
+    // only `alignVersion`, so without `--from` the range would now be `unknown`, not "current".)
     expect(code).toBe(0);
     expect(logs.join('\n')).toContain(`align upgrade: 0.0.1 → ${ALIGN_VERSION}`);
     expect(logs.join('\n')).not.toMatch(/Already at the current version/);

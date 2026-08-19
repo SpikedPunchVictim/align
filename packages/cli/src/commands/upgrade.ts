@@ -13,6 +13,7 @@ import { reportCliError } from '../cli-error.js';
 import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
 import { partitionBlindSpotCandidates } from '../scan-blind-spot-retention.js';
 import { createFileExistenceProbe } from '../file-existence.js';
+import { describeUpgradeTransition, reconciliationWatermark } from '../upgrade-range.js';
 import { openScanHistory } from '../scan-history.js';
 import { defaultConfirm } from '../prompt.js';
 import { compareVersions } from '../version-skew.js';
@@ -143,10 +144,11 @@ export async function runUpgrade(rootDir: string, options: UpgradeOptions): Prom
   }
 
   const to = ALIGN_VERSION;
-  const fromKnown = options.from ?? stamp?.alignVersion;
-  const rangeFrom: SelectRangeFrom = fromKnown ?? 'unknown';
+  // `baselineReconciledBy`, NOT `alignVersion` — see `reconciliationWatermark` for the whole argument
+  // and for what reading the wrong one cost (LEDGER D028).
+  const rangeFrom = reconciliationWatermark(stamp, options.from);
 
-  console.log(`align upgrade: ${rangeFrom === 'unknown' ? 'unknown' : rangeFrom} → ${to}`);
+  console.log(describeUpgradeTransition(rangeFrom, to));
 
   if (rangeFrom !== 'unknown') {
     const cmp = compareVersions(rangeFrom, to);

@@ -463,6 +463,30 @@ function violatingSource(name) {
  * Uses `d.ts`'s survival rather than a second bait for the same reason `useHideableSubtreeWorld`
  * keeps `keep.ts`: the cheapest way to hold one variable still.
  */
+/**
+ * Rewinds `.align/version.json` to a repository that was last reconciled under 0.1.4 — BOTH fields,
+ * which is what a real post-ADR-022 repository on that version looks like (`align init` writes
+ * `baselineReconciledBy` unconditionally on every run).
+ *
+ * Exists for LEDGER D028's reproduction, and it has to be a mutation rather than a sequence of real
+ * commands: local binaries always stamp both fields to the CURRENT version, so there is no way to
+ * reach "reconciled under an older version" by running align. Rewinding the stamp is the honest
+ * stand-in — it is exactly the state a real 0.1.4-era repository is in the moment its binary is
+ * upgraded.
+ *
+ * Throws if the file is absent rather than creating one: a scenario that reaches here without an
+ * `init` has not set up what it thinks it has, and inventing the file would let it pass while testing
+ * a state no user can be in.
+ */
+export function stampVersionFileAs014(workingDir) {
+  const file = path.join(workingDir, '.align', 'version.json');
+  if (!fs.existsSync(file)) {
+    throw new Error(`mutation 'stamp-version-file-as-0.1.4': ${file} does not exist — run 'init' first`);
+  }
+  const current = JSON.parse(fs.readFileSync(file, 'utf8'));
+  writeText(file, `${JSON.stringify({ ...current, alignVersion: '0.1.4', baselineReconciledBy: '0.1.4' }, null, 2)}\n`);
+}
+
 export function deleteOneAcceptedFile(workingDir) {
   const victim = path.join(workingDir, HARNESS_TREE_DIRNAME, HARNESS_HIDEABLE_DIRNAME, 'c.ts');
   if (!fs.existsSync(victim)) {
@@ -615,6 +639,7 @@ export const MUTATIONS = {
   'use-hideable-subtree-world': (ctx) => useHideableSubtreeWorld(ctx.workingDir),
   'add-transfer-bait': (ctx) => addTransferBait(ctx.workingDir),
   'delete-one-accepted-file': (ctx) => deleteOneAcceptedFile(ctx.workingDir),
+  'stamp-version-file-as-0.1.4': (ctx) => stampVersionFileAs014(ctx.workingDir),
   'hide-subtree-as-symlink': (ctx) => hideSubtreeAsSymlink(ctx.workingDir),
   'hide-subtree-unreadable': (ctx) => hideSubtreeUnreadable(ctx.workingDir),
   'restore-subtree-readable': (ctx) => restoreSubtreeReadable(ctx.workingDir),
