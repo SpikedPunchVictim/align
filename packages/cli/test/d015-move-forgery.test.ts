@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readBaselineSnapshot } from '../src/align-dir.js';
-import { baselineAccept } from '../src/commands/baseline.js';
+import { baselineAccept, baselinePrune } from '../src/commands/baseline.js';
 import { seedBaseline } from './seed-baseline.js';
 import { runCheck } from '../src/commands/check.js';
 import { readLastScanRecord } from '../src/last-scan-file.js';
@@ -87,6 +87,52 @@ describe('a violation that was already red last scan cannot receive a transferre
     expect(readBaselineSnapshot(dir).entries.map((e) => e.file)).toEqual(['src/api/old.ts']);
   });
 
+  it('HOLDS on the second check, and the third — the refusal is not a one-run delay (LEDGER D030)', async () => {
+    // The defect this pins was shipped and reported as closing D015, and it did not: the run that
+    // refuses also rewrites the record, and by then the orphan's file is deleted and therefore not
+    // observed — so the coexistence evidence that justified the refusal was destroyed by the very run
+    // that acted on it. Measured before the fix: check#1 exit 1, **check#2 exit 0** with
+    // `acceptedBy: manual` re-homed onto the never-reviewed violation, check#3 green. In CI, where
+    // every push runs check, that is a delay of minutes.
+    //
+    // Three checks, not two: two would prove the refusal survives one rewrite, and the failure mode is
+    // precisely that it survives exactly one.
+    const dir = await acceptedAndGreen();
+    fs.writeFileSync(path.join(dir, 'src/api/new.ts'), VIOLATING_SOURCE);
+    expect(await quietCheck(dir)).toBe(1);
+    fs.rmSync(path.join(dir, 'src/api/old.ts'));
+
+    expect(await quietCheck(dir)).toBe(1);
+    expect(await quietCheck(dir)).toBe(1);
+    expect(await quietCheck(dir)).toBe(1);
+
+    expect(readBaselineSnapshot(dir).entries.map((e) => e.file)).toEqual(['src/api/old.ts']);
+    // The evidence is visibly carried rather than re-observed: the deleted file cannot be in
+    // `violations` (nothing observed it), so a record that still answers about it must say `retained`.
+    const record = readLastScanRecord(dir);
+    expect(record?.violations.map((v) => v.file)).toEqual(['src/api/new.ts']);
+    expect(record?.retained.map((v) => v.file)).toEqual(['src/api/old.ts']);
+  });
+
+  it('stops retaining once the human resolves it, so the record converges', async () => {
+    // The other half of the mechanism, and the reason it is not an unbounded accumulator: retention is
+    // conditional on a baseline entry still naming that violation at that path. Prune the orphan and
+    // the evidence is dropped on the next write.
+    const dir = await acceptedAndGreen();
+    fs.writeFileSync(path.join(dir, 'src/api/new.ts'), VIOLATING_SOURCE);
+    await quietCheck(dir);
+    fs.rmSync(path.join(dir, 'src/api/old.ts'));
+    await quietCheck(dir);
+    expect(readLastScanRecord(dir)?.retained).toHaveLength(1);
+
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    expect(await baselinePrune(dir, { yes: true, allowIncomplete: true })).toBe(0);
+    log.mockRestore();
+    await quietCheck(dir);
+
+    expect(readLastScanRecord(dir)?.retained).toEqual([]);
+  });
+
   it('a genuine rename in the same window still transfers, exactly as ADR 006 promises', async () => {
     // Calibration for the test above [S-05]: if the refusal fired on any absent file rather than on
     // an already-observed candidate, this would go red and ADR 006's "a rename must not turn CI red
@@ -163,5 +209,60 @@ describe('a record that advanced past a lost baseline write must not strand the 
     // The invariant `check.ts` promises: the next run redoes the transfer.
     expect(await quietCheck(dir)).toBe(0);
     expect(readBaselineSnapshot(dir).entries.map((e) => e.file)).toEqual(['src/api/new.ts']);
+  });
+});
+
+/**
+ * **The branch-switch coupling** — `.align/baseline.json` is committed and travels with the branch;
+ * `.align/last-scan.json` is gitignored and stays put. So a `git checkout` leaves align holding a
+ * record of a tree that is no longer there.
+ *
+ * Simulated without git, deliberately: the essential mechanic is "the tree and the committed baseline
+ * change together while the machine-local record does not", which plain `fs` reproduces exactly. It
+ * also isolates the coupling instead of testing git's checkout.
+ *
+ * **The answer, and it is a trade rather than a fix.** Measured on 2026-08-19 BEFORE retention landed,
+ * this self-healed: the first check refused on the other branch's evidence, that same check rewrote
+ * the record from the current tree, and the second check transferred. One red cycle. Retention
+ * (LEDGER D030) deliberately removes that self-healing, because the branch-switch case and the D015
+ * forgery are *indistinguishable to align* — both are "the record says these coexisted; the orphan's
+ * file is now gone" — so evidence that sticks for one sticks for the other.
+ *
+ * That is ADR 006's asymmetry choosing again, and choosing the same way: a missed transfer is loud and
+ * one `align baseline accept` from resolved; a forged one is silent and destroys a consent record. The
+ * cost is stated here rather than discovered — after a branch switch, a rename that crossed it needs a
+ * human to say so.
+ */
+describe('after a branch switch, the record describes a tree that is no longer checked out', () => {
+  it('refuses the transfer and KEEPS refusing until a human resolves it', async () => {
+    const dir = await acceptedAndGreen();
+    // Branch A: the twin exists and is red, so the record learns the two coexisted.
+    fs.writeFileSync(path.join(dir, 'src/api/new.ts'), VIOLATING_SOURCE);
+    expect(await quietCheck(dir)).toBe(1);
+
+    // `git checkout branch-b`, where the rename already happened: `old.ts` is not in this tree, the
+    // committed baseline still names it, and the gitignored record still describes branch A.
+    fs.rmSync(path.join(dir, 'src/api/old.ts'));
+
+    expect(await quietCheck(dir)).toBe(1);
+    expect(await quietCheck(dir)).toBe(1);
+    expect(readBaselineSnapshot(dir).entries.map((e) => e.file)).toEqual(['src/api/old.ts']);
+  });
+
+  it('resolves on one `baseline accept` — the recoverable direction ADR 006 chose', async () => {
+    // The cost of the trade, made concrete: this is the whole remedy, and it is the same one a user
+    // already runs for any newly-introduced violation they intend to keep.
+    const dir = await acceptedAndGreen();
+    fs.writeFileSync(path.join(dir, 'src/api/new.ts'), VIOLATING_SOURCE);
+    await quietCheck(dir);
+    fs.rmSync(path.join(dir, 'src/api/old.ts'));
+    expect(await quietCheck(dir)).toBe(1);
+
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    expect(await baselineAccept(dir)).toBe(0);
+    log.mockRestore();
+
+    expect(await quietCheck(dir)).toBe(0);
+    expect(readBaselineSnapshot(dir).entries.map((e) => e.file).sort()).toEqual(['src/api/new.ts', 'src/api/old.ts']);
   });
 });

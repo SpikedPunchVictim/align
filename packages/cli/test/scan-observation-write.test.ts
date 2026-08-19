@@ -215,7 +215,10 @@ describe('an incomplete scan does not replace a complete record (ADR 029 §7.6)'
 
   /** Persist one run against whatever is on disk, the way a command does: read, then write. */
   function persist(dir: string, run: CheckRun): void {
-    persistScanObservation(dir, run, { probe: noScanHistory(), context: context(), previous: readLastScanRecord(dir) });
+    // `[]` for the baseline: these tests drive the writer's completeness guard, and an empty baseline
+    // means nothing is retained (ADR 029 §2.1) — so the transitions under test are observed exactly as
+    // the run reported them. The retention path has its own tests in `core/test/scan-history-retention.test.ts`.
+    persistScanObservation(dir, run, { probe: noScanHistory(), context: context(), previous: readLastScanRecord(dir) }, []);
   }
 
   it('bootstraps from an incomplete run when there is no record at all', () => {

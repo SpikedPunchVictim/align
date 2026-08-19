@@ -3,6 +3,8 @@ import {
   buildScanObservation,
   createScanHistoryProbe,
   observationsDiffer,
+  retainUnresolvedObservations,
+  type BaselineEntry,
   type CheckRun,
   type RulesetIR,
   type ScanHistoryContext,
@@ -165,10 +167,21 @@ function wouldDowngrade(previous: ScanObservationRecord | undefined, next: ScanO
  *    are answers to "this run knows less than the repository contains", and shipping only the errored
  *    half was [S-09], fixed one arm and missed the other.
  */
-export function persistScanObservation(rootDir: string, run: CheckRun, history: ScanHistory): void {
+export function persistScanObservation(
+  rootDir: string,
+  run: CheckRun,
+  history: ScanHistory,
+  /**
+   * The baseline as it stands AFTER this run's own move-transfer, which is what decides whether a
+   * carried-forward observation still matters (ADR 029 §2.1, LEDGER D030). Required rather than
+   * optional: a caller that omitted it would silently write a record with no retained evidence, which
+   * is precisely the state that let the forged transfer land one run late — and it would compile.
+   */
+  baseline: readonly BaselineEntry[],
+): void {
   if (run.verdict === 'error') return;
   try {
-    const next = buildScanObservation(run, history.context, Date.now());
+    const next = retainUnresolvedObservations(history.previous, buildScanObservation(run, history.context, Date.now()), baseline);
     if (wouldDowngrade(history.previous, next)) {
       console.error(
         'align: this scan did not resolve everything it was asked to, so the previous (complete) ' +

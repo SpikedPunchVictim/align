@@ -100,6 +100,15 @@ export default {
         stdoutNotContains: 'transferred (file moves)',
       },
     },
+    // STEP 10 — THE STEP THIS SCENARIO WAS MISSING (LEDGER D030). One check after the deletion proves
+    // the refusal FIRES; it cannot prove the refusal HOLDS, and the defect was that it held for
+    // exactly one run. `check` #1 refuses and rewrites the record from the current tree, where the
+    // orphan's file is deleted and so unobserved — destroying the coexistence evidence that justified
+    // the refusal, and letting the next run transfer. Measured: exit 1, then exit 0 with the consent
+    // re-homed. Two more checks, because two total would only prove it survives one rewrite.
+    { run: 'check', expect: { exit: 1, stdoutNotContains: 'transferred (file moves)' } },
+    { run: 'check', expect: { exit: 1, stdoutNotContains: 'transferred (file moves)' } },
+
     // The consent stayed where the human put it. `check` rewrites the baseline unconditionally when
     // `reconcileMoves` returns anything, so byte-identity here IS the assertion — a forged transfer
     // would have re-homed `harness-tree/hidden/c.ts`'s entry onto `harness-tree/bait/bait.ts`,

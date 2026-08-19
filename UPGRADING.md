@@ -287,6 +287,14 @@ run. That is the situation align cannot tell from a forgery, and red is the reco
 one `align baseline accept` resolves it, whereas a forged transfer is silent and destroys the record
 of what you consented to.
 
+**The refusal persists until you resolve it.** It is not a one-run warning that clears itself: align
+keeps the evidence for as long as the accepted entry is still unresolved. The remedy is the one you
+already use for any violation you intend to keep — `align baseline accept` — or `align baseline prune`
+if the old entry is genuinely finished with. **You will most likely meet this after a branch switch**:
+`.align/baseline.json` is committed and travels with the branch, while the scan record is gitignored
+and does not, so align can be holding evidence about a tree you are no longer on. A rename that
+crossed the switch will come back red once, and one accept settles it.
+
 **It needs two scans, and it is machine-local.** A first `align check` on a fresh checkout has no
 previous scan to consult, so it behaves exactly as 0.1.x did. Nothing about this refusal can make a
 run *greener* than before — the history is only ever a reason to decline.

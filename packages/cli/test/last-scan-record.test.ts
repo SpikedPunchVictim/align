@@ -29,6 +29,7 @@ function record(overrides: Partial<ScanObservationRecord> = {}): ScanObservation
     },
     components: { api: { matchCount: 3, selectorIdentity: 'sel-api' } },
     ruleDefinitions: { 'arch.no-dependency:api-to-db': 'rule-hash-1' },
+    retained: [],
     violations: [
       { file: 'src/a.ts' as RepoRelativePath, ruleId: 'arch.no-dependency:api-to-db' as RuleId, contentFingerprint: 'cf1' as ViolationId },
     ],

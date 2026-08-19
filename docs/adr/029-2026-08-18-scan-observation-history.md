@@ -111,6 +111,39 @@ invalidation predicates below — "the cited rule's definition changed", "`c`'s 
   observation record, collapsing the very distinction §Context draws. It is also absent in a
   non-git checkout, so no consumer could depend on it anyway.
 
+### 2.1 Retained evidence — added 2026-08-19, [D030]
+
+The record carries a second, smaller list beside `violations`: **`retained`**, observations an earlier
+scan made that this one could not, kept while they still bear on an unresolved baseline entry.
+
+**Why §2 as first written could not work.** §6's refusal requires the previous scan to have observed
+the orphan violating at its own path AND the candidate at its — coexistence is the whole content of
+"the candidate predates the disappearance". But the run that first refuses also *rewrites* the record,
+and by then the orphan's file is deleted and therefore unobserved. The evidence justifying the refusal
+is destroyed by the very run that acts on it. Measured on the real command: `check#1` exit 1 with the
+consent held, **`check#2` exit 0 with `acceptedBy: manual` re-homed onto the never-reviewed
+violation**, `check#3` green. The refusal survived exactly one run; D015 was delayed, not closed.
+
+**A separate field, not merged into `violations`.** `violations` means *what this scan observed* and
+must keep meaning exactly that — a carried-forward fact is not an observation this run made, and
+writing it there would make the record lie about its own provenance. `wasViolationObservedAt` consults
+the union, because for its question both are equally sound evidence about the past.
+
+**It converges, and the bound is the baseline rather than a timer.** An observation is retained only
+while a current baseline entry names exactly that violation at exactly that path. Accepting the
+candidate, pruning the orphan, or restoring the file each end it on the next write. There is no cap
+and no age rule — an age rule here would be the time-based admissibility §2 already refuses.
+
+**The cost, stated rather than discovered.** A stale record now refuses persistently instead of
+self-healing after one cycle, and the case where that shows is a **branch switch**: `baseline.json` is
+committed and travels with the branch, `last-scan.json` is gitignored and does not, so after a
+checkout align holds evidence about a tree that is no longer there. Measured before retention landed,
+that case healed itself in one red cycle; it now stays red until a human accepts. That is deliberate,
+because the branch-switch case and the D015 forgery are *indistinguishable to align* — both are "the
+record says these coexisted; the orphan's file is gone" — so evidence that sticks for one sticks for
+both. ADR 006's asymmetry decides it the same way it decided the original: a missed transfer is loud
+and one `align baseline accept` from resolved; a forged one is silent and destroys a consent record.
+
 ### 3. Consumers ask questions; nobody reads the record
 
 An injected probe, following `FileExistenceProbe`: `packages/core` stays filesystem-free, the CLI

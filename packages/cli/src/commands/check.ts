@@ -156,7 +156,7 @@ async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<
   // and never before it — the record is the temporal reference a transfer decision is made against,
   // so moving it forward first would make the next legitimate rename look like a pre-existing
   // violation. Never fatal, never on an errored run; see `persistScanObservation`.
-  persistScanObservation(rootDir, run, history);
+  persistScanObservation(rootDir, run, history, baselineStore.snapshot());
 
   recordCheckTelemetry(rootDir, recorder, effectiveRun, wallMs, rulesetIrHash, 'check');
 
@@ -306,7 +306,7 @@ async function runUntrustedCheck(rootDir: string, options: CheckOptions): Promis
   // rather than from `align.config.ts`, so the scope identity it records is derived from
   // `exported.excludes` — a different source for the same fact, which is exactly why the identity is
   // a hash of the VALUES and not of where they came from.
-  persistScanObservation(rootDir, run, history);
+  persistScanObservation(rootDir, run, history, baselineStore.snapshot());
 
   recordCheckTelemetry(rootDir, recorder, run, wallMs, rulesetIrHash, 'check --untrusted');
 

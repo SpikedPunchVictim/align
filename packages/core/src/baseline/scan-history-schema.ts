@@ -63,5 +63,10 @@ export const scanObservationRecordSchema = z
     components: z.record(componentObservationSchema),
     ruleDefinitions: z.record(z.string().min(1)),
     violations: z.array(observedViolationSchema),
+    // Required, same pre-release-churn reasoning as `complete`: a record written before this field
+    // existed fails the parse, reads as absent, and is replaced by the same run. An OPTIONAL field
+    // here would mean `undefined` had to be interpreted, and the only safe interpretation is "no
+    // retained evidence" — which is exactly the state that lets D030's forgery through.
+    retained: z.array(observedViolationSchema),
   })
   .passthrough();

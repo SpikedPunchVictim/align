@@ -174,6 +174,30 @@ export interface ScanObservationRecord {
    * Bounded by violation count, not file count: cheap on the repositories where it matters least
    * and proportionate on the ones where it matters most. */
   readonly violations: readonly ObservedViolation[];
+  /**
+   * Observations an EARLIER scan made that this one could not, kept because they still bear on an
+   * unresolved baseline entry (ADR 029 §2.1, LEDGER **D030**).
+   *
+   * **A separate field, not merged into `violations`, and that is the whole point.** `violations`
+   * means "what this scan observed" and must keep meaning exactly that; a carried-forward fact is not
+   * an observation this scan made, and writing it there would make the record lie about its own
+   * provenance. `wasViolationObservedAt` consults the union, because for its question — *did align
+   * ever report this violation at this path while the orphan still existed?* — both are equally sound
+   * evidence.
+   *
+   * **Why the mechanism is needed at all.** The D015 refusal requires the previous scan to have
+   * observed BOTH the orphan at its own path and the candidate at its. The run that first refuses also
+   * rewrites the record, and by then the orphan's file is deleted — so the evidence that justified the
+   * refusal is destroyed by the very run that acted on it, and the NEXT run transfers. Measured: the
+   * refusal survived exactly one check and the forgery landed on the second. Coexistence is a fact
+   * about the past; a snapshot rewritten every run cannot hold it, so it is retained explicitly.
+   *
+   * **It converges.** An entry is retained only while a baseline entry still names that exact
+   * violation at that exact path. The moment a human resolves it — accepting the candidate, pruning
+   * the orphan, or restoring the file — the entry stops being retained and the record shrinks. There
+   * is no timer and no cap, because the bound is the baseline itself.
+   */
+  readonly retained: readonly ObservedViolation[];
 }
 
 export interface ComponentObservation {

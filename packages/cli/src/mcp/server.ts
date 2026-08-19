@@ -57,7 +57,7 @@ async function freshCheck(rootDir: string): Promise<{ readonly run: CheckRun; re
   // `scan-history.ts` for why §7.3's enumeration is widened rather than followed literally — an
   // agent-only workflow never runs the CLI command, so excluding this call site would leave the
   // whole mechanism inert for the consumer align ships an MCP server for.
-  persistScanObservation(rootDir, run, history);
+  persistScanObservation(rootDir, run, history, baselineStore.snapshot());
   // Shared, error-run-guarded computation (check.ts) — NOT an inline `Σ baselinedCount`, which
   // fabricates a `−N` debt drop on error runs (gates report 0 baselined then). This was the third
   // copy the first fix missed (NEW-1), and it is now guarded against a SECOND cause of the same

@@ -83,6 +83,7 @@ function record(violatingFiles: readonly string[], overrides: Partial<ScanObserv
     observed: { source: violatingFiles.map(toRepoRelativePath), manifest: [] },
     components: {},
     ruleDefinitions: { [RULE]: RULE_HASH },
+    retained: [],
     violations: violatingFiles.map((file) => ({
       file: toRepoRelativePath(file),
       ruleId: RULE,
