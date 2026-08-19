@@ -149,8 +149,20 @@ discovered in production — or, if you are lucky, on a scenario's first run.
 
 ## S-09 — Fixed one arm, missed the other
 
-**Instances**: ADR 027 F1 (S0), **D010 (S0)**, D016 (S1), D017 (S1), **D020 (S2, twice over)**.
-**Rung**: brief, **plus one executable technique** — see below.
+**Instances**: ADR 027 F1 (S0), **D010 (S0)**, D016 (S1), D017 (S1), **D020 (S2, twice over)**,
+D024(a) (S1), **D025 (S2)**. **Rung**: brief, **plus one executable technique** — see below.
+
+**D025 is the sharpest instance yet and the cheapest to have avoided**: a guard refusing to write the
+scan record from an ERRORED run, shipped hours before review asked what *else* makes a run know less
+than the repository contains. The answer — an incomplete run — had had its own name, its own
+predicate (`isRunComplete`) and its own ADR (023, "incomplete ≠ errored") for ten days, and the ADR
+that shipped the guard cites 023 elsewhere. The arm was not merely missed; the vocabulary for naming
+it was already in the author's hands.
+
+> **Ask, for a guard specifically**: a guard exists because some input is untrustworthy. Name the
+> PROPERTY that makes it untrustworthy, then enumerate every state with that property. A guard whose
+> condition names a *state* (`verdict === 'error'`) rather than the property is one arm by
+> construction.
 
 **This register was a sample, not a census, for one day.** It shipped listing three instances while
 the ledger tagged four rows `[S-09]` — D010 was omitted, so D017 was recorded as the "third"

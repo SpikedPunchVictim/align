@@ -49,6 +49,11 @@ export const scanObservationRecordSchema = z
     alignVersion: z.string().min(1),
     scopeIdentity: z.string().min(1),
     observedAt: z.number(),
+    // Required, and pre-release shape churn is the reason it can be: a record written by an align
+    // that predates this field fails the parse, reads as absent, and is replaced by the same run.
+    // The alternative — optional, with `undefined` meaning "unknown" — would put a third state into
+    // the one predicate that decides whether a sound record gets overwritten.
+    complete: z.boolean(),
     observed: z
       .object({
         source: z.array(z.string()),

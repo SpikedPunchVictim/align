@@ -291,6 +291,12 @@ of what you consented to.
 previous scan to consult, so it behaves exactly as 0.1.x did. Nothing about this refusal can make a
 run *greener* than before — the history is only ever a reason to decline.
 
+**A scan that could not resolve everything will not overwrite one that could.** If a run reports
+missing dependencies or an ungrounded component, it sees fewer violations than a complete run would —
+so recording it would quietly narrow what the next run can compare against. align keeps the earlier,
+complete record instead and prints one line saying it did. Install the dependencies (or ground the
+empty component) and the next run brings the record up to date.
+
 ### `align baseline prune` now asks before it deletes
 
 **Breaking for non-interactive use.** Every entry `prune` removes is an accepted consent decision — a

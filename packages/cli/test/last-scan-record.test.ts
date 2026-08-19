@@ -21,6 +21,7 @@ function record(overrides: Partial<ScanObservationRecord> = {}): ScanObservation
     recordVersion: 1,
     alignVersion: '0.2.0',
     scopeIdentity: 'scope-abc',
+    complete: true,
     observedAt: 1_755_000_000_000,
     observed: {
       source: ['src/a.ts' as RepoRelativePath],
@@ -46,6 +47,12 @@ const UNUSABLE: readonly { readonly why: string; readonly bytes: string }[] = [
   { why: 'right shape, wrong record version (written by a future align)', bytes: JSON.stringify({ ...record(), recordVersion: 2 }) },
   { why: 'a field with the wrong type', bytes: JSON.stringify({ ...record(), observedAt: 'yesterday' }) },
   { why: 'a negative match count', bytes: JSON.stringify({ ...record(), components: { api: { matchCount: -1, selectorIdentity: 's' } } }) },
+  {
+    // The `complete` field is REQUIRED (ADR 029 §7.6): a record from an align that predates it cannot
+    // be read, because the writer's no-downgrade decision has no safe answer for "unknown".
+    why: 'missing the completeness flag (written by an align from before ADR 029 §7.6)',
+    bytes: JSON.stringify((({ complete: _complete, ...rest }) => rest)(record())),
+  },
 ];
 
 describe('.align/last-scan.json round-trips what ADR 029 §2 says it holds', () => {

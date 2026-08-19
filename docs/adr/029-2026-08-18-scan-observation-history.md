@@ -313,6 +313,37 @@ ever add refusals cannot introduce a false green, whatever state the record is i
    matched 12 files would read as having always matched 0, silencing the exact regression §6 exists
    to report. And it would destroy a sound record to do it.
 
+6. **Never downgrade a complete record to an incomplete one.** *Added 2026-08-18, by adversarial
+   review of §7.5 — [D025].* Constraint 5 names ONE cause of "this run knows less than the repository
+   contains" and stops there. A run that is merely **incomplete** (`isRunComplete`: a
+   `missing-dependencies` advisory or an ungrounded component — ADR 023's second axis) reports fewer
+   violations, because an unresolved specifier drops the edge its violation would have fired on and an
+   ungrounded component evaluates its rules over nothing. Persisting that narrows the record, and the
+   next run then answers `known: true, value: false` about a violation the previous **complete** scan
+   had seen — so §6's D015 refusal does not fire. One `align check` without dependencies installed
+   disarms it, and nothing says so. That is [S-09], fixed one arm and missed the other, inside the
+   constraint added for the other arm.
+
+   The record therefore carries `complete`, and the writer refuses to replace a complete record with an
+   incomplete one. **A no-downgrade rule, not a no-write-when-incomplete rule**, and the distinction is
+   forced by measurement rather than taste: incompleteness is an ordinary standing state, not an error.
+   The integration project reports `complete: false` at its pinned commit (48 unresolved external
+   specifiers), and every fixture in `cli/test/scan-observation-write.test.ts` is incomplete because it
+   has no `node_modules` — so "never write when incomplete" would mean the record is never written on
+   exactly the repositories with the most code in them. The four transitions: no record → write
+   (bootstrap); incomplete → incomplete → write; incomplete → complete → write; complete → incomplete →
+   **decline, and say so on stderr**.
+
+   `complete` is a WRITE-ELIGIBILITY field and not an admissibility one — no `ScanHistoryProbe` question
+   consults it. An incomplete scan still *observed* what it reported, so a recorded violation is a sound
+   positive fact; what an incomplete run gets wrong is what it OMITS, and an omission is invisible in
+   the record by construction. That is why the guard has to live in the writer.
+
+   The cost, stated rather than left to be discovered: a repository that becomes *permanently*
+   incomplete freezes its record at the last complete scan. Benign for the only consumer — a frozen
+   record refuses only where a candidate genuinely coexisted with the orphan at that time, which is the
+   D015 case — but real, and the stderr line is what keeps it visible.
+
 This makes the known non-atomic `.align/` write (full-snapshot `writeFileSync`, no temp-and-rename,
 no lock — recorded in ADR 028's closing section) a **prerequisite** of implementation rather than a
 nicety, because `check` gains a second artifact it writes on a schedule the user does not control.
@@ -344,19 +375,14 @@ the claim rather than the mechanism will build on sand.
 *Three residuals added 2026-08-18 by adversarial review of the implementation, because each is a way
 the mechanism is quietly weaker than this ADR reads.*
 
-- **An INCOMPLETE run writes a thinner record over a sounder one, and nothing says so.** §7.5 refuses
-  to write from an *errored* run, and that guard names one cause of "this run knows less than the
-  repository contains" while missing the other: a run that is merely incomplete (unresolved
-  specifiers, an ungrounded component — `isRunComplete`, two-axis since D011) reports fewer violations
-  and overwrites the record with them. The next run then answers `known: true, value: false` about a
-  violation the previous *complete* scan had seen, so the D015 refusal silently does not fire. It is
-  never *unsound* — fewer refusals is exactly pre-ADR-029 behaviour, and no wrong refusal or false
-  green can result — but the protection is variable in a way a user cannot observe. Concretely: run
-  `align check` once without installing dependencies and the next run's D015 guard is disarmed for any
-  violation that dropped out. Not fixed here because the obvious fix (refuse to write when incomplete)
-  would make the mechanism permanently inert on any repository with a standing uncertainty advisory —
-  which includes align's own — and choosing between "variable protection" and "no protection" deserves
-  its own decision rather than being folded into this one.
+- ~~**An INCOMPLETE run writes a thinner record over a sounder one, and nothing says so.**~~ **Closed
+  2026-08-18 by §7.6** ([D025]). The residual as first written also carried a false justification for
+  leaving it open — that refusing to write when incomplete "would make the mechanism permanently inert
+  on any repository with a standing uncertainty advisory, which includes align's own". `isRunComplete`
+  does not consider `uncertainty` at all (`gates/advisories.ts`; `advisories.test.ts` asserts it
+  directly), and align's own run is complete. The real constraint came from a different measurement —
+  the integration project and every unit fixture are incomplete for other reasons — and it pointed at
+  a no-DOWNGRADE rule rather than a no-write rule. The wrong reason would have led to the wrong fix.
 - **A forged record can steer which candidate inherits a transfer.** §5 guarantees no *additional*
   transfer and no greener verdict, and that holds. But `applyMoves` matches greedily and consumes each
   candidate, so declaring one candidate already-observed shifts later orphans onto different targets

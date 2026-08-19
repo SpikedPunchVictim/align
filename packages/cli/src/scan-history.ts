@@ -93,18 +93,56 @@ export function openScanHistory(
   return { probe: createScanHistoryProbe(previous, context), context, previous };
 }
 
+const INCOMPLETE_HINT =
+  'Install dependencies (or ground the empty component) and re-run to bring the record up to date.';
+
 /**
- * Records what this run observed, subject to three constraints that are each a way of NOT writing.
+ * ADR 029 §7.6 / LEDGER D025 — **an incomplete run must not overwrite a complete one.**
+ *
+ * The failure this closes: a run that is merely incomplete reports FEWER violations (an unresolved
+ * specifier drops the edge, so the violation on it never fires; an ungrounded component evaluates its
+ * rules over nothing). Persisting that replaces a sound record with a narrower one, and the next run
+ * then answers `known: true, value: false` about a violation the previous complete scan had seen — so
+ * the D015 refusal does not fire. One `align check` without `npm ci` silently disarms it, and nothing
+ * announces that it has been disarmed.
+ *
+ * **A no-DOWNGRADE rule rather than a no-write-when-incomplete rule**, and the difference is not
+ * cosmetic. Incompleteness is an ordinary standing state for real repositories, not an error: the
+ * integration project reports `complete: false` at its pinned commit (48 unresolved external
+ * specifiers), so "never write from an incomplete run" would mean the record is never written there
+ * at all and the mechanism is permanently inert on exactly the repositories that have the most code.
+ * The four transitions:
+ *
+ *   no record   → write (bootstrap; an incomplete record beats none, since every question it answers
+ *                 `true` is still a sound positive observation)
+ *   incomplete  → write (tracks the repository at the fidelity available)
+ *   → complete    write (an upgrade in fidelity is never a loss)
+ *   complete → incomplete   **decline**, and say so
+ *
+ * The cost, stated rather than discovered: a repository that becomes permanently incomplete freezes
+ * its record at the last complete scan. That is benign for the only consumer — a frozen record refuses
+ * only where a candidate genuinely coexisted with the orphan at that time, which is the D015 case — but
+ * it is a real behaviour and the stderr line is what makes it visible instead of silent.
+ */
+function wouldDowngrade(previous: ScanObservationRecord | undefined, next: ScanObservationRecord): boolean {
+  return previous !== undefined && previous.complete && !next.complete;
+}
+
+/**
+ * Records what this run observed, subject to four constraints that are each a way of NOT writing.
  *
  * 1. **Never from an errored run** — and note what this constraint does NOT cover. It names one cause
  *    of "this run knows less than the repository contains"; a run that is merely INCOMPLETE
  *    (unresolved specifiers, an ungrounded component — `isRunComplete`) still writes, with fewer
  *    violations, over a sounder record. The next run's D015 refusal then does not fire for whatever
  *    dropped out. Never unsound (fewer refusals is pre-ADR-029 behaviour exactly), but the protection
- *    becomes variable in a way nobody can see. Recorded as a residual in ADR 029's "What this does not
- *    close" rather than fixed, because refusing to write when incomplete would make the mechanism
- *    permanently inert on any repository carrying a standing uncertainty advisory — align's own
- *    included. If you are here to fix it, that is the trade-off to decide first. An errored run reports empty `observedFiles`,
+ *    becomes variable in a way nobody can see. **Closed by constraint 4 below** (LEDGER D025); an
+ *    earlier version of this comment left it as an accepted residual and justified that with a claim
+ *    that was simply false — that refusing to write when incomplete would inert the mechanism on any
+ *    repository with a standing `uncertainty` advisory, align's own included. `isRunComplete` does not
+ *    consider `uncertainty` at all (`gates/advisories.ts`, and `advisories.test.ts` asserts it
+ *    directly); align's own run is complete. The real constraint came from a different measurement —
+ *    see `wouldDowngrade`. An errored run reports empty `observedFiles`,
  *    `observedViolations` and `componentMatchCounts` — deliberately, because it has no trustworthy
  *    scan scope to report (`untrustworthyScanScope`). Persisting that would turn "this run knows
  *    nothing" into the positive claim "the previous scan observed nothing", which is admissible next
@@ -121,11 +159,23 @@ export function openScanHistory(
  *    `known: false`, which is exactly today's behaviour — and a `check` that exited non-zero because
  *    it could not update a cache would be a far worse outcome than the one being protected against.
  *    Announced on stderr rather than swallowed: silence is how a mechanism stays broken.
+ *
+ * 4. **Never downgrading a complete record to an incomplete one** — see `wouldDowngrade` above for the
+ *    defect, the four transitions and the cost. This is the constraint constraint 1 was missing: both
+ *    are answers to "this run knows less than the repository contains", and shipping only the errored
+ *    half was [S-09], fixed one arm and missed the other.
  */
 export function persistScanObservation(rootDir: string, run: CheckRun, history: ScanHistory): void {
   if (run.verdict === 'error') return;
   try {
     const next = buildScanObservation(run, history.context, Date.now());
+    if (wouldDowngrade(history.previous, next)) {
+      console.error(
+        'align: this scan did not resolve everything it was asked to, so the previous (complete) ' +
+          `.align/last-scan.json was kept rather than replaced with a narrower observation. ${INCOMPLETE_HINT}`,
+      );
+      return;
+    }
     if (!observationsDiffer(history.previous, next)) return;
     writeLastScanRecord(rootDir, next);
   } catch (err) {

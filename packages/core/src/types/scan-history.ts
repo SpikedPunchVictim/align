@@ -129,6 +129,19 @@ export interface ScanObservationRecord {
    * or wider scope observes a different set of files for reasons that have nothing to do with the
    * repository changing. */
   readonly scopeIdentity: string;
+  /**
+   * Whether the recording run resolved everything it was asked to — `isRunComplete`, ADR 023's second
+   * axis: no `missing-dependencies` advisory and no ungrounded component. (An `uncertainty` advisory
+   * does NOT make a run incomplete; align's own repository carries one and is complete.)
+   *
+   * **Not admissibility — write eligibility.** No question on `ScanHistoryProbe` consults this, and
+   * that is deliberate: an incomplete scan still *observed* what it reported, so a recorded violation
+   * remains a sound positive fact. What an incomplete run gets wrong is what it OMITS, and an
+   * omission is invisible in the record by construction. So this field exists for the writer
+   * (`persistScanObservation`), which refuses to replace a record from a complete run with one from
+   * an incomplete run — see LEDGER D025 for the defect that required it.
+   */
+  readonly complete: boolean;
   /** Reporting and staleness only. NEVER an input to an inference: "the record is 20 minutes old"
    * says nothing about whether a file moved, and a time-based admissibility rule would make the
    * safety of a destructive inference depend on how long a developer went to lunch for. */
