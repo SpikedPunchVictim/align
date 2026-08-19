@@ -18,3 +18,9 @@ coverage/
 # cross-version integration harness (ADR 025): run output, cloned projects, packed tarballs —
 # reproducible from integration/{scenarios,projects,lib} on demand, never committed.
 integration/results/
+
+# A personal skill that materialized into this repo's skill directory. The skills that ARE committed
+# here (`align/`, `bug-hunt/`) are the ones this project ships and expects a contributor to have;
+# this one is the author's own toolkit and is deliberately not shared state. Targeted rather than a
+# blanket `.claude/skills/` ignore, which would misdescribe the tracked ones.
+.claude/skills/cli-best-practices/

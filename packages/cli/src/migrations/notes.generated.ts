@@ -11,11 +11,11 @@
 // `migration-notes-drift.test.ts` fails if UPGRADING_MD_CONTENT_HASH below no longer matches
 // the doc's current content — that is the drift detector, not a suggestion.
 //
-// Generated at: 2026-08-19T05:56:52.934Z
+// Generated at: 2026-08-19T06:31:47.046Z
 import type { MigrationNote } from './types.js';
 
 /** sha256Hex (16-char) of UPGRADING.md's full text at compile time. */
-export const UPGRADING_MD_CONTENT_HASH = "0dff747779b829b2";
+export const UPGRADING_MD_CONTENT_HASH = "3c10225022eb7065";
 
 /** Migration notes compiled from UPGRADING.md, keyed by the exact version heading text
  * ("## <version>") it was compiled from. */
@@ -68,6 +68,14 @@ export const COMPILED_NOTES: Readonly<Record<string, readonly MigrationNote[]>> 
     {
       heading: "A move-transfer is now refused when the target was already violating",
       body: "**This is the reason the record exists.** When a baselined file disappears, align looks for a\ncurrent, not-yet-baselined violation with the same content elsewhere and transfers your acceptance\nonto it — that is how a rename avoids turning CI red for one cycle. But align matches by content, so\nit cannot tell a renamed file from one that was *deleted while an identical violation already existed\nsomewhere else*. In that second case the transfer moves your recorded `acceptedBy` onto a violation\nnobody ever reviewed, and the repository goes from red to **green at exit 0**.\n\nFrom 0.2.0, `align check` asks the previous scan first: if that violation was already reported at that\npath last run, it existed before the file disappeared, so it cannot be where the violation moved to\nand the transfer is refused. Your accepted entry stays where you put it, and the other violation stays\nred and reviewable.\n\n**What you might notice.** A rename that used to transfer silently can now come back red, in one\nspecific situation: the violation at the new path was already there and already red on the previous\nrun. That is the situation align cannot tell from a forgery, and red is the recoverable direction —\none `align baseline accept` resolves it, whereas a forged transfer is silent and destroys the record\nof what you consented to.\n\n**It needs two scans, and it is machine-local.** A first `align check` on a fresh checkout has no\nprevious scan to consult, so it behaves exactly as 0.1.x did. Nothing about this refusal can make a\nrun *greener* than before — the history is only ever a reason to decline.\n\n**A scan that could not resolve everything will not overwrite one that could.** If a run reports\nmissing dependencies or an ungrounded component, it sees fewer violations than a complete run would —\nso recording it would quietly narrow what the next run can compare against. align keeps the earlier,\ncomplete record instead and prints one line saying it did. Install the dependencies (or ground the\nempty component) and the next run brings the record up to date.",
+    },
+    {
+      heading: "A malformed command line now exits 2, not 1",
+      body: "**Check your CI scripts if they branch on align's exit code.** `align check` exits 1 for a red\nverdict — and until now commander exited 1 for a bad command line too, so `align check --nonsuch`\n(a typo, a flag from a newer version, a copy-paste error) was indistinguishable from \"this\nrepository has violations\". A script that reported architecture failures reported one that had never\nhappened.\n\nUsage errors — unknown option, unknown command, missing argument — now exit **2**. `--help` and\n`--version` still exit 0, and a red verdict still exits 1, so the only scripts affected are ones that\nwere previously being told the wrong thing.",
+    },
+    {
+      heading: "`align` no longer stack-traces when you pipe it into `head`",
+      body: "A downstream reader that closes the pipe before align finishes writing used to produce an unhandled\nNode error and a stack trace on stderr. It now exits quietly, keeping whatever exit code the command\nhad already determined — a broken pipe never turns a red verdict green.",
     },
     {
       heading: "`align baseline prune` now asks before it deletes",

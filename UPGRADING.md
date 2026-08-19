@@ -297,6 +297,24 @@ so recording it would quietly narrow what the next run can compare against. alig
 complete record instead and prints one line saying it did. Install the dependencies (or ground the
 empty component) and the next run brings the record up to date.
 
+### A malformed command line now exits 2, not 1
+
+**Check your CI scripts if they branch on align's exit code.** `align check` exits 1 for a red
+verdict — and until now commander exited 1 for a bad command line too, so `align check --nonsuch`
+(a typo, a flag from a newer version, a copy-paste error) was indistinguishable from "this
+repository has violations". A script that reported architecture failures reported one that had never
+happened.
+
+Usage errors — unknown option, unknown command, missing argument — now exit **2**. `--help` and
+`--version` still exit 0, and a red verdict still exits 1, so the only scripts affected are ones that
+were previously being told the wrong thing.
+
+### `align` no longer stack-traces when you pipe it into `head`
+
+A downstream reader that closes the pipe before align finishes writing used to produce an unhandled
+Node error and a stack trace on stderr. It now exits quietly, keeping whatever exit code the command
+had already determined — a broken pipe never turns a red verdict green.
+
 ### `align baseline prune` now asks before it deletes
 
 **Breaking for non-interactive use.** Every entry `prune` removes is an accepted consent decision — a

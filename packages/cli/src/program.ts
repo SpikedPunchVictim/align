@@ -53,6 +53,13 @@ function addTelemetryOptions(cmd: Command): Command {
  */
 export function buildProgram(): Command {
   const program = new Command();
+  // LEDGER D026. Commander's default is to print the error and `process.exit(1)` itself; `align
+  // check` already uses 1 for a RED verdict, so a mistyped flag in a CI script was indistinguishable
+  // from a repository that genuinely has violations. With `exitOverride` commander throws instead,
+  // and `index.ts` maps it (usage → 2, `--help`/`--version` → 0). The error message is still printed
+  // by commander before it throws — verified against the real binary, not assumed, because a silent
+  // usage error would be a worse outcome than the wrong exit code.
+  program.exitOverride();
   program
     .name('align')
     .description('Architecture-conformance verification oracle for LLM coding agents.')
