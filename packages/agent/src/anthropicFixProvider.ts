@@ -7,7 +7,8 @@
  * Model default per the `claude-api` skill reference, per explicit task instruction to default to
  * the latest Sonnet-class model id (not the skill's general-purpose Opus default) — a background
  * fix loop that may run many PLAN+FIX calls per session is exactly the cost-sensitive, high-volume
- * workload Sonnet-tier is for. Config/env-selectable (`ALIGN_AGENT_MODEL` / `--model`).
+ * workload Sonnet-tier is for. Selected by the caller: the CLI resolves `--model` / `ALIGN_AGENT_MODEL`
+ * at its entry point and passes the result in; this package reads no environment variable itself.
  */
 import Anthropic from '@anthropic-ai/sdk';
 import { fixProposalSchema, type FixProposal } from '@spikedpunch/align-core';
@@ -141,7 +142,14 @@ export class AnthropicFixProvider implements FixProvider {
 
   constructor(options: AnthropicFixProviderOptions = {}) {
     this.client = options.apiKey !== undefined ? new Anthropic({ apiKey: options.apiKey }) : new Anthropic();
-    this.model = options.model ?? process.env['ALIGN_AGENT_MODEL'] ?? DEFAULT_MODEL;
+    // No `process.env` fallback here, deliberately (2026-08-19). This package is a domain library —
+    // the functional-core side of the shell/core split — and a library that reaches for ambient
+    // process state cannot be reasoned about from its arguments, which is the property the whole
+    // injection discipline in this repo exists to preserve. `ALIGN_AGENT_MODEL` is now resolved once
+    // at the CLI entry point (`cli/src/program.ts` via `resolveAgentModel`) and arrives as
+    // `options.model`, exactly the way `ALIGN_TELEMETRY` already did. Pinned by
+    // `packages/agent/test/agent-reads-no-ambient-env.test.ts`.
+    this.model = options.model ?? DEFAULT_MODEL;
     this.maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
     this.schemaRetries = options.schemaRetries ?? DEFAULT_SCHEMA_RETRIES;
   }

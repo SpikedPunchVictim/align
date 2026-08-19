@@ -7,7 +7,7 @@ import { runUpgrade } from './commands/upgrade.js';
 import { runExplain } from './commands/explain.js';
 import { runDoctor } from './commands/doctor.js';
 import { runBuild, DEFAULT_DOC_PATH } from './commands/build.js';
-import { runAgentCommand } from './commands/agent.js';
+import { resolveAgentModel, runAgentCommand } from './commands/agent.js';
 import { runSkill, type SkillTopic } from './commands/skill.js';
 import { runDocs } from './commands/docs.js';
 import { runTelemetryReport, DEFAULT_TELEMETRY_FILE } from './commands/telemetry.js';
@@ -336,6 +336,10 @@ export function buildProgram(): Command {
       const rootDir = resolveRootOrFail('align agent run');
       if (rootDir === undefined) return;
       const telemetryPreConfig = resolveTelemetryPreConfig({ telemetry: opts.telemetry });
+      // Resolved HERE, at the entry point, alongside the telemetry env read — not inside the
+      // provider that consumes it. `packages/agent` is a domain library and now reads no environment
+      // variable at all (pinned by a test in that package).
+      const model = resolveAgentModel(opts.model);
       const code = await runAgentCommand(rootDir, {
         maxAttempts: opts.maxAttempts,
         pr: opts.pr,
@@ -343,7 +347,7 @@ export function buildProgram(): Command {
         allowUntested: opts.allowUntested,
         allowSymbolRemovals: opts.allowSymbolRemovals,
         allowIncomplete: opts.allowIncomplete,
-        ...(opts.model !== undefined ? { model: opts.model } : {}),
+        ...(model !== undefined ? { model } : {}),
         dryRun: opts.dryRun,
         ...(telemetryPreConfig !== undefined ? { telemetryPreConfig } : {}),
       });

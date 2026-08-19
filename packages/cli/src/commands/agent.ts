@@ -27,6 +27,26 @@ import { readBaseline } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
 
+/**
+ * `--model <id>` beats `ALIGN_AGENT_MODEL` beats the provider's own default.
+ *
+ * Exists as a named function with an injectable `env` for the same two reasons
+ * `resolveTelemetryPreConfig` does: the precedence is then stated in one place instead of being a
+ * `??` chain buried at a call site, and it is testable without mutating `process.env` — which is what
+ * the env read cost while it lived inside `AnthropicFixProvider`'s constructor (it had no test at
+ * all). Called ONLY from `program.ts`, align's entry point; nothing below it reads the environment.
+ */
+export function resolveAgentModel(flagModel: string | undefined, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (flagModel !== undefined) return flagModel;
+  // `??` is wrong here and was wrong in the constructor this replaced (LEDGER D027): it treats only
+  // `null`/`undefined` as absent, so `ALIGN_AGENT_MODEL=` — which is how a variable gets "unset" in a
+  // shell profile or a CI matrix row — yielded `''`, an empty model id that travels all the way to
+  // the SDK and fails there talking about the model instead of about the configuration. Trimmed
+  // because `ALIGN_AGENT_MODEL=" "` has the same intent and the same failure.
+  const fromEnv = env['ALIGN_AGENT_MODEL']?.trim();
+  return fromEnv === undefined || fromEnv === '' ? undefined : fromEnv;
+}
+
 export interface AgentRunCliOptions {
   readonly maxAttempts: number;
   readonly pr: boolean;
