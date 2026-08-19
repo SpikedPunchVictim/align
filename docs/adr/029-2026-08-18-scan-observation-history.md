@@ -249,10 +249,25 @@ ever add refusals cannot introduce a false green, whatever state the record is i
   ADR 006's exception stands between D010 and a green exit 0. What would actually retire it is
   evidence of a file's past NON-EXISTENCE — which git has and this record structurally cannot hold.
   See [ADR 006's amended section](006-2026-07-11-baseline.md#this-exception-was-intended-to-be-temporary-it-is-not).
-- **`store.prune` retention (D001, D008) — retain only.** The history may add retention; it may
+- ~~**`store.prune` retention (D001, D008) — retain only.** The history may add retention; it may
   never license a deletion. `wasFileObserved` returning `known: true, value: false` for a file the
-  baseline names is a reason to retain and report, never a reason to prune. **ADR 006's consent
+  baseline names is a reason to retain and report, never a reason to prune.~~ **ADR 006's consent
   gate stays** — see §"What this does not close".
+
+  ***STRUCK 2026-08-19 — not implementable with N = 1, and `wasFileObserved` is removed with it
+  ([D032]).*** The rule reads as a safe addition and is not one. `known: true, value: false` means
+  "the previous scan did not observe this file", which is true of every file deleted **before** that
+  scan — so retention on it would make any entry whose file vanished more than one run ago
+  permanently unprunable, and users prune long after deleting. That is not a stricter `prune`; it is
+  a `prune` that cannot do its job, arriving as a safety feature. Raising N would not fix it either:
+  any finite history has the same edge one run further back. The sound question is "has align ever
+  observed this file", which no bounded record answers.
+
+  With no sound consumer, `wasFileObserved` and the per-domain observed-path lists it read are
+  deleted. They were **73% of the record, measured** on align's own repository — 24,848 bytes down to
+  6,644 — written into someone else's checkout on every run that changes anything. Add them back when
+  a sound consumer exists, the same rule §1 states for raising N. The prune-retention question stays
+  answered by ADR 028's three mechanisms, which reason about THIS scan and need no history.
 
   *Qualified 2026-08-18, while implementing the `applyMoves` consumer above.* "Never license a
   deletion" is true of THIS consumer and false of the ADR as a whole, and the difference is a
@@ -267,7 +282,14 @@ ever add refusals cannot introduce a false green, whatever state the record is i
 - **Component grounding (D011) — report.** "Component `api` matched 12 files last scan and 0 now"
   replaces a generic incompleteness refusal with an actionable one. The ADR 023 tier-2 refusal
   itself is unchanged; only its message improves.
-- **Scope change (D009) — report the narrowing direction only.** See below.
+- **Scope change (D009) — report that it changed.** ~~The narrowing direction only.~~ *Corrected
+  2026-08-19 while wiring it:* `scopeIdentity` is a hash over the sorted `excludes` plus the
+  nested-checkout opt-outs, so comparing two of them yields same-or-different and **never**
+  narrower-or-wider. A direction would require carrying the scope's contents in every repository —
+  the same bytes-for-a-message trade struck above for the observed-file list, and rejected for the
+  same reason. "The scan scope changed since the previous run" is derivable, sound, and is the single
+  fact that most often explains an ungrounded component. Wired into ADR 023's tier-2 refusal message
+  beside the grounding report.
 
 ### 7. Writing it is conditional, and never fatal
 

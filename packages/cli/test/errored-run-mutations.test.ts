@@ -8,6 +8,7 @@ import { baselineAccept, baselinePrune } from '../src/commands/baseline.js';
 import { persistMovedBaseline, runCheck } from '../src/commands/check.js';
 import { runInit } from '../src/commands/init.js';
 import { refuseIfRunIncomplete } from '../src/errored-run.js';
+import type { ScanHistory } from '../src/scan-history.js';
 import { InMemoryBaselineStore, noScanHistory, toRuleId, toRepoRelativePath, toViolationId, type CheckRun, type FileExistenceProbe } from '@spikedpunch/align-core';
 import { seedBaseline } from './seed-baseline.js';
 import { readBaselineSnapshot } from '../src/align-dir.js';
@@ -308,6 +309,16 @@ describe('the other mutating consumers of a run’s violations', () => {
 });
 
 describe('`refuseIfRunIncomplete` (ADR 023 tier 2, unit-level)', () => {
+  /** No previous scan: these tests are about the REFUSAL, which ADR 029 §6 leaves unchanged — the
+   * history only sharpens the message. `noScanHistory()` keeps that separation visible. */
+  function noHistory(): ScanHistory {
+    return {
+      probe: noScanHistory(),
+      context: { alignVersion: '0.2.0', scopeIdentity: 's', ruleDefinitions: new Map(), componentSelectorIdentities: new Map() },
+      previous: undefined,
+    };
+  }
+
   function runWith(complete: boolean): CheckRun {
     return {
       verdict: 'red',
@@ -323,20 +334,20 @@ describe('`refuseIfRunIncomplete` (ADR 023 tier 2, unit-level)', () => {
   }
 
   it('refuses when the scan is incomplete, something is actually at risk, and there is no override', () => {
-    const code = refuseIfRunIncomplete('align baseline prune', runWith(false), 3, false);
+    const code = refuseIfRunIncomplete('align baseline prune', runWith(false), 3, false, noHistory());
     expect(code).toBe(1);
   });
 
   it('proceeds (returns undefined) when --allow-incomplete overrides an incomplete scan', () => {
-    expect(refuseIfRunIncomplete('align baseline prune', runWith(false), 3, true)).toBeUndefined();
+    expect(refuseIfRunIncomplete('align baseline prune', runWith(false), 3, true, noHistory())).toBeUndefined();
   });
 
   it('proceeds when the scan is complete, regardless of the override flag', () => {
-    expect(refuseIfRunIncomplete('align baseline prune', runWith(true), 3, false)).toBeUndefined();
+    expect(refuseIfRunIncomplete('align baseline prune', runWith(true), 3, false, noHistory())).toBeUndefined();
   });
 
   it('never refuses when nothing is actually at risk of deletion (atRiskCount 0) — a pure transfer is never blocked', () => {
-    expect(refuseIfRunIncomplete('align baseline prune', runWith(false), 0, false)).toBeUndefined();
+    expect(refuseIfRunIncomplete('align baseline prune', runWith(false), 0, false, noHistory())).toBeUndefined();
   });
 });
 

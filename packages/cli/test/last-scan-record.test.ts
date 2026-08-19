@@ -23,10 +23,6 @@ function record(overrides: Partial<ScanObservationRecord> = {}): ScanObservation
     scopeIdentity: 'scope-abc',
     complete: true,
     observedAt: 1_755_000_000_000,
-    observed: {
-      source: ['src/a.ts' as RepoRelativePath],
-      manifest: ['package.json' as RepoRelativePath],
-    },
     components: { api: { matchCount: 3, selectorIdentity: 'sel-api' } },
     ruleDefinitions: { 'arch.no-dependency:api-to-db': 'rule-hash-1' },
     retained: [],

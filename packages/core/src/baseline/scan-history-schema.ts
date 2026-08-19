@@ -54,12 +54,6 @@ export const scanObservationRecordSchema = z
     // The alternative — optional, with `undefined` meaning "unknown" — would put a third state into
     // the one predicate that decides whether a sound record gets overwritten.
     complete: z.boolean(),
-    observed: z
-      .object({
-        source: z.array(z.string()),
-        manifest: z.array(z.string()),
-      })
-      .passthrough(),
     components: z.record(componentObservationSchema),
     ruleDefinitions: z.record(z.string().min(1)),
     violations: z.array(observedViolationSchema),

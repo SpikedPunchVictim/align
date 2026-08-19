@@ -11,7 +11,7 @@ import { assertGeneratedRulesNoteWellFormed, writeGeneratedRulesNote } from '../
 import { ALIGN_LOCAL_GITIGNORE_ENTRIES, ensureAlignLocalFilesGitignored } from '../init/gitignore.js';
 import { offerAlignScript } from '../init/npm-script.js';
 import { createOrchestrator } from '../composition-root.js';
-import { openScanHistory } from '../scan-history.js';
+import { openScanHistory, type ScanHistory } from '../scan-history.js';
 import { CONFIG_FILENAME, loadConfig } from '../config.js';
 import { writeBaseline, readBaselineSnapshot, recordBaselineReconciled, type BaselineToken } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
@@ -100,6 +100,9 @@ function partitionAndRefuseIfBaselineWriteAtRisk(
   existing: readonly BaselineEntry[],
   persistedFingerprints: ReadonlySet<ViolationId>,
   allowIncomplete: boolean,
+  /** ADR 029 §6's grounding/scope reporting, for the tier-2 refusal's message only — the refusal
+   * itself is unchanged (see `refuseIfRunIncomplete`). */
+  history: ScanHistory,
 ): { readonly refusal: number | undefined; readonly retained: ReturnType<typeof partitionBlindSpotCandidates<BaselineEntry>>['retained'] } {
   const dropped = existing.filter((entry) => !persistedFingerprints.has(entry.fingerprint));
   // ADR 028 Stage 2: the probe applies HERE too, not only in `baseline prune`. This path never
@@ -114,7 +117,7 @@ function partitionAndRefuseIfBaselineWriteAtRisk(
   // retain it forever.
   const observedFiles = new Set([...run.observedFiles.source, ...run.observedFiles.manifest]);
   const { retained, forfeited } = partitionBlindSpotCandidates(dropped, run.blindSpots, observedFiles, createFileExistenceProbe(rootDir));
-  return { refusal: refuseIfRunIncomplete('align init', run, forfeited.length, allowIncomplete), retained };
+  return { refusal: refuseIfRunIncomplete('align init', run, forfeited.length, allowIncomplete, history), retained };
 }
 
 export async function runInit(rootDir: string, options: InitOptions): Promise<number> {
@@ -245,13 +248,10 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   // A `noScanHistory()` here would be a false statement about the repository that merely happens not
   // to matter today, and the exemption is pinned by a test rather than by this comment. `init` reads
   // the record and never writes it (ADR 029 §7.3).
-  const { orchestrator } = createOrchestrator(
-    rootDir,
-    ruleset,
-    [],
-    hostRules,
-    openScanHistory(rootDir, { ruleset, excludes, includeNestedCheckouts }).probe,
-  );
+  // ONE read, two uses: the store's transfer gate and the tier-2 refusal's message (ADR 029 §6). A
+  // second `openScanHistory` here would re-read the file and could disagree with the first.
+  const history = openScanHistory(rootDir, { ruleset, excludes, includeNestedCheckouts });
+  const { orchestrator } = createOrchestrator(rootDir, ruleset, [], hostRules, history.probe);
   const run = await orchestrator.check({ rootDir, excludes, includeNestedCheckouts });
   // `align init` is re-runnable on a repo that already has a baseline ("align.config.ts already
   // exists — leaving it as-is", above), and the zero-violations branch below writes `[]` over it.
@@ -290,7 +290,7 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     // nothing to refuse. Returned directly, not routed through `finish()` — matching every other
     // refusal in this command. `retained` (see that function's doc comment) is what actually gets
     // persisted below instead of a bare `[]`.
-    const atRisk = partitionAndRefuseIfBaselineWriteAtRisk(rootDir, run, existingBaseline, new Set<ViolationId>(), options.allowIncomplete ?? false);
+    const atRisk = partitionAndRefuseIfBaselineWriteAtRisk(rootDir, run, existingBaseline, new Set<ViolationId>(), options.allowIncomplete ?? false, history);
     if (atRisk.refusal !== undefined) return atRisk.refusal;
 
     // `writeBaseline` (a `.align/` artifact writer, `align-dir.ts`) stamps `alignVersion` on its
@@ -333,6 +333,7 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
     existingBaseline,
     new Set(violations.map((v) => v.id)),
     options.allowIncomplete ?? false,
+    history,
   );
   if (seedAtRisk.refusal !== undefined) return seedAtRisk.refusal;
 

@@ -74,9 +74,6 @@ export function recalled<T>(value: T): Recalled<T> {
  * more importantly, keeps each predicate small enough that a consumer's author can check it.
  */
 export interface ScanHistoryProbe {
-  /** `known: false` when the record is absent, written by a different align version, or written
-   * under a different scan scope. */
-  wasFileObserved(file: RepoRelativePath): Recalled<boolean>;
   /** The question that closes the severity zeros: *was this candidate already violating, at this
    * path, last scan?* If it was, it predates the source file's disappearance and cannot be where
    * that violation moved to. `known: false` when the record is absent, written by a different align
@@ -146,14 +143,16 @@ export interface ScanObservationRecord {
    * says nothing about whether a file moved, and a time-based admissibility rule would make the
    * safety of a destructive inference depend on how long a developer went to lunch for. */
   readonly observedAt: number;
-  /** Repo-relative paths, per scan domain (ADR 013). Kept separate for the same reason
-   * `CheckRun.observedFiles` is: `.json` is an asset extension to the source walker and a
-   * first-class file to the manifest walker, so judging one domain by the other's vocabulary
-   * mis-classifies. */
-  readonly observed: {
-    readonly source: readonly RepoRelativePath[];
-    readonly manifest: readonly RepoRelativePath[];
-  };
+  /**
+   * *(Removed 2026-08-19 — LEDGER D032.)* The record used to carry every observed path, per scan
+   * domain, for `wasFileObserved`. That question's only licensed consumer — `store.prune`'s retention
+   * — turned out to be unsound with N=1: "the previous scan did not observe this file" is true of any
+   * file deleted before that scan, so retaining on it would make every entry whose file vanished more
+   * than one run ago permanently unprunable. With no sound consumer, the field was **64% of the record
+   * measured on align's own repository** (16KB of 25KB, 355 paths) — written into someone else's
+   * checkout on every run that changes anything. Add it back when a sound consumer exists, the same
+   * rule §1 states for raising N.
+   */
   /** Per component: how many files its selector matched, and the identity of everything that could
    * move that number. See `componentSelectorIdentities` for why the identity is a PREFIX hash
    * rather than a hash of the component's own selector. */

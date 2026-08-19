@@ -282,7 +282,7 @@ export async function baselinePrune(rootDir: string, options: PruneOptions = {})
   // will actually be DELETED: the forfeited ones, plus any the user forfeited explicitly with
   // `--forget-unscanned`. A retained entry is being put back below, so it was never at risk; a
   // forgotten one is as permanently gone as a forfeited one, and tier 2's whole subject is deletion.
-  const incompleteRefusal = refuseIfRunIncomplete('align baseline prune', run, forfeited.length + forgotten.length, allowIncomplete ?? false);
+  const incompleteRefusal = refuseIfRunIncomplete('align baseline prune', run, forfeited.length + forgotten.length, allowIncomplete ?? false, history);
   if (incompleteRefusal !== undefined) return incompleteRefusal;
   // ADR 006's consent gate, added 2026-08-17. EVERY deletion below destroys an accepted consent
   // decision, and this command is the only one whose PURPOSE is that deletion — which is exactly

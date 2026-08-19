@@ -45,7 +45,6 @@ describe('align check records what it observed (ADR 029 §7)', () => {
 
     const record = readLastScanRecord(dir);
     expect(record?.recordVersion).toBe(1);
-    expect(record?.observed.source).toContain('src/api/service.ts');
     // The violation is recorded even though it is unbaselined and red — the record is what the scan
     // OBSERVED, not what a human still owes a decision on.
     expect(record?.violations.map((v) => v.file)).toEqual(['src/api/service.ts']);
@@ -77,7 +76,9 @@ describe('align check records what it observed (ADR 029 §7)', () => {
     await quietCheck(dir);
 
     expect(fs.statSync(lastScanPath(dir)).ino).not.toBe(first);
-    expect(readLastScanRecord(dir)?.observed.source).toContain('src/api/renamed.ts');
+    // Asserted on the VIOLATION rather than on a file list: the per-domain observed paths were removed
+    // in LEDGER D032, so what makes this a changed observation is the violation moving with the file.
+    expect(readLastScanRecord(dir)?.violations.map((v) => v.file)).toEqual(['src/api/renamed.ts']);
   });
 
   it('never writes from an ERRORED run — "knows nothing" must not become "observed nothing"', async () => {
@@ -123,7 +124,7 @@ describe('align check records what it observed (ADR 029 §7)', () => {
 
     expect(await quietCheck(dir, { json: false, untrusted: true })).toBe(1);
 
-    expect(readLastScanRecord(dir)?.observed.source).toContain('src/api/service.ts');
+    expect(readLastScanRecord(dir)?.violations.map((v) => v.file)).toEqual(['src/api/service.ts']);
   });
 });
 

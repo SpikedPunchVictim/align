@@ -80,7 +80,6 @@ function record(violatingFiles: readonly string[], overrides: Partial<ScanObserv
     scopeIdentity: 'scope-1',
     complete: true,
     observedAt: 1_755_000_000_000,
-    observed: { source: violatingFiles.map(toRepoRelativePath), manifest: [] },
     components: {},
     ruleDefinitions: { [RULE]: RULE_HASH },
     retained: [],

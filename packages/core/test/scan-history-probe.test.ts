@@ -70,8 +70,9 @@ function recordFrom(overrides: Partial<CheckRun> = {}, ctx = context()): ScanObs
 describe('buildScanObservation projects a run into ADR 029 §2\'s record', () => {
   it('records both scan domains, the component counts, and the violations', () => {
     const record = recordFrom();
-    expect(record.observed.source).toEqual(['application/api/a.ts', 'application/ui/b.ts']);
-    expect(record.observed.manifest).toEqual(['package.json']);
+    // The per-domain observed-path lists were REMOVED on 2026-08-19 (LEDGER D032): their only reader
+    // was `wasFileObserved`, whose only licensed consumer proved unsound, and they were 64% of the
+    // record measured on align's own repository.
     expect(record.components['api']?.matchCount).toBe(1);
     expect(record.violations).toHaveLength(1);
   });
@@ -93,49 +94,21 @@ describe('buildScanObservation projects a run into ADR 029 §2\'s record', () =>
     expect(observationsDiffer(recordFrom(), buildScanObservation(run(), context(), 9_999))).toBe(false);
   });
 
-  it('DOES count a changed file set as a changed observation', () => {
+  it('DOES count a changed component match count as a changed observation', () => {
     // Calibration for the test above: an `observedAt`-blind comparison that was blind to everything
     // would never write at all, and the mechanism would be permanently one scan behind.
-    const moved = run({ observedFiles: { source: new Set([toRepoRelativePath('application/api/renamed.ts')]), manifest: new Set() } });
-    expect(observationsDiffer(recordFrom(), buildScanObservation(moved, context(), 1))).toBe(true);
+    //
+    // This asserted a changed FILE SET until 2026-08-19, when the per-domain path lists were removed
+    // (LEDGER D032). The consequence is real and worth stating rather than editing away: a file that
+    // appears or disappears WITHOUT moving a component's match count and without changing a violation
+    // no longer rewrites the record. That is §7.1 working as intended — the record exists to answer
+    // two questions, and a change neither question can see is not an observation change — but it does
+    // mean the record is no longer a census of the tree, and nothing should read it as one.
+    const regrouped = run({ componentMatchCounts: new Map([[toComponentName('api'), 7]]) });
+    expect(observationsDiffer(recordFrom(), buildScanObservation(regrouped, context(), 1))).toBe(true);
   });
 });
 
-describe('wasFileObserved — invalidated by version and by scan scope (ADR 029 §4)', () => {
-  it('answers about a file the previous scan saw, and about one it did not', () => {
-    const probe = createScanHistoryProbe(recordFrom(), context());
-    expect(probe.wasFileObserved(toRepoRelativePath('application/api/a.ts'))).toEqual({ known: true, value: true });
-    expect(probe.wasFileObserved(toRepoRelativePath('application/api/never.ts'))).toEqual({ known: true, value: false });
-  });
-
-  it('spans both domains — a manifest path is observed, not merely a source one', () => {
-    const probe = createScanHistoryProbe(recordFrom(), context());
-    expect(probe.wasFileObserved(toRepoRelativePath('package.json'))).toEqual({ known: true, value: true });
-  });
-
-  it('refuses to answer with no record at all', () => {
-    expect(createScanHistoryProbe(undefined, context()).wasFileObserved(toRepoRelativePath('application/api/a.ts'))).toEqual({ known: false });
-  });
-
-  it('refuses to answer when the record was written by a different align', () => {
-    const probe = createScanHistoryProbe(recordFrom(), context({ alignVersion: '0.3.0' }));
-    expect(probe.wasFileObserved(toRepoRelativePath('application/api/a.ts'))).toEqual({ known: false });
-  });
-
-  it('refuses to answer when the scan scope changed', () => {
-    // THE QUESTION THIS INVALIDATION EXISTS FOR. `wasFileObserved`'s `false` is an inference from
-    // absence, and narrowing `excludes` makes a file absent for a reason that has nothing to do with
-    // the repository — which is D009's direction and ADR 028's whole subject.
-    const probe = createScanHistoryProbe(recordFrom(), context({ excludes: ['dist/**', 'vendor/**'] }));
-    expect(probe.wasFileObserved(toRepoRelativePath('application/api/a.ts'))).toEqual({ known: false });
-  });
-
-  it('is not fooled by reordering excludes, which changes no file\'s fate', () => {
-    const record = buildScanObservation(run(), context({ excludes: ['a/**', 'b/**'] }), 1);
-    const probe = createScanHistoryProbe(record, context({ excludes: ['b/**', 'a/**'] }));
-    expect(probe.wasFileObserved(toRepoRelativePath('application/api/a.ts'))).toEqual({ known: true, value: true });
-  });
-});
 
 describe('wasViolationObservedAt — the question that closes the severity zeros', () => {
   const observed = { file: toRepoRelativePath('application/api/a.ts'), rule: firstRuleId(), fingerprint: toViolationId('cf-1') };
@@ -256,10 +229,9 @@ describe('a forged record cannot make the probe answer outside its own invalidat
     const forged: ScanObservationRecord = {
       ...recordFrom(),
       alignVersion: 'not-this-one',
-      observed: { source: [toRepoRelativePath('anything.ts')], manifest: [] },
     };
     const probe = createScanHistoryProbe(forged, context());
-    expect(probe.wasFileObserved(toRepoRelativePath('anything.ts'))).toEqual({ known: false });
+    expect(probe.observedMatchCount(toComponentName('api'))).toEqual({ known: false });
   });
 
   it('every `known: true, value: true` it can produce is a positive fact, which §5 permits only as a refusal', () => {

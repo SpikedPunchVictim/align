@@ -1,6 +1,7 @@
-import type { CheckRun } from '@spikedpunch/align-core';
+import type { CheckRun, ComponentName } from '@spikedpunch/align-core';
 import { isRunComplete } from '@spikedpunch/align-core';
 import { reportCliError } from './cli-error.js';
+import type { ScanHistory } from './scan-history.js';
 
 /**
  * The two guards every command that MUTATES state from a `CheckRun`'s violations must pass through
@@ -88,7 +89,22 @@ export function refuseIfRunErrored(command: string, run: CheckRun, refusal: stri
  * mirroring `refuseIfRunErrored`'s "undefined means proceed" contract so both guards compose the
  * same way at a call site.
  */
-export function refuseIfRunIncomplete(command: string, run: CheckRun, atRiskCount: number, allowIncomplete: boolean): number | undefined {
+export function refuseIfRunIncomplete(
+  command: string,
+  run: CheckRun,
+  atRiskCount: number,
+  allowIncomplete: boolean,
+  /**
+   * The previous scan — ADR 029 §6's grounding and scope-change consumers, wired 2026-08-19.
+   *
+   * Purely for the MESSAGE. The refusal is decided by `isRunComplete` and is unchanged, which is
+   * exactly what §6 licenses here: *"the ADR 023 tier-2 refusal itself is unchanged; only its message
+   * improves"*. Required rather than optional so a new call site has to state what it knows; a caller
+   * with no repository to read from passes one built on `noScanHistory()` and the message degrades to
+   * what it said before.
+   */
+  history: ScanHistory,
+): number | undefined {
   if (atRiskCount === 0 || isRunComplete(run) || allowIncomplete) return undefined;
   // `isRunComplete` now has two axes (LEDGER D011), and telling a user to install dependencies when
   // the real problem is a component selector pointing at a directory that no longer exists sends
@@ -98,11 +114,11 @@ export function refuseIfRunIncomplete(command: string, run: CheckRun, atRiskCoun
     ungrounded.length > 0
       ? `${ungrounded.length} declared component(s) matched no files (` +
         `${ungrounded
-          .map((c) => `${c.name} → '${c.selector}'`)
+          .map((c) => `${c.name} → '${c.selector}'${describeGroundingHistory(history, c.name)}`)
           .slice(0, 3)
           .join(', ')}${ungrounded.length > 3 ? `, +${ungrounded.length - 3} more` : ''}), so every rule scoped to ` +
         'them evaluated over nothing and their violations are unobservable rather than fixed. Check those selectors ' +
-        'against the tree'
+        `against the tree${describeScopeChange(history)}`
       : 'this scan could not resolve all dependencies (missing-dependencies advisory), so an absent violation may be ' +
         'unobservable rather than fixed. Re-run with dependencies installed';
   return reportCliError(
@@ -112,4 +128,37 @@ export function refuseIfRunIncomplete(command: string, run: CheckRun, atRiskCoun
         '--allow-incomplete.',
     ),
   );
+}
+
+/**
+ * ADR 029 §6's grounding consumer (LEDGER D011). "matched no files" is equally true of a component
+ * that never matched anything and of one that matched twelve yesterday — and only the second is a
+ * regression. The first is a selector that was always wrong; the second is a tree that moved. Naming
+ * which one turns a refusal the user has to investigate into one they can act on.
+ *
+ * Silent when the history cannot speak, and silent when the previous count was also zero: a message
+ * that appends "(matched 0 files last scan)" to every ungrounded component is adding noise to the
+ * sentence it exists to sharpen.
+ */
+function describeGroundingHistory(history: ScanHistory, component: ComponentName): string {
+  const before = history.probe.observedMatchCount(component);
+  if (!before.known || before.value === 0) return '';
+  return ` — matched ${before.value} file(s) on the previous scan and 0 now`;
+}
+
+/**
+ * ADR 029 §6's scope-change consumer (D009), **direction-free — a correction to §6 rather than a
+ * shortcut.** §6 says "report the narrowing direction only", and the record cannot support it:
+ * `scopeIdentity` is a hash over the sorted `excludes` plus the nested-checkout opt-outs, so comparing
+ * two of them yields same-or-different and never narrower-or-wider. Reporting a direction would mean
+ * carrying the scope's CONTENTS in every repository — the same bytes-for-a-message trade LEDGER D032
+ * has just declined for the observed-file list, and declined after measuring it at 64% of the record.
+ *
+ * "Different" is still worth saying, because it is the single fact that most often explains an
+ * ungrounded component: somebody edited `excludes`.
+ */
+function describeScopeChange(history: ScanHistory): string {
+  const previous = history.probe.previousScopeIdentity();
+  if (!previous.known || previous.value === history.context.scopeIdentity) return '';
+  return ' (note: the scan scope changed since the previous run)';
 }
