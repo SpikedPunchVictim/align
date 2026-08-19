@@ -216,9 +216,28 @@ export interface LockTimings {
  * lock contention and retried in a loop until the deadline, then reported as "timed out waiting for
  * the lock" with the real error discarded. Caught while writing the tests below, never shipped.
  */
+/**
+ * Lock paths this PROCESS is currently holding, for re-entrancy.
+ *
+ * The lock is an exclusive file: a second acquire from the same process would find its own lock
+ * present, wait the full timeout, and throw `ConcurrentAlignWriteError` — align deadlocking against
+ * itself and reporting it as a concurrent align. That is reachable the moment one locked writer calls
+ * another, which is exactly what `writeBaseline` → `stampAlignVersion` became when the version file
+ * gained the lock (LEDGER D031).
+ *
+ * Re-entrancy is sound here rather than a convenience: the lock's purpose is mutual exclusion between
+ * PROCESSES, Node is single-threaded, and everything under it is synchronous — so a nested acquire is
+ * already inside the exclusivity the outer one bought. The inner call must NOT release, which is why
+ * this is a set the outer frame owns rather than a counter.
+ */
+const heldByThisProcess = new Set<string>();
+
 export function withAlignDirLock<T>(alignDir: string, command: string, fn: () => T, timings: LockTimings = {}): T {
   fs.mkdirSync(alignDir, { recursive: true });
   const file = lockPath(alignDir);
+  // Already ours: run inside the exclusivity we already hold, and leave releasing to the frame that
+  // acquired it.
+  if (heldByThisProcess.has(file)) return fn();
   // Injectable purely so the tests can exercise the timeout and staleness arms in milliseconds
   // instead of minutes. Not a safety switch — every default below is the production value, and no
   // caller in `src/` passes this.
@@ -283,10 +302,12 @@ export function withAlignDirLock<T>(alignDir: string, command: string, fn: () =>
 
     // Held. Everything from here runs with the lock and must release it on every path.
     try {
+      heldByThisProcess.add(file);
       return fn();
     } finally {
       // Release even if `fn` threw. `force` because a stale-breaker may already have removed it,
       // and failing to release over a missing file would be its own bug.
+      heldByThisProcess.delete(file);
       try {
         fs.rmSync(file, { force: true });
       } catch {

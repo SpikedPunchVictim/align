@@ -46,7 +46,7 @@ failing test.
 ### Verifying a change
 
 ```
-pnpm build && pnpm typecheck && pnpm test      # ~26s, 1485 tests — the fast gate, run it always
+pnpm build && pnpm typecheck && pnpm test      # ~26s, 1489 tests — the fast gate, run it always
 node packages/cli/dist/index.js check          # must be green; red is blocking
 node packages/cli/dist/index.js doctor         # advisory only, always exits 0
 node integration/run.mjs --targets local       # Docker; real project, real command sequences
@@ -156,6 +156,7 @@ This section is expensive and is meant to be. Spend it on artifacts that will be
 re-derivation, and say plainly when you are choosing not to — "spot-checked, not exhaustively
 verified" is an honest and often correct thing to write. Silence about depth reads as a claim of
 depth.
+
 ## 2. The defect ledger — required for every defect you find or fix
 
 `docs/adr/defects/` is this project's record of **how we were wrong**, kept to sharpen the next
