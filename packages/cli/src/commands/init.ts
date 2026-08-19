@@ -1,7 +1,9 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { defineProject, type ComponentsInput } from '@spikedpunch/align-core/dsl';
-import { toComponentName, type BaselineEntry, type CheckRun, type ViolationId } from '@spikedpunch/align-core';
+import {
+  defineProject, type ComponentsInput } from '@spikedpunch/align-core/dsl';
+import {
+  computeContentFingerprint, toComponentName, type BaselineEntry, type CheckRun, type ViolationId } from '@spikedpunch/align-core';
 import { TypeScriptPlugin } from '@spikedpunch/align-plugin-typescript';
 import { detectComponents } from '../init/detect-components.js';
 import { suggestLayers } from '../init/suggest-layers.js';
@@ -406,7 +408,22 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
             file: v.file,
             acceptedAt: prior?.acceptedAt ?? Date.now(),
             acceptedBy: prior?.acceptedBy ?? (options.acceptExisting ? ('accept-existing' as const) : ('init-seed' as const)),
-            ...(prior?.contentFingerprint === undefined ? {} : { contentFingerprint: prior.contentFingerprint }),
+            // DERIVED from the violation, not carried from `prior` (LEDGER D035, bug hunt B3). This
+            // read `prior?.contentFingerprint` and dropped the field entirely whenever the structural
+            // fingerprint had changed — which is exactly what a RENAME does, since `fingerprint` folds
+            // in file identity (`store.ts`: "a rename produces a brand-new fingerprint and orphans the
+            // old baseline entry by construction"). The entry was then re-seeded with no
+            // `contentFingerprint`, and an entry without one can never participate in a move-transfer
+            // again, so the NEXT rename made it an unmatchable orphan and `align baseline prune`
+            // deleted it reporting "Pruned 1 fixed violation(s)" at exit 0 — while `align check` was
+            // red on the violation it had just called fixed.
+            //
+            // Deriving is both simpler and safer than matching: it is what `store.accept` already does
+            // for every entry it creates, it needs no guess about which prior entry a moved violation
+            // came from, and it cannot carry one violation's consent onto another. What it does NOT
+            // recover is `acceptedAt`/`acceptedBy` across a rename — those still reset, and that is
+            // reported below rather than fixed by guessing.
+            contentFingerprint: computeContentFingerprint(v.ruleId, v.snippet),
             ...(prior?.acceptedValue === undefined ? {} : { acceptedValue: prior.acceptedValue }),
           };
         }),

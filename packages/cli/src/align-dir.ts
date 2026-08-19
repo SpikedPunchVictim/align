@@ -19,6 +19,7 @@ import {
   alignDirPath,
   ensureAlignDir,
   parseArtifact,
+  preflightVersionStamp,
   readVersionFile,
   recordBaselineReconciled,
   stampAlignVersion,
@@ -223,6 +224,11 @@ export function writeBaseline(rootDir: string, entries: readonly BaselineEntry[]
           'has been written. Re-run the command; it will pick up the current baseline.',
       );
     }
+    // BEFORE the write, not after (LEDGER D034): `stampAlignVersion` below reads `version.json` and
+    // throws on a corrupt one, and until this line that throw landed AFTER the baseline had already
+    // been replaced — a destructive prune that reported failure. Inside the lock, so nothing can
+    // corrupt the file between here and the stamp.
+    preflightVersionStamp(rootDir);
     // Always the CURRENT shape, never the shape that was read: a repository whose baseline is still a
     // legacy array is migrated by the first write that touches it, and `readBaseline` above is what
     // makes that safe to do silently — the entries are identical, only the container changed. Stated
@@ -276,6 +282,9 @@ export function readGeneratedRules(rootDir: string): GeneratedRulesFile | undefi
  * read back later (`readGeneratedRulesRaw`) — the divergence-detection hash must be computed over
  * identical serialization on both sides of the round-trip. */
 export function writeGeneratedRules(rootDir: string, file: GeneratedRulesFile): string {
+  // See `writeBaseline` above (LEDGER D034): the stamp at the end of this function can throw, and
+  // until this line it did so after the artifact was already on disk.
+  preflightVersionStamp(rootDir);
   ensureAlignDir(rootDir);
   const raw = `${JSON.stringify(file, null, 2)}\n`;
   writeFileAtomic(generatedRulesPath(rootDir), raw);
@@ -291,6 +300,9 @@ export function readRulesLock(rootDir: string): RulesLock | undefined {
 }
 
 export function writeRulesLock(rootDir: string, lock: RulesLock): void {
+  // See `writeBaseline` above (LEDGER D034): the stamp at the end of this function can throw, and
+  // until this line it did so after the artifact was already on disk.
+  preflightVersionStamp(rootDir);
   ensureAlignDir(rootDir);
   writeFileAtomic(rulesLockPath(rootDir), `${JSON.stringify(lock, null, 2)}\n`);
   stampAlignVersion(rootDir);
@@ -330,6 +342,9 @@ export function readRulesetIr(rootDir: string, override?: string): ExportedRules
 }
 
 export function writeRulesetIr(rootDir: string, data: ExportedRuleset, override?: string): string {
+  // See `writeBaseline` above (LEDGER D034): the stamp at the end of this function can throw, and
+  // until this line it did so after the artifact was already on disk.
+  preflightVersionStamp(rootDir);
   const file = rulesetIrPath(rootDir, override);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   writeFileAtomic(file, `${JSON.stringify(data, null, 2)}\n`);

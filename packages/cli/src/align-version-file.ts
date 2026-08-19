@@ -110,6 +110,30 @@ export function writeVersionFile(rootDir: string, data: VersionFile): void {
  * ADR 029 a plain check DOES write `.align/last-scan.json`, which is why that writer is in the
  * exempt set: a check that changed nothing must not start claiming a version stamp it didn't earn.
  */
+/**
+ * Throws now if `.align/version.json` is unreadable, so a writer can find out BEFORE it writes rather
+ * than after (LEDGER D034, bug hunt B2).
+ *
+ * **The defect this closes.** Every committed-artifact writer is two-phase — `writeFileAtomic(...)`
+ * then `stampAlignVersion` — and the second phase reads `version.json`, which throws on a corrupt one.
+ * A merge conflict or a half-written stamp was therefore enough to make `align baseline prune` DELETE
+ * the baseline and then report failure, with a message naming an unrelated file and the prune report
+ * never printed. Measured: 1 entry in, an error about `version.json`, 0 entries out. The user is told
+ * the command failed while their consent records are gone.
+ *
+ * Called at the top of each writer, inside the same lock the write happens under, so nothing can
+ * corrupt the file between the check and the stamp — `version.json` is only written under that lock
+ * (D031). The return value is deliberately discarded: this exists for the throw.
+ *
+ * This is the `build.ts` precedent applied where it was missing. That function already pre-flights its
+ * note markers "before any of the three writes, so a malformed align.config.ts fails this whole
+ * sequence atomically" — ADR 030 then added two new throw sources downstream of the first write and
+ * neither was pre-flighted.
+ */
+export function preflightVersionStamp(rootDir: string): void {
+  readVersionFile(rootDir);
+}
+
 export function stampAlignVersion(rootDir: string): void {
   withVersionFileLock(rootDir, () => {
     const current = readVersionFile(rootDir);
