@@ -10,6 +10,7 @@ import {
   type InMemoryBaselineStore,
 } from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
+import { describeTrustedIrStaleness, describeUntrustedIrStaleness } from '../ir-staleness.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaselineSnapshot, readGeneratedRules, readRulesetIr, readRulesLock, writeBaseline, type BaselineToken } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
@@ -138,17 +139,23 @@ async function runTrustedCheck(rootDir: string, options: CheckOptions): Promise<
       + '');
   }
 
-  let effectiveRun = run;
+  // LEDGER D067: does the exported IR still say what this config says? Advisory, never a verdict
+  // change — THIS run read the live config and its verdict is right; what is wrong is the answer a
+  // `--untrusted` run elsewhere would give. Computed after the check so a scan failure is reported
+  // first, and folded in below alongside the frozen-rules advisories.
+  const irDrift = describeTrustedIrStaleness(rootDir, { ruleset, excludes, includeNestedCheckouts }, options.ir);
+
+  let effectiveRun = { ...run, advisories: irDrift === undefined ? run.advisories : [...run.advisories, irDrift] };
   if (options.frozenRules === true) {
     const frozen = verifyFrozenRules(rootDir);
     effectiveRun = {
-      ...run,
+      ...effectiveRun,
       // A false 'green' verdict is a severity-zero bug class (ARCHITECTURE.md's stated
       // invariant) — drift/divergence must flip the VERDICT ITSELF, not just the exit code, so
       // `--json` consumers (agents, CI) reading `verdict` alone never get a lying "green" while
       // `advisories` quietly explains why they shouldn't have trusted it.
       verdict: !frozen.ok && run.verdict === 'green' ? 'red' : run.verdict,
-      advisories: [...run.advisories, ...frozen.advisories],
+      advisories: [...effectiveRun.advisories, ...frozen.advisories],
     };
   }
 
@@ -310,11 +317,18 @@ async function runUntrustedCheck(rootDir: string, options: CheckOptions): Promis
 
   recordCheckTelemetry(rootDir, recorder, run, wallMs, rulesetIrHash, 'check --untrusted');
 
+  // LEDGER D067. This mode may not execute the config, so it compares the SOURCE fingerprint the
+  // export stamped — weaker than the trusted comparison, and the advisory says which claim it is
+  // making. `exported` is the artifact this run actually evaluated, not a re-read.
+  const staleness = describeUntrustedIrStaleness(rootDir, exported, options.ir);
+  const runWithStaleness: CheckRun =
+    staleness === undefined ? run : { ...run, advisories: [...run.advisories, staleness] };
+
   let finalRun: CheckRun;
   try {
     // Same corrupt-≠-absent risk (reads `.align/version.json` for the provenance advisory) as
     // `runTrustedCheck`'s identical catch above.
-    finalRun = withVersionSkew(run, rootDir);
+    finalRun = withVersionSkew(runWithStaleness, rootDir);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`align check --untrusted: ${message}`);

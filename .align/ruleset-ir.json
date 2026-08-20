@@ -1,14 +1,17 @@
 {
   "irVersion": "1",
-  "exportedAt": 1784673011419,
+  "exportedAt": 1787261128083,
   "excludes": [
     "test-apps",
     "docs/evidence",
+    "docs/adr/proposals",
+    ".claude",
     "packages/core/test/fixtures",
     "packages/plugin-typescript/test/fixtures",
     "packages/cli/test/fixtures",
     "packages/agent/test/fixtures"
   ],
+  "includeNestedCheckouts": [],
   "ruleset": {
     "irVersion": "1",
     "components": {
@@ -310,5 +313,6 @@
         }
       }
     ]
-  }
+  },
+  "sourceFingerprint": "ccca7e52d984deee"
 }

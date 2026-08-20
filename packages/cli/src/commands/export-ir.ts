@@ -2,6 +2,7 @@ import { buildExportedRuleset } from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { writeRulesetIr } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
+import { computeConfigSourceFingerprint } from '../ir-staleness.js';
 
 export interface ExportIrOptions {
   /** Overrides the default `.align/ruleset-ir.json` output location (absolute or repo-root-relative). */
@@ -33,7 +34,12 @@ export async function runExportIr(rootDir: string, options: ExportIrOptions = {}
     return reportCliError('align export-ir', err);
   }
   const { ruleset, excludes, includeNestedCheckouts } = loaded;
-  const exported = buildExportedRuleset(ruleset, excludes, undefined, includeNestedCheckouts);
+  // LEDGER D067: stamp what the config looked like, so `--untrusted` can notice drift later without
+  // executing it. Computed here — in the CLI — because core does no filesystem I/O.
+  const exported = {
+    ...buildExportedRuleset(ruleset, excludes, undefined, includeNestedCheckouts),
+    sourceFingerprint: computeConfigSourceFingerprint(rootDir),
+  };
   // `writeRulesetIr` stamps `alignVersion` when the write lands inside `.align/` (ADR 022's write
   // discipline, `align-dir.ts`) and can throw on a corrupted `.align/version.json` — same
   // corrupt-≠-absent discipline as every other artifact reader, caught here rather than left as a

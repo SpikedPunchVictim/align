@@ -155,6 +155,11 @@ export const exportedRulesetSchema = z.object({
   // as "no opt-outs" rather than a hard schema-validation failure.
   includeNestedCheckouts: z.array(z.string()).default([]),
   ruleset: rulesetIRSchema,
+  // LEDGER D067. A hash of the config SOURCE FILES at export time, so `align check --untrusted` can
+  // notice that align.config.ts has moved on WITHOUT executing it — which is the one thing that mode
+  // may never do. Optional because every artifact written by 0.2.0 or earlier lacks it; the CLI
+  // treats absent as "cannot tell" and says so, rather than as "fresh".
+  sourceFingerprint: z.string().optional(),
 });
 
 export type ExportedRuleset = z.infer<typeof exportedRulesetSchema>;

@@ -14,6 +14,7 @@ import {
 } from '@spikedpunch/align-core';
 import { TypeScriptPlugin, UNMAPPED_COMPONENT, findDeadAliases, findOrphanedPackages } from '@spikedpunch/align-plugin-typescript';
 import { loadConfig } from '../config.js';
+import { describeTrustedIrStaleness } from '../ir-staleness.js';
 import { ALIGN_VERSION } from '../telemetry/index.js';
 import { parseSkillVersionMarker, parseSkillContentHashMarker, computeSkillContentHash } from '../skill/version-stamp.js';
 import { renderSkillMarkdown } from '../skill/render.js';
@@ -212,6 +213,11 @@ async function collectDoctorReport(rootDir: string, program: Command | undefined
 
   if (loaded !== undefined) {
     const { ruleset, excludes: loadedExcludes, includeNestedCheckouts } = loaded;
+    // LEDGER D067. `doctor` is the survey a user runs when `check` and `check --untrusted` disagree
+    // and they want to know why, so it is the surface that must not be silent about it. Same exact
+    // comparison the trusted `check` makes — imported, not restated, so the two cannot drift.
+    const irDrift = describeTrustedIrStaleness(rootDir, { ruleset, excludes: loadedExcludes, includeNestedCheckouts });
+    if (irDrift !== undefined) advisories.push(irDrift);
     const plugin = new TypeScriptPlugin();
     const graph = await plugin.scanner
       .scan({ rootDir, components: ruleset.components, excludes: loadedExcludes, includeNestedCheckouts })
