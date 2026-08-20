@@ -276,18 +276,43 @@ export function buildProgram(): Command {
           'structured `- **Rule**:` bullets, zero LLM. Default is dry-run (prints the proposal diff + ' +
           'impact delta, writes nothing).',
       )
-      .option('--doc <path>', 'doc to build (default docs/ARCHITECTURE-RULES.md)', DEFAULT_DOC_PATH)
+      // LEDGER D064. `align build ARCHITECTURE.md` used to be accepted, discarded, and run against
+      // the default doc — a "Doc not found: docs/ARCHITECTURE-RULES.md" naming a path the user never
+      // typed where the default is absent, and a full green build report about the WRONG document
+      // where it is present. Declaring the positional makes the obvious reading the real one;
+      // `allowExcessArguments(false)` below makes the same mistake impossible on every other command.
+      .argument('[doc]', 'doc to build — the positional form of --doc; both together is an error')
+      .option('--doc <path>', `doc to build (default ${DEFAULT_DOC_PATH})`, DEFAULT_DOC_PATH)
       .option('--apply', 'write .align/generated-rules.json, rules.lock.json, and the audit report', false)
       .option('--if-changed', 'exit 0 immediately if the doc is unchanged since the last build', false)
       .option('--verify', 'exit red if the doc or generated-rules.json has drifted from the lockfile (ADR 011)', false)
       .option('--accept-new-into-baseline', 'seed any new violations the proposal adds into the baseline', false),
   ).action(
-    async (opts: { doc: string; apply: boolean; ifChanged: boolean; verify: boolean; acceptNewIntoBaseline: boolean; telemetry?: boolean }) => {
+    async (
+      docArg: string | undefined,
+      opts: { doc: string; apply: boolean; ifChanged: boolean; verify: boolean; acceptNewIntoBaseline: boolean; telemetry?: boolean },
+      command: Command,
+    ) => {
+      // Refuse rather than rank them. Picking a winner silently is the same class of defect as
+      // discarding the positional was — the user stated two intentions and align would be guessing
+      // which one it honoured. `getOptionValueSource` distinguishes "the user typed --doc" from
+      // "commander filled in the default", which a bare value comparison cannot.
+      if (docArg !== undefined && command.getOptionValueSource('doc') === 'cli') {
+        // `command.error` and NOT a hand-thrown `CommanderError`: `index.ts` routes an error to
+        // exit 2 only when its `code` starts with `commander.` (`process-contract.ts`), so a
+        // custom code escapes the handler and Node prints a raw stack trace. Measured — the first
+        // version of this used `code: 'align.build.conflictingDoc'` and did exactly that, while the
+        // unit test asserting "it rejects" passed. The test now asserts the exit code, not the throw.
+        command.error(
+          `error: both '${docArg}' and '--doc ${opts.doc}' name the doc to build. Pass one of them.`,
+          { exitCode: 2 },
+        );
+      }
       const rootDir = resolveRootOrFail('align build');
       if (rootDir === undefined) return;
       const telemetryPreConfig = resolveTelemetryPreConfig({ telemetry: opts.telemetry });
       const code = await runBuild(rootDir, {
-        doc: opts.doc,
+        doc: docArg ?? opts.doc,
         apply: opts.apply,
         ifChanged: opts.ifChanged,
         verify: opts.verify,
@@ -414,5 +439,30 @@ export function buildProgram(): Command {
       process.exitCode = await runTelemetryReport(rootDir, { json: opts.json, ...(opts.file !== undefined ? { file: opts.file } : {}) });
     });
 
+  return refuseExcessArgumentsEverywhere(program);
+}
+
+/**
+ * No command accepts an argument it does not declare — LEDGER D064.
+ *
+ * commander 12 defaults `allowExcessArguments` to **true**, so any positional a command has not
+ * declared is parsed, stored in `command.args`, and never looked at again. `align build` was the
+ * instance that got reported; nothing made it special, and nothing would have made the next one
+ * special either. Setting the flag once per command turns "silently ignored" into commander's
+ * `excessArguments` error, which `index.ts` already maps to exit 2 under D026's contract.
+ *
+ * **Walked, not listed.** The tree comes from `program.commands` recursively, the same live object
+ * `skill/cli-inventory.ts` reads, so a command added later is covered on the day it is added rather
+ * than on the day someone remembers this function. A hand-maintained list here would reproduce the
+ * defect one level up — the mistake `integration-all-projects.mjs` was written to stop making.
+ *
+ * Applied at the END of `buildProgram`, after every command is registered, for the same reason.
+ */
+function refuseExcessArgumentsEverywhere(program: Command): Command {
+  const walk = (cmd: Command): void => {
+    cmd.allowExcessArguments(false);
+    for (const child of cmd.commands) walk(child);
+  };
+  walk(program);
   return program;
 }
