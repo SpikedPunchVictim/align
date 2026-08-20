@@ -229,11 +229,22 @@ up the current baseline.
 see this in CI, two align invocations are running concurrently against one working copy; serialize
 them.
 
-Every `.align/` file align rewrites in full is now written atomically (temp file + `rename`), so a
+Every file align rewrites in full is now written atomically (temp file + `rename`), so a
 run interrupted mid-write — Ctrl-C, an OOM kill, a cancelled CI job — leaves the previous file
 intact instead of a truncated one. If you ever hit "baseline.json is not valid JSON" after an
 interrupted run, that is the failure this removes. (`.align/telemetry.jsonl` is appended to rather
 than rewritten, so it is not part of this and never needed to be.)
+
+**This covers the files align writes in YOUR repository, not only its own.** `CLAUDE.md`,
+`align.config.ts`, `.gitignore`, `package.json`, an installed skill under `.claude/skills/`, and the
+source files `align agent` edits during a repair are all written the same way. They were not, for
+most of this release's development: the protection covered the artifacts align can regenerate and
+not the ones it cannot. Nothing for you to do — but if you have ever seen align leave a half-written
+`CLAUDE.md` behind after a Ctrl-C, that is the failure this removes.
+
+One visible consequence: an interrupted write can leave a dotfile like `.CLAUDE.md.4821.3.tmp`
+beside the real file. It is inert and safe to delete. That is the deliberate trade — a stray temp
+file you can see instead of a truncated file you cannot.
 
 A concurrent align does **not** fail `align check`. The transfer it could not persist is re-derived
 and re-persisted by the next run, so `check` reports the collision on stderr and still prints its
@@ -490,6 +501,133 @@ recomputes and rewrites the hash using an unmodified doc and code, so re-running
 lockfile onto the new scheme with no other effect. Until then, `align check --frozen-rules` /
 `align build --verify` recognize a lockfile on the old scheme and report it distinctly from a
 genuine hand-edit, rather than accusing an untouched repo of tampering.
+
+### An unsupported glob pattern in `excludes` now fails at load
+
+**This is the one change in 0.2.0 that can stop a config that worked yesterday from loading at
+all.** Read it if you have ever written a pattern with `!`, `[...]`, `(...)` or `|` in
+`align.config.ts`.
+
+align's glob matcher is deliberately minimal: `*` (one path segment), `**` (any depth), `?` (one
+character), `{a,b,c}` brace expansion, and literal path segments. Anything outside that vocabulary
+was never *matched* — it was escaped and compiled to a literal, so the pattern quietly matched
+nothing at all. Component selectors have always been linted against this dialect and fail loudly.
+Three sibling exports were matched by the same engine and linted by nothing:
+
+- `excludes`
+- `includeNestedCheckouts`
+- `knownPublicDeepImports`
+
+So `export const excludes = ['!vendor/**'];` or `['src/+(api|legacy)/**']` did **nothing**,
+silently, forever. align scanned the paths you had asked it to skip and reported violations you
+believed you had excluded, with no indication anywhere that the pattern was the reason.
+
+**What you will see.** All three are now linted when the config loads, which means a bad pattern is
+a clean, non-zero error from every command rather than a silent no-op:
+
+```
+align check: `excludes` in align.config.ts contains 'src/+(api|legacy)/**', which uses extglob
+groups (`(...)`), and align's glob dialect does not support it — an unsupported pattern silently
+matches nothing rather than failing. It supports `*` (one path segment), `**` (any depth), `?`
+(one character), `{a,b,c}` brace expansion, and literal path segments — list patterns explicitly
+(e.g. ['dist/**', 'build/**']) or use a `*` wildcard.
+```
+
+**What to do.** Rewrite the pattern in the supported dialect — usually by listing the alternatives
+explicitly (`['src/api/**', 'src/legacy/**']`) or by widening to a `*`. There is no escape syntax
+and no negation: if you were relying on `!` to re-include something, express the inclusion by
+narrowing the exclude instead.
+
+**Expect this to change what a scan sees.** A pattern that had been inert is now either fixed by you
+or rejected — in the first case align stops looking at a subtree it used to scan, so violations
+there disappear and `align baseline prune` will offer to remove their entries. That is the exclusion
+finally doing what you wrote it to do, but it is a baseline change, so run `align baseline prune`
+deliberately rather than being surprised by it.
+
+### `align init` skips a directory it cannot express as a selector
+
+Component selectors are built from directory names, and a directory name may legally contain
+characters the glob dialect above cannot express — `docs (old)` is the everyday case. Writing that
+name into `align.config.ts` produced a config that failed to load on the very next command, and
+re-running `init` did not repair it ("align.config.ts already exists — leaving it as-is").
+
+`align init` now leaves such a directory out of the generated config and says so:
+
+```
+Skipped 1 director(y/ies) whose name align's glob dialect cannot express: 'docs (old)/**'.
+They are NOT governed by the generated config. Rename them, or add a component by hand with a
+selector that reaches them.
+```
+
+The directory is simply ungoverned — no rules are scoped to it — until you rename it or write a
+selector yourself. If *every* directory align detected has such a name, `init` refuses rather than
+writing a config with no components in it.
+
+Relatedly, a component selector using unsupported syntax now reports the actual problem. It used to
+be diagnosed as `matches zero files. Likely cause: its directory was renamed/moved or the selector
+is stale` — which sent you looking for a directory sitting exactly where you left it.
+
+### A directory name could execute code during `align init` (security)
+
+**Affects 0.1.x. Fixed in 0.2.0.** `align init` built `align.config.ts` by interpolating each
+detected directory name into a single-quoted TypeScript string without escaping it, and align then
+loads that file. A directory whose name closed the quote could therefore run arbitrary code as you,
+on the next `align check`.
+
+Reaching it required running `align init` in a repository containing a hostile directory name — so
+the realistic exposure is cloning an untrusted repository and initializing align in it. There is no
+sign this was ever exploited, and nothing to clean up: the payload would have lived in your
+`align.config.ts`, where you can see it.
+
+**What to do.** Upgrade. If you initialized align in a repository you did not write, open
+`align.config.ts` and check that every entry under `components` is a plain quoted pattern. The
+ordinary, non-malicious form of the same bug was an apostrophe — a directory named `don't` produced
+a config that would not parse.
+
+### `align check --json` and the MCP tools now say why a run errored
+
+If you consume align's machine output — `align check --json`, or the `align_check` /
+`align_violations` MCP tools — three things changed, and one of them is a correctness fix you may be
+relying on the old behaviour of.
+
+**`align_violations` no longer answers an errored scan with an empty list.** It returned
+`{"violations": []}` with no error flag when a gate had errored — byte-identical to the answer for a
+clean repository, for a scan that had evaluated no rule at all. It now returns an MCP error naming
+the gate and its reason. A red repository still returns its violations exactly as before; only the
+errored case changed.
+
+**Errored gates now carry `errorMessage`.** The payload's per-gate objects gained an optional
+`errorMessage`, present only when `status` is `error`. Before this, `align check --json` on a broken
+config exited 1 with the reason on neither stdout nor stderr, while the human output printed it in
+full. Passing gates still carry counts only.
+
+**`complete` is now `false` on an errored run.** It reports whether the scan resolved everything it
+was asked to, and an errored run trivially satisfied the two conditions it used to check — so a run
+that evaluated nothing reported `"verdict": "error"` beside `"complete": true`. If you branch on
+`complete`, this is strictly more conservative.
+
+### `align build --verify` reports doc-built rules with no lockfile
+
+`.align/generated-rules.json` is merged into your effective ruleset on every load, and
+`.align/rules.lock.json` is the record of which document produced it. If the first exists without
+the second — an `align build --apply` interrupted partway, a hand-deleted file, a `git clean` — the
+rules are being enforced with no record of where they came from, and `align build --verify` /
+`align check --frozen-rules` reported `ok` for exactly that state, because a missing lockfile was
+read as "this repo never ran a build."
+
+Both now report it:
+
+```
+.align/generated-rules.json is in force but .align/rules.lock.json is missing, so align cannot
+tell which document produced the rules it is enforcing — most likely an `align build --apply`
+that did not finish. Re-run `align build --apply` to rebuild both, or delete
+.align/generated-rules.json to drop the doc-built rules.
+```
+
+A repository that has never run `align build` is unaffected and stays silent, which is what the
+early return was originally there for. Separately, `align build --apply` now performs its writes
+under one lock with the baseline read hoisted before the first write, so the partial state above is
+much harder to reach in the first place.
 
 ### Changes that need nothing from you
 

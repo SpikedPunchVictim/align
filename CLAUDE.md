@@ -46,21 +46,28 @@ failing test.
 ### Verifying a change
 
 ```
-pnpm build && pnpm typecheck && pnpm test      # ~26s, 1511 tests — the fast gate, run it always
+pnpm build && pnpm typecheck && pnpm test      # ~26s, 1577 tests — the fast gate, run it always
 node packages/cli/dist/index.js check          # must be green; red is blocking
 node packages/cli/dist/index.js doctor         # advisory only, always exits 0
-node integration/run.mjs --targets local       # Docker; real project, real command sequences
-node integration/run.mjs --targets local --project nest-incomplete   # the ADR 023 tier-2 scenario
+pnpm integration:dev                           # Docker; real project, real command sequences
 ```
 
-**Both project lines are required.** `run.mjs` defaults to `--project nest` and filters by project,
-so the first line alone silently skips every scenario declared against another project — today that
-is `prune-incomplete-scan-requires-allow-incomplete`, the only coverage ADR 023 tier 2 has at the
+**`pnpm integration:dev` runs EVERY project; do not call `run.mjs` directly for a gate.** `run.mjs`
+takes one `--project` (default `nest`) and filters its scenario pool by it, so invoking it directly
+silently skips every scenario declared against another project — today that is
+`prune-incomplete-scan-requires-allow-incomplete`, the only coverage ADR 023 tier 2 has at the
 integration level. A release-gate scenario the release-gate command does not execute is not
-calibration; this was found by review on 2026-08-18 (`docs/adr/defects/LEDGER.md` D012) after the
-consent gate broke that scenario and nothing reported it.
+calibration; found by review on 2026-08-18 (`docs/adr/defects/LEDGER.md` D012) after the consent gate
+broke that scenario and nothing reported it.
 
-The full cross-version matrix (`--targets 0.1.4,local`) is a release gate — **ten** scenarios carry
+This block used to list the two `run.mjs` invocations by hand, which made the coverage a thing a
+human had to remember — and the release script `integration:release` never ran the second one at all
+for three more days (D049). Both scripts now go through `scripts/integration-all-projects.mjs`, which
+DISCOVERS the project list from `integration/projects/` rather than enumerating it, so a third
+project is covered the day it is added.
+
+The full cross-version matrix (`pnpm integration:release`, i.e. `--targets 0.1.4,local` across every
+project) is a release gate — **ten** scenarios carry
 `expectFailOn: ['0.1.4']` as its calibration (recounted 2026-08-19 after
 `accept-does-not-restamp-provenance` was calibrated; it was three when this line was written, and
 grows whenever a defect is pinned against a published version), and if those ever pass against 0.1.4

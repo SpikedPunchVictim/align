@@ -152,10 +152,11 @@ discovered in production — or, if you are lucky, on a scenario's first run.
 **Instances**: ADR 027 F1 (S0), **D010 (S0)**, D016 (S1), D017 (S1), **D020 (S2, twice over)**,
 D024(a) (S1), **D025 (S2)**, D028 (S1), **D030 (S0)**, **D034 (S0)**, **D035 (S0)**, D037 (S2),
 D038 (S2), D039 (S1), **D041 (S0)**, **D042 (S0)**, D043 (S2), D044 (S2), D045 (S2), D046 (S1),
-**D047 (S0)**, D048(a) (S2). **Rung**: brief, **plus three executable invariants** — see below.
+**D047 (S0)**, D048(a) (S2), **D049 (S2 — D012 recorded as fixed while its command stayed
+uncovered)**. **Rung**: brief, **plus three executable invariants** — see below.
 
 **This is the project's dominant shape, and the number is measured, not impressionistic.** Recounted
-from `LEDGER.md`'s Shape column on 2026-08-20: **21 of 48 rows**, more than two in five. Both phase-4 and phase-5 sweeps were near-total — D037/D038/D039, then
+from `LEDGER.md`'s Shape column on 2026-08-20: **22 of 50 rows**, more than two in five. Both phase-4 and phase-5 sweeps were near-total — D037/D038/D039, then
 D041/D042/D043/D044/D045/D046/D047, seven in a row. No other shape is close. Recount before quoting; this register went stale by six rows
 between 2026-08-17 and 2026-08-19, the second time this exact file has been a sample presenting as a
 census (see the paragraph below).
@@ -166,7 +167,7 @@ count that matters is the Shape column specifically, and neither `grep -c S-09` 
 non-row lines — 24 hits against 20 real instances when last compared), and the second mis-splits any row containing
 an escaped `\|` in its prose, silently shifting the column index. The census above splits on
 UNESCAPED pipes only and reads field 6, cross-checked against the previous count plus the rows added
-since (13 + 7 + 1 = 21) — CLAUDE.md §1.4, two independent derivations of one `n`.
+since (13 + 7 + 1 + 1 = 22) — CLAUDE.md §1.4, two independent derivations of one `n`.
 
 Writing that counter is what surfaced the second defect: **two rows carried bare `|` characters
 inside shell snippets and prose** (`D026`'s `align skill … | wc -c`, and `D047`'s quotation of the
@@ -218,6 +219,18 @@ find one, that is the promotion signal.
 > **Ask, when the two arms should legitimately differ**: can the *choice* be made declarable, so an
 > unclassified call site fails a test? A register with reasons beats an assertion that must be wrong
 > for somebody.
+
+**The variant D049 adds: a fix that converts an executable gap into a documented one.** D012 found
+that the release-gate command never ran a release-gate scenario, and was recorded FIXED — the
+scenario was repaired and CLAUDE.md gained a paragraph telling a human to run a second command. The
+command itself was untouched, so for three more days `pnpm integration:release` still covered one
+project of two. The tell is the failure mode: it passes whenever you *do* remember, so no run ever
+reported anything wrong. **A documented mitigation for a mechanical gap is the second arm left
+unfixed, and it is harder to see than an ordinary one because the ledger already says the defect is
+closed.**
+
+> **Ask, when closing a row**: did the fix change code, or did it change a document telling someone
+> to be careful? If the latter, the arm is still open — and the row now says otherwise.
 
 **Third executable invariant, 2026-08-19 (D046) — the same register pattern, second application, and
 that is the finding.** `cli/test/writes-are-atomic.test.ts` enumerates every direct `fs` write under
