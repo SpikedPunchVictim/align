@@ -250,6 +250,131 @@ at all.
 
 Real build output is still skipped exactly as before, so nothing generated starts being checked.
 
+### A stray command-line argument is now a usage error instead of being ignored
+
+**This can break a script that was silently doing the wrong thing.** Before 0.2.1, an argument a
+command did not declare was parsed, discarded, and never mentioned. `align build ARCHITECTURE.md`
+ran against `docs/ARCHITECTURE-RULES.md` instead — reporting "Doc not found: docs/ARCHITECTURE-RULES.md"
+in a repository without that default, and in a repository with it, exiting **0 with a full build
+report for a document nobody asked about**.
+
+Every command was affected, not just `build`: the permissive behaviour came from the argument parser's
+default, so it applied to all of them.
+
+**What changed.** No command accepts an argument it does not declare. An undeclared argument now
+exits **2** (the usage-error code, unchanged from 0.2.0's contract) with a message naming the
+command and the count.
+
+Separately, `align build <doc>` now **means** that doc — the positional form of `--doc`. Passing both
+is refused rather than resolved in align's favour.
+
+**What to check before upgrading**: any CI step or script that passes an extra word to an align
+command. It was being ignored; it will now fail the step. Nothing else about parsing changed —
+declared positionals (`align explain <ruleId>`, `align docs [topic]`) and subcommand dispatch behave
+exactly as before.
+
+No baseline churn.
+
+### A `custom.host` predicate whose findings share a message now fails the run
+
+**Only repositories with `custom.host` rules are affected, and only 0.2.0 shipped this defect.**
+0.1.x is not affected.
+
+align identifies a `custom.host` finding by rule + file + **message**, never by line number, so that
+inserting a comment above a finding does not orphan its baseline entry. The consequence is that two
+findings from one predicate, in the same file, carrying the same message are **one signature**. In
+0.2.0 that meant a single accepted baseline entry suppressed all of them — including findings added
+later that nobody had reviewed — and `align check` exited 0.
+
+**What changed.** align refuses instead of guessing. A predicate that returns two findings which
+differ in position or snippet but share a file and message now produces a gate **error** naming the
+rule, the predicate, the file, the colliding message and the count. Emitting the *same* finding twice
+(every field equal) is still fine and is reported once.
+
+**What to do.** Give each finding a message that identifies it — the symbol, the offending value, the
+specifier — in your `hostRules` export. This also makes the report readable: several violations that
+render identically are not usable by whoever reads them.
+
+**Expect baseline churn if you were affected.** Changing a predicate's messages changes those
+findings' fingerprints, so entries accepted under the old message orphan. That is the correct
+outcome: the old entry represented consent to one occurrence and was being applied to others. Review
+the newly-distinct findings and `align baseline accept` the ones you intend to keep.
+
+### align reports when `.align/ruleset-ir.json` no longer matches your config
+
+`align check --untrusted` (ADR 014) reads the exported IR instead of executing `align.config.ts`, and
+the documented workflow — export in a trusted checkout, `--untrusted` in CI — makes the two drift
+apart as a matter of routine. Before 0.2.1, nothing said so: the same tree could produce a green
+`align check` and a red `align check --untrusted`, with neither command nor `align doctor` mentioning
+that they were reading different rules. Drift hurts in both directions — a stale IR keeps enforcing a
+rule you removed, and **cannot enforce one you added**.
+
+**What changed**, in two places that can answer different questions:
+
+- **Trusted** (`check`, `doctor`) loads both and compares them exactly — rules, components,
+  `excludes` and `includeNestedCheckouts` — and names which part differs.
+- **`--untrusted`** may not execute your config, so `align export-ir` now records a
+  `sourceFingerprint` over `align.config.ts` and `.align/generated-rules.json`, and the check
+  recompares it. This is deliberately weaker and says so: a config that **imports another module** can
+  change without moving the fingerprint, so a mismatch proves drift while a match proves nothing.
+
+Both are advisories. Neither changes your verdict — the trusted run read your live config and its
+verdict is right; what is wrong is a run somewhere else.
+
+**An IR exported by 0.2.0 or earlier has no fingerprint**, and `--untrusted` will say it **cannot
+tell** whether the rules are current rather than staying silent. Re-run `align export-ir` once to
+clear it. The field is additive: an older align reading a 0.2.1-written IR ignores it, and 0.2.1
+reads an older IR without complaint.
+
+No baseline churn.
+
+### `build-output-excluded` now means build output, and out-of-scope imports report which blind spot
+
+This changes strings in `align check --json` and in the uncertainty advisories.
+
+`build-output-excluded` has been in align's uncertainty vocabulary since ADR 004, and it fired on
+your **`excludes` patterns** — so an import into a directory you excluded was reported as build
+output, a claim align has no way to support, while an import into `dist/`, the case the name
+describes, produced no marker at all. `fixture-excluded` sat in the same list and was never emitted
+by anything.
+
+**What changed:**
+
+- `build-output-excluded` now means the target really is build output — under a default-excluded
+  build directory at a package root or the repository root.
+- Everything else out of scope reports **`excluded-from-scan`**, which claims only what align knows.
+  This replaces `fixture-excluded`, which is removed.
+- Markers gain an optional `excludedBy`, carrying the same blind-spot reason
+  (`{kind: 'excluded', pattern}`, `{kind: 'default-excluded-dir', name}`, …) that
+  `align check --json`'s `blindSpots` already reports, so the per-import marker and the per-directory
+  record can no longer describe one event two different ways.
+
+**What you will see.** Advisory counts change, and imports reaching into skipped directories produce
+markers where they previously produced silence. No violations change and no verdict changes.
+If you parse `--json` for uncertainty reasons, update the two strings.
+
+No baseline churn.
+
+### A layering violation against an unmapped file no longer names an internal sentinel
+
+`arch.layer(a).canOnlyDependOn(b)` against a file matching no component selector used to render as
+`imports src/shared/r.ts (layer '__unmapped__')`. `__unmapped__` is align's internal marker for "this
+file matched no selector" — it is not a layer, it is not in your config, and searching for it finds
+nothing, so a real finding read like a malfunction.
+
+This is not a rare corner. `canOnlyDependOn` is an allowlist, so a file in no component falls outside
+it by construction: measured on a 300-package repository, **7577 of 7577** violations from one such
+rule named the sentinel.
+
+**What changed.** The message now says `(which matches no component selector)`. `align check --json`
+keeps `toLayer` as the scan's own classification and adds `toIsUnmapped` for consumers that need the
+fact structurally.
+
+The remedy for these violations is unchanged and worth stating: give the file a component, or remove
+the dependency. You cannot allow it through `canDependOn`, because it is not a component.
+
+No fingerprints change, so no baseline churn.
+
 ## 0.2.0
 
 ### Why violation fingerprints changed
