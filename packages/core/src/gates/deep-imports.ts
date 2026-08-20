@@ -109,7 +109,19 @@ export function computeDeepImportHits(
   const occurrences: SpecifierOccurrence[] = [];
   for (const e of graph.edges) occurrences.push({ file: e.from, specifier: e.specifier, line: e.line });
   for (const e of graph.externalEdges) occurrences.push({ file: e.from, specifier: e.specifier, line: e.line });
-  for (const u of graph.uncertain) occurrences.push({ file: u.file, specifier: u.specifier, line: u.line });
+  for (const u of graph.uncertain) {
+    // An ASSET is not a deep import (LEDGER D055). The scanner has already classified this
+    // specifier — `reason: 'asset-specifier'` — and flattening the marker to {file, specifier, line}
+    // discarded the one fact that answers the question, one line before it is asked. A stylesheet
+    // has no public surface to reach past; `import 'reactflow/dist/style.css'` was reported as
+    // "reaches past reactflow's public surface via 'dist'".
+    //
+    // Filtered on the REASON, not on the file extension: `graph.uncertain` is a legitimate source of
+    // deep-import occurrences (a specifier align could not resolve is still worth reporting), so
+    // dropping the collection wholesale would narrow the check far past the defect.
+    if (u.reason === 'asset-specifier') continue;
+    occurrences.push({ file: u.file, specifier: u.specifier, line: u.line });
+  }
 
   const hits: DeepImportHit[] = [];
   for (const { file, specifier, line } of occurrences) {

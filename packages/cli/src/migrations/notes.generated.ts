@@ -11,11 +11,11 @@
 // `migration-notes-drift.test.ts` fails if UPGRADING_MD_CONTENT_HASH below no longer matches
 // the doc's current content — that is the drift detector, not a suggestion.
 //
-// Generated at: 2026-08-20T17:40:13.495Z
+// Generated at: 2026-08-20T17:50:00.697Z
 import type { MigrationNote } from './types.js';
 
 /** sha256Hex (16-char) of UPGRADING.md's full text at compile time. */
-export const UPGRADING_MD_CONTENT_HASH = "b15a7ff4a910ef5f";
+export const UPGRADING_MD_CONTENT_HASH = "7c63754dbb39f6c1";
 
 /** Migration notes compiled from UPGRADING.md, keyed by the exact version heading text
  * ("## <version>") it was compiled from. */
@@ -28,6 +28,10 @@ export const COMPILED_NOTES: Readonly<Record<string, readonly MigrationNote[]>> 
     {
       heading: "`arch.no-cycles` now says when a reported cycle is one of several in a group",
       body: "align reports **one cycle per strongly connected component** — a group of files that can all reach\neach other. That has always been true; what is new is that the message says so.\n\nWhy it matters: if a group holds more than one cycle, fixing the reported one promotes another and\nthe violation count does not move. One reporter's repository showed 12 cycles and needed 17 distinct\nfixes, with the number static across most of them — which reads as no progress when real progress\nwas being made.\n\nA cycle whose group is exactly the files in the cycle — a plain two-file cycle, which is most of\nthem — is unchanged. A larger group now reads:\n\n```\nImport cycle of 2 edge(s) detected: src/b3.ts -> src/b1.ts -> src/b3.ts. These 3 files form one\nmutually-dependent group (src/b1.ts, src/b2.ts, src/b3.ts); align reports one cycle per group, so\nbreaking the cycle above may leave other cycles among these files.\n```\n\n`--json` and MCP consumers get the same information as a `cycleGroup` array on the violation.\n\n**No baseline churn.** A cycle violation's identity is its chain, and neither the chain nor which\ncycle is selected changed — only the rendered message and one added field. Accepted cycle entries\nkeep matching.",
+    },
+    {
+      heading: "`align doctor`'s deep-import advisory stops making two false claims",
+      body: "Two false-positive classes are gone. Both were reported against one specifier —\n`import 'reactflow/dist/style.css'`, which produced *\"reaches past reactflow's public surface via\n'dist'\"*.\n\n**Assets are no longer deep imports.** A stylesheet has no public surface to reach past. align's\nscanner already classified it as an asset; the advisory was discarding that classification before\nasking the question it answers.\n\n**Neither is a package that declares no `exports` map.** Without one, every subpath is public under\nNode resolution — `reactflow/dist/style.css` is that package's documented stylesheet path — so there\nis no boundary the import could violate. align now checks whether the target package declares a\nsurface at all before claiming you reached past it.\n\nA package that *does* declare `exports` is still reported exactly as before: that is the case the\nadvisory exists for. And if align cannot read the target package's manifest — not installed,\nunreadable — it keeps reporting, so this never silently suppresses the advisory on a repository\nwithout `node_modules`.\n\nAdvisory-only, so no verdict or baseline effect. Expect fewer `deep-import` lines from `align\ndoctor`, all of them removals of claims that were wrong.",
     },
     {
       heading: "align now tells you when it is holding an edge it cannot evaluate",

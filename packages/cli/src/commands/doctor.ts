@@ -18,6 +18,7 @@ import { ALIGN_VERSION } from '../telemetry/index.js';
 import { parseSkillVersionMarker, parseSkillContentHashMarker, computeSkillContentHash } from '../skill/version-stamp.js';
 import { renderSkillMarkdown } from '../skill/render.js';
 import { buildUnknownProvenanceAdvisory, detectVersionSkewAdvisory } from '../version-skew.js';
+import { packageDeclaresExportsMap } from '../deep-import-surface.js';
 
 const UNMAPPED_EXAMPLES = 5;
 /** Stage 2 live-probe DX finding, carried into Stage 3: the agent had to script against the
@@ -288,7 +289,20 @@ async function collectDoctorReport(rootDir: string, program: Command | undefined
       // delegates to (`core/src/gates/advisories.ts`) -- doctor only has a bare advisories array
       // here, not a full `CheckRun`, so it calls the array-shaped half directly.
       const deepImportsIncomplete = !areAdvisoriesComplete(advisories);
+      // A package that declares no `exports` map has no surface to reach past, so the advisory's
+      // claim would be false by construction (LEDGER D055). Memoized per package name: one manifest
+      // read per distinct dependency, not per hit — a repo importing forty subpaths of one package
+      // reads its manifest once.
+      const declaresSurface = new Map<string, boolean>();
+      const hasSurface = (pkg: string): boolean => {
+        const cached = declaresSurface.get(pkg);
+        if (cached !== undefined) return cached;
+        const answer = packageDeclaresExportsMap(rootDir, pkg);
+        declaresSurface.set(pkg, answer);
+        return answer;
+      };
       for (const hit of computeDeepImportHits(graph, { allowlist: deepImportAllowlist })) {
+        if (!hasSurface(hit.targetPackage)) continue;
         const partialNote = deepImportsIncomplete ? ' (results partial — dependencies not fully installed)' : '';
         advisories.push({
           kind: 'deep-import',

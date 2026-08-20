@@ -72,6 +72,30 @@ cycle is selected changed — only the rendered message and one added field. Acc
 keep matching.
 
 
+### `align doctor`'s deep-import advisory stops making two false claims
+
+Two false-positive classes are gone. Both were reported against one specifier —
+`import 'reactflow/dist/style.css'`, which produced *"reaches past reactflow's public surface via
+'dist'"*.
+
+**Assets are no longer deep imports.** A stylesheet has no public surface to reach past. align's
+scanner already classified it as an asset; the advisory was discarding that classification before
+asking the question it answers.
+
+**Neither is a package that declares no `exports` map.** Without one, every subpath is public under
+Node resolution — `reactflow/dist/style.css` is that package's documented stylesheet path — so there
+is no boundary the import could violate. align now checks whether the target package declares a
+surface at all before claiming you reached past it.
+
+A package that *does* declare `exports` is still reported exactly as before: that is the case the
+advisory exists for. And if align cannot read the target package's manifest — not installed,
+unreadable — it keeps reporting, so this never silently suppresses the advisory on a repository
+without `node_modules`.
+
+Advisory-only, so no verdict or baseline effect. Expect fewer `deep-import` lines from `align
+doctor`, all of them removals of claims that were wrong.
+
+
 ### align now tells you when it is holding an edge it cannot evaluate
 
 The silence above is what let that defect survive review, a release, and align's own CI. An edge

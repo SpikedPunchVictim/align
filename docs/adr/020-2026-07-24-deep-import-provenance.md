@@ -167,3 +167,25 @@ rescope.
   doctor-advisory precedent this v1 mirrors.
 - `packages/plugin-typescript/src/tsconfig-resolver.ts:47-59` — the `unresolved → uncertain` routing
   (the false-quiet finding).
+
+---
+
+## Amendment, 2026-08-20 — a one-bit precondition, distinct from Arm-B (LEDGER D055)
+
+Arm-B — full `exports`-map subpath resolution, deciding whether a *specific* subpath is exported —
+remains rejected. The placebo test that rejected it stands and nothing here revisits it.
+
+What field use surfaced is a different, cheaper question this ADR never asked: **does the target
+package declare a public surface at all?** A package with no `exports` field exposes every subpath
+under Node resolution, so "reaches past its public surface" is not a noisy claim about it, it is a
+false one. Measured: `import 'reactflow/dist/style.css'` was reported that way, and reactflow's
+manifest carries `main` and no `exports`.
+
+The advisory now consults that one bit, at one manifest read per distinct target package, in the CLI
+(`deep-import-surface.ts`) because core performs no filesystem I/O. Unknown — not installed,
+unreadable, malformed — answers "has a surface", preserving today's behaviour, because this gates a
+false-positive filter and the opposite default would suppress the advisory entirely on a repository
+with no `node_modules`.
+
+Separately, asset specifiers (`.css` and friends) are no longer eligible at all: the scanner already
+classifies them `asset-specifier`, and the check was discarding that classification.
