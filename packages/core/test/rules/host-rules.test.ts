@@ -3,6 +3,7 @@ import {
   assertNoCustomHostRules,
   evaluateCustomHost,
   HostPredicateExecutionError,
+  HostViolationCollisionError,
   UnknownHostRuleError,
   UntrustedCustomHostRuleError,
   validateHostRules,
@@ -170,20 +171,29 @@ describe('evaluateCustomHost', () => {
     expect(idAtLine5).toBe(idAtLine6);
   });
 
-  it('collapses two same-file, same-message findings on different lines into one fingerprint — intended, not accidental', () => {
-    // This is a deliberate consequence of dropping the line number from the fingerprint, not a
-    // bug: it is the same collision behavior every other rule family already has (two identical
-    // no-dependency edges from one file with the same specifier collide too, evaluators.ts:56).
-    // A predicate that needs two findings in the same file to stay distinct must put the
-    // distinguishing detail in `message` — see the HostViolation doc comment in host-rules.ts.
+  it('REFUSES two same-file, same-message findings on different lines rather than collapsing them (LEDGER D063)', () => {
+    // This assertion is inverted from what it used to be, and the inversion is the point.
+    //
+    // Until 2026-08-20 this test asserted that the two findings collapse to one fingerprint and
+    // called it "intended, not accidental", reasoning that it is "the same collision behavior every
+    // other rule family already has". The premise was half right and the conclusion was wrong. The
+    // collision IS shared with the edge rules — but there it collapses two reports of ONE fact
+    // (the same import, seen twice), while here it collapses two DIFFERENT findings the predicate
+    // deliberately raised. Measured consequence on the reporter's fixture against the built 0.2.0
+    // binary: one accepted baseline entry suppressed three findings and `align check` exited 0.
+    //
+    // So this is the check that should have caught D063 and did not — it asserted the defect was
+    // correct. A test can pin the wrong behavior as firmly as the right one; that is the reusable
+    // lesson, and it is why the ledger row's "which check should have caught it" column names this
+    // test rather than saying "nothing".
     const g = graph([node('api/routes.ts', 'api')], []);
     const predicate: HostPredicate = () => [
       { file: toRepoRelativePath('api/routes.ts'), range: { startLine: 3, endLine: 3 }, message: 'too fat' },
       { file: toRepoRelativePath('api/routes.ts'), range: { startLine: 30, endLine: 30 }, message: 'too fat' },
     ];
-    const violations = evaluateCustomHost(ROUTE_THINNESS_RULE, g, registryOf('route-thinness', predicate));
-    expect(violations).toHaveLength(2);
-    expect(violations[0]?.id).toBe(violations[1]?.id);
+    expect(() => evaluateCustomHost(ROUTE_THINNESS_RULE, g, registryOf('route-thinness', predicate))).toThrow(
+      HostViolationCollisionError,
+    );
   });
 
   it('still differs when file, message, or rule.id differ (only the line number is excluded)', () => {

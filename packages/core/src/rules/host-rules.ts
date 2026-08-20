@@ -30,6 +30,79 @@ export class UnknownHostRuleError extends Error {
 }
 
 /**
+ * Thrown when one predicate returns two *distinct* findings that align cannot tell apart — LEDGER
+ * D063, the fourth refusal in this module's vacuous-green family (`UnknownHostRuleError`,
+ * `UntrustedCustomHostRuleError`, `HostPredicateExecutionError`) and the only one caused by
+ * repo-authored code rather than by a missing or unavailable registration.
+ *
+ * **The defect.** A `custom.host` violation's identity is `['custom', ruleId, file, message]` — no
+ * line number, by the same rule every other evaluator follows, so that a comment inserted above a
+ * finding does not orphan its baseline entry. Two findings from the same predicate, in the same
+ * file, carrying the same message therefore hash to ONE fingerprint. Reproduced against the built
+ * 0.2.0 binary: a predicate emitting three findings on lines 1, 2 and 3 of `src/index.ts` against a
+ * baseline holding ONE accepted entry reported `verdict: green`, `baselinedCount: 3`, and
+ * `baselineDebt: {previous: 1, current: 1, delta: 0}`. Two findings no human had ever seen were
+ * suppressed by consent given to a third, and the debt line — the one instrument a human would audit
+ * — confirmed that nothing had changed.
+ *
+ * **Introduced by a fix, and shipped in exactly one version.** `9102847` (2026-08-06, "stop folding a
+ * line number into the custom.host fingerprint") removed `String(range.startLine)` from the parts
+ * list to stop baseline churn — a real problem, correctly diagnosed. What the line number had ALSO
+ * been doing was keeping two findings apart, and nothing asked what else the field was carrying
+ * before it was dropped. `git tag --contains 9102847` is `v0.2.0` alone; `v0.1.4`'s copy of this file
+ * still has the line number in it, so 0.1.x churns and does not collapse. The remedy for churn was
+ * never in dispute — it just needed this guard beside it.
+ *
+ * **Why this refuses instead of disambiguating.** Every other rule kind takes its distinctness from
+ * structural coordinates core computes itself (`from`/`to`/`specifier` for the edge rules,
+ * `manifest.file`/`dep.name` for the manifest rules, one-per-file for `arch.metric`) — whether those
+ * coordinates are *sufficient* is a separate open question, measured and filed under SHAPES.md S-14,
+ * and not a claim made here. `custom.host` has no coordinates at all: the predicate is the only
+ * thing in the system that knows whether two findings are one problem or two. Every way core could
+ * guess is worse than asking:
+ *
+ * - *Number them by position* — fixing the first finding shifts the rest down one, silently
+ *   re-pointing accepted entries at findings nobody reviewed. That is precisely the consent-forging
+ *   this store's move-transfer logic (ADR 027/028) exists to prevent.
+ * - *Fall back to the line number* — restores the baseline churn the line-free fingerprint was
+ *   adopted to remove, and makes acceptance order-dependent on the predicate's iteration order.
+ * - *Collapse them into one finding* — turns one person's acceptance of one occurrence into standing
+ *   consent for every future occurrence in that file. It is the false green, renamed.
+ *
+ * So align stops and says what it cannot decide. The remedy is one line in the predicate and it
+ * improves the report too: three violations that read identically are not usable by the human
+ * reading them, baselines or no baselines.
+ *
+ * **This was a doc comment before it was a guard**, which is the reusable lesson. `HostViolation`'s
+ * own documentation has told predicate authors to put the distinguishing detail in `message` since
+ * the fingerprint went line-free — and nothing checked that they had. CLAUDE.md's rule 5: a doc
+ * comment asserting a safety property is a claim to verify, not evidence.
+ */
+export class HostViolationCollisionError extends Error {
+  constructor(
+    public readonly ruleId: string,
+    public readonly hostRuleName: string,
+    public readonly file: RepoRelativePath,
+    /** The colliding text. Named `hostMessage` because `Error.message` is the rendered explanation. */
+    public readonly hostMessage: string,
+    public readonly count: number,
+  ) {
+    super(
+      `Rule '${ruleId}' (custom.host) predicate '${hostRuleName}' returned ${count} different ` +
+        `findings for '${file}' that all carry the message "${hostMessage}". align identifies a ` +
+        `custom.host finding by rule + file + message and never by line number (a line number would ` +
+        `orphan the baseline entry as soon as anything above the finding moved), so these ${count} ` +
+        `are one signature: accepting one would silently accept the others, including findings ` +
+        `added later that nobody has reviewed. Refusing instead of guessing. Fix: in ` +
+        `align.config.ts's 'hostRules' export, give each finding a message that identifies it — the ` +
+        `symbol, the offending value, the import specifier — so the ${count} findings read ` +
+        `differently to a human and hash differently to the baseline.`,
+    );
+    this.name = 'HostViolationCollisionError';
+  }
+}
+
+/**
  * Load-time validation, run in `GateOrchestrator.check`'s vacuous-green guard step: every
  * `custom.host` rule's `hostRuleName` must name a registered host predicate. The CLI composition
  * root derives `registeredHostPredicates` from the loaded config's `hostRules` export (core stays
@@ -73,15 +146,20 @@ export interface HostRuleContext {
  * the rule's `.because()` text, mirroring exactly what every other `RuleEvaluator` does for its
  * own violations.
  *
- * **`message` — not `range` — is what makes two findings distinct across baseline checks.**
+ * **`message` — not `range` — is what makes two findings distinct, and align now enforces it.**
  * Every `computeFingerprint` call site in this codebase deliberately excludes line numbers
  * (`baseline/fingerprint.ts:8-9`: "never line numbers"), `custom.host` included: the fingerprint
- * is `['custom', rule.id, file, message]`. This keeps a baseline entry alive across a line shift
- * (a comment or import inserted above the violation), but it means two `HostViolation`s from the
- * same predicate, same `file`, same `message`, on different lines are indistinguishable to the
- * baseline and collapse to one entry. If a predicate can emit more than one *distinct* finding
- * per file, put the distinguishing detail in `message` (e.g. the symbol name, the offending
- * value) — do not rely on `range`/line number to separate them.
+ * is `['custom', rule.id, file, message]`. That keeps a baseline entry alive across a line shift
+ * (a comment or import inserted above the violation). It also means two `HostViolation`s from the
+ * same predicate, same `file`, same `message`, on different lines are one signature to the
+ * baseline. So if a predicate can emit more than one *distinct* finding per file, put the
+ * distinguishing detail in `message` (the symbol name, the offending value, the specifier) — never
+ * rely on `range`/line number to separate them.
+ *
+ * Until LEDGER D063 that paragraph was the whole mechanism: advice, unchecked, and a predicate that
+ * ignored it produced a green run over findings nobody had accepted. `evaluateCustomHost` now
+ * refuses the collision outright (`HostViolationCollisionError`). Emitting the *same* finding twice
+ * — every field equal — is still fine and is reported once.
  */
 export interface HostViolation {
   readonly file: RepoRelativePath;
@@ -161,11 +239,16 @@ export function assertNoCustomHostRules(rules: readonly RuleIR[]): void {
   if (ids.length > 0) throw new UntrustedCustomHostRuleError(ids);
 }
 
+/** The `custom.host` arm of the `Violation` union. Named because `refuseOnCollision` below needs
+ * `detail`, which only this arm has — carrying `Violation` there would force a narrowing branch that
+ * can never be taken. */
+type CustomViolation = Extract<Violation, { readonly kind: 'custom' }>;
+
 function normalizeHostViolation(
   rule: CustomHostRule,
   hv: HostViolation,
   nodeByFile: ReadonlyMap<RepoRelativePath, DependencyGraph['nodes'][number]>,
-): Violation {
+): CustomViolation {
   const range = hv.range ?? { startLine: 1, endLine: 1 };
   // No I/O here either (evaluateCustomHost stays as pure as every other RuleEvaluator) — the
   // fallback reuses the node's already-scanned first-line snippet (DependencyGraphNode.snippet,
@@ -175,9 +258,9 @@ function normalizeHostViolation(
   // Deliberately excludes range.startLine (fingerprint.ts:8-9's "never line numbers" — every other
   // computeFingerprint call site in this codebase upholds this; this one used to be the exception).
   // A line shift (a comment or import inserted above the violation) must not orphan the baseline
-  // entry. Trade-off: two HostViolations in the same file with the same message on different lines
-  // now collapse to one baseline entry — see the HostViolation.message doc comment above for the
-  // authoring guidance this implies.
+  // entry. The consequence — two HostViolations in the same file with the same message are one
+  // signature — is no longer left to the author to remember: `refuseOnCollision` below rejects the
+  // pair (LEDGER D063).
   const id = computeFingerprint(['custom', rule.id, hv.file, hv.message]);
   return {
     id,
@@ -227,5 +310,54 @@ export function evaluateCustomHost(
     throw new HostPredicateExecutionError(rule.id, rule.hostRuleName, err);
   }
 
-  return results.map((hv) => normalizeHostViolation(rule, hv, nodeByFile));
+  return refuseOnCollision(rule, results.map((hv) => normalizeHostViolation(rule, hv, nodeByFile)));
+}
+
+/**
+ * LEDGER D063's guard: one fingerprint must mean one finding, or align refuses to report at all.
+ *
+ * Runs on the NORMALIZED violations rather than the raw `HostViolation`s so the comparison sees the
+ * same values the baseline will: a defaulted `range` and a defaulted `snippet` are what get written
+ * to `.align/baseline.json`, and two findings that differ only in a field align discards are not
+ * distinguishable no matter what the predicate intended.
+ *
+ * Two violations sharing an `id` are *the same finding reported twice* only if everything align can
+ * observe about them agrees — `id` already covers rule/file/message, so `range` and `snippet` are
+ * what remain. That case (two overlapping detection passes in one predicate) collapses to one
+ * violation, which is honest: there is one problem and align reports one. Anything else is two
+ * problems wearing one name, and the run errors.
+ */
+function refuseOnCollision(rule: CustomHostRule, violations: readonly CustomViolation[]): readonly Violation[] {
+  const byId = new Map<string, CustomViolation[]>();
+  for (const v of violations) {
+    const group = byId.get(v.id);
+    if (group === undefined) byId.set(v.id, [v]);
+    else group.push(v);
+  }
+  if (byId.size === violations.length) return violations; // the overwhelmingly common path
+
+  const deduped: CustomViolation[] = [];
+  for (const group of byId.values()) {
+    // A group is only ever created with one member already in it, so `[0]` is present; the check is
+    // what `noUncheckedIndexedAccess` requires to say so.
+    const first = group[0];
+    if (first === undefined) continue;
+    if (!group.every((v) => sameObservableFinding(first, v))) {
+      throw new HostViolationCollisionError(rule.id, rule.hostRuleName, first.file, first.detail, group.length);
+    }
+    deduped.push(first);
+  }
+  return deduped;
+}
+
+/** What a `custom.host` finding carries beyond its fingerprint: `id` already accounts for rule,
+ * file and message, and every other field on a normalized host violation is a constant of the rule
+ * (`ruleId`, `category`, `severity`, `fixHint`, `because`, `kind`, `hostRuleName`) or is derived
+ * from the message (`detail`). Only `range` and `snippet` can differ between two findings that
+ * share an id — enumerated by reading `normalizeHostViolation` above, not inferred, and it is that
+ * function a future field would have to be added to. */
+function sameObservableFinding(a: CustomViolation, b: CustomViolation): boolean {
+  return (
+    a.range.startLine === b.range.startLine && a.range.endLine === b.range.endLine && a.snippet === b.snippet
+  );
 }

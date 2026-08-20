@@ -467,3 +467,47 @@ promote on the second, because the cost of an executable invariant usually is no
 then. Two things overrode it here: there were already three occurrences in one finding, and the
 invariant is fifteen lines with no runtime cost. The rule is a heuristic about cost versus evidence —
 when the cost collapses, so does the threshold.
+
+---
+
+## S-14 — An identity narrowed to stop churn, without asking what it was keeping apart
+
+**Instances**: D063. **Rung**: brief, with one arm promoted — see below.
+
+A fingerprint, a cache key, a dedup key, a primary key. Something churns, and the fix is to drop a
+field from the identity: a line number that shifts, a timestamp that ticks, a path that moves. The
+churn stops, the diagnosis was correct, and the change is a one-liner.
+
+The field was doing two jobs. Stability was the one under discussion. **Separation was the one
+nobody named**, and the two things that field kept apart now share a name — which, wherever the
+identity feeds consent (a baseline, an acknowledgement, a suppression list, a "don't ask me again"),
+converts one person's decision about one thing into standing consent for another.
+
+D063 is the clean example. `custom.host` violation ids folded in `range.startLine`, so inserting a
+comment above a finding orphaned its baseline entry. `9102847` dropped the line number; churn fixed.
+Three findings in one file carrying one message then hashed to one id, one accepted entry suppressed
+all three, and `align check` exited 0 with `baselineDebt` reporting `1 → 1 (0)`. Shipped in v0.2.0
+only — v0.1.4 still has the line number.
+
+The inverse is the same shape and is worth checking in the same pass: an identity that was **never**
+wide enough. Measured while hunting D063's class, on default configuration: a type-only import and a
+value import of the same specifier from the same file produce two `arch.no-dependency` violations
+with one fingerprint — the parts are `['no-dependency', rule.id, edge.from, target.file,
+edge.specifier]` (`evaluators.ts`) and `edge.kind` is not among them — so accepting the
+erased-at-runtime one silently accepts the runtime one. Both carry `edgeKind`, and the rendered
+messages differ, so the two the user reads are not the two the baseline stores. Filed, not fixed:
+adding `edge.kind` re-identifies every existing accepted arch violation, and move-transfer does not
+rescue an orphan whose file is still in the scan.
+
+> **Ask, before removing a field from any identity**: list the pairs this identity must keep apart,
+> then check the remaining fields still separate every pair. If the answer is "the author will make
+> them distinct," that is not a mechanism — see S-03, and add the guard.
+>
+> **Ask, of any identity that feeds consent**: can two things a human would review differently ever
+> hash the same? Suppressing on a shared id is consent nobody gave.
+
+**Promoted for the case where the parties differ.** When the values being hashed come from outside
+the codebase — a host predicate, a plugin, a config callback — the code cannot ask the author to
+uphold an invariant, because the author is not present when it breaks. `evaluateCustomHost` now
+refuses a collision outright rather than documenting the obligation. The general case (are these two
+`arch.*` violations really the same fact?) is a judgement about semantics and stays a brief.
