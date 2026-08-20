@@ -73,6 +73,30 @@ jobs:
       - name: align check (self-dogfood)
         run: pnpm check
 
+      # ADR 025 §6: "required before publish" — and until LEDGER D059 nothing enforced it. The
+      # harness ran on `release: published` in ci.yml while this workflow publishes on the tag push,
+      # so the two raced and npm could ship regardless of the result. It runs HERE now, ahead of the
+      # publish step, so a red harness fails the job and no tarball leaves the runner.
+      #
+      # `integration:release` covers EVERY project (scripts/integration-all-projects.mjs) against
+      # both targets, so it also carries the red/green calibration proof: ten scenarios pinned via
+      # `expectFailOn` must go red against the real published 0.1.4, and run.mjs exits non-zero if
+      # any of them passes. Minutes, paid once per release.
+      - name: Cross-version integration harness (ADR 025 §6 — required before publish)
+        run: pnpm integration:release
+
+      # Keep the evidence for a release even when it passed — the artifacts are how a published
+      # version's gate result stays inspectable after the fact.
+      - name: Upload harness results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-integration-results
+          path: |
+            integration/results/*/
+            !integration/results/.cache/
+          retention-days: 90
+
       # pnpm publishes in topological order (core → plugin-typescript/agent → cli)
       # and rewrites `workspace:*` deps to the concrete version being published.
       # --no-git-checks: the tag checkout is a detached HEAD.

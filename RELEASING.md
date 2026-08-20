@@ -113,8 +113,15 @@ git push --follow-tags              # pushing the tag triggers .github/workflows
 The `release.yml` workflow then, on the `v0.2.0` tag:
 
 1. checks that the tag matches `packages/core`'s version (guards a forgotten `release:version`),
-2. builds, typechecks, tests, and runs the align self-dogfood, and
-3. runs `pnpm -r publish --access public --no-git-checks --provenance`.
+2. builds, typechecks, tests, and runs the align self-dogfood,
+3. **runs the cross-version integration harness across every project** (`pnpm integration:release`) —
+   ADR 025 §6's "required before publish", and a red harness fails the job so nothing is published,
+4. uploads the harness results as an artifact (90 days), then
+5. runs `pnpm -r publish --access public --no-git-checks --provenance`.
+
+Step 3 is minutes. It is deliberately inside this workflow rather than a separate one: until
+LEDGER D059 it ran on `release: published` in `ci.yml` while publishing happened on the tag push, so
+the two raced and the "required" gate could not block anything.
 
 Every published tarball carries a signed **provenance** attestation linking it to this repo, the
 commit, and the workflow run.

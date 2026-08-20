@@ -15,8 +15,12 @@ on:
   workflow_dispatch:
     inputs:
       project:
-        description: 'project id (integration/projects/*.mjs)'
-        default: 'nest'
+        description: 'project id (integration/projects/*.mjs) — leave EMPTY to run every project'
+        # Empty by default (LEDGER D059). This used to default to 'nest', so a bare manual dispatch —
+        # the "pre-release check on a branch" this workflow exists to offer — silently covered one
+        # project of two and never ran the only integration coverage ADR 023 tier 2 has. Same shape
+        # as D049, one level up: a gate whose DEFAULT under-covers is a gate nobody knows is partial.
+        default: ''
         required: false
       targets:
         description: 'align versions to test, comma-separated (0.1.0-0.1.4, local)'
@@ -26,8 +30,12 @@ on:
         description: 'comma-separated scenario ids (default: every scenario for --project)'
         default: ''
         required: false
-  release:
-    types: [published]
+  # NO `release: published` trigger (LEDGER D059). It used to run the harness when a GitHub Release
+  # was published, while `release.yml` publishes to npm on the TAG PUSH — two different events that
+  # fire concurrently, so the harness never gated anything it was described as gating (ADR 025 §6:
+  # "required before publish"). The gate now lives in `release.yml`, ahead of the publish step, where
+  # a failure actually stops the release. Re-adding a trigger here would restore the duplicate
+  # 25-minute run that can block nothing.
 
 # Cancel superseded runs on the same ref so PR pushes don't queue stale jobs.
 concurrency:
@@ -93,7 +101,7 @@ jobs:
   # dev machine, a different CI provider).
   integration:
     name: cross-version integration harness (ADR 025)
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
