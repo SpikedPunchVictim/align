@@ -218,7 +218,7 @@ export async function runAgentCommand(rootDir: string, options: AgentRunCliOptio
   } catch (err) {
     return reportCliError('align agent run', err);
   }
-  const { ruleset, excludes, includeNestedCheckouts, hostRules, telemetry } = loaded;
+  const { ruleset, excludes, includeNestedCheckouts, hostRules, telemetry, testFiles } = loaded;
   const anthropicProvider = options.model !== undefined ? new AnthropicFixProvider({ model: options.model }) : new AnthropicFixProvider();
   const memoizingProvider = new MemoizingFixProvider(anthropicProvider);
   const effects = buildEffects(rootDir, ruleset, excludes, includeNestedCheckouts, hostRules, options, memoizingProvider);
@@ -228,6 +228,11 @@ export async function runAgentCommand(rootDir: string, options: AgentRunCliOptio
     maxAttempts: options.maxAttempts,
     mode: options.autoMerge ? 'auto-merge' : 'pr',
     allowUntested: options.allowUntested,
+    // `[]` (the export is absent) means "use the defaults", NOT "this repo has no test files" —
+    // spreading rather than assigning keeps the option undefined so `coverageGateOutcome` falls back
+    // to `DEFAULT_TEST_FILE_PATTERNS`. Assigning `[]` here would make the agent refuse every file in
+    // every repository that never set the export, which is LEDGER D051 reintroduced by its own fix.
+    ...(testFiles.length > 0 ? { testFilePatterns: testFiles } : {}),
     allowSymbolRemovals: options.allowSymbolRemovals,
     allowIncomplete: options.allowIncomplete,
     dryRun: options.dryRun,

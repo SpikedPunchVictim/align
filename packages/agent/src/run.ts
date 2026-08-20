@@ -23,7 +23,7 @@ import {
 import type { AgentEffects } from './effects.js';
 import type { FixProviderInput, RuleExplanation } from './fixProvider.js';
 import { buildCondensedSymbolTable } from './symbolTable.js';
-import { isFileCovered } from './coverage.js';
+import { assessCoverage, DEFAULT_TEST_FILE_PATTERNS } from './coverage.js';
 import { diffExportedSymbols } from './symbolDiff.js';
 import { decideNextRepairAction, type RepairDecision } from './repairDecision.js';
 import { detectOscillation, type AttemptFingerprint } from './oscillation.js';
@@ -42,6 +42,15 @@ export interface AgentRunOptions {
    * `gates/advisories.ts`) — the one shared predicate this option gates, never re-derived here. */
   readonly allowIncomplete: boolean;
   readonly dryRun: boolean;
+  /** Glob patterns (align's dialect) identifying this repository's test files, for the zero-coverage
+   * gate — `align.config.ts`'s optional `testFiles` export, threaded through by the CLI. Optional so
+   * every pre-existing caller keeps working; absent means `DEFAULT_TEST_FILE_PATTERNS`.
+   *
+   * Configurable since LEDGER D051. The seam already existed — `isFileCovered` accepted a pattern
+   * argument from the day it was written — and no caller ever passed one, so a repository using
+   * `__tests__/` or `.e2e.` had every file report zero coverage with no way to say otherwise. An
+   * unused parameter is not an extension point; it is a plan someone had. */
+  readonly testFilePatterns?: readonly string[];
   readonly workBranchName: string;
   readonly baseBranch: string;
   readonly prTitle?: string;
@@ -115,8 +124,23 @@ async function buildInputForFile(
   };
 }
 
-const ZERO_COVERAGE_REASON =
-  'zero test coverage — no scanned test file transitively imports this file (pass --allow-untested to override)';
+/**
+ * The two reasons the coverage gate fires, kept apart because they ask the user for different
+ * things (LEDGER D051). `uncovered` is a finding about the file: tests were scanned, none reach it,
+ * write one or override. `noTestFilesScanned` is not a finding about the file at all — align saw no
+ * test files anywhere, so it cannot answer the question, and the fix is almost always in the config.
+ */
+const coverageRefusal = {
+  uncovered: (scannedTestFileCount: number): string =>
+    `zero test coverage — ${scannedTestFileCount} test file(s) were scanned and none transitively imports this ` +
+    'file (pass --allow-untested to override)',
+  noTestFilesScanned: (patterns: readonly string[]): string =>
+    `coverage unknown — this scan matched 0 test files anywhere in the repository, so align cannot tell whether ` +
+    `this file is tested. That is usually configuration rather than missing tests: check that your test files are ` +
+    `not hidden by an \`excludes\` pattern in align.config.ts, and that they match \`testFiles\` ` +
+    `(currently ${patterns.map((p) => `'${p}'`).join(', ')}) — a repository using \`__tests__/\` or \`.e2e.\` ` +
+    'needs to say so. Pass --allow-untested to proceed anyway.',
+} as const;
 
 /** Green≠correct guard (c), ADR 023 tier 2: a VERIFY (or terminal-merge) run whose gates are all
  * green but which could not resolve the whole dependency graph (`missing-dependencies` advisory,
@@ -138,12 +162,19 @@ const INCOMPLETE_VERIFY_REASON =
 async function coverageGateOutcome(
   effects: AgentEffects,
   file: RepoRelativePath,
-  options: Pick<AgentRunOptions, 'allowUntested'>,
+  options: Pick<AgentRunOptions, 'allowUntested' | 'testFilePatterns'>,
 ): Promise<GroupOutcome | undefined> {
   if (options.allowUntested) return undefined;
+  const patterns = options.testFilePatterns ?? DEFAULT_TEST_FILE_PATTERNS;
   const graph = await effects.scanGraph();
-  if (isFileCovered(file, graph)) return undefined;
-  return { status: 'escalated', file, reason: ZERO_COVERAGE_REASON };
+  const { covered, scannedTestFileCount } = assessCoverage(file, graph, patterns);
+  if (covered) return undefined;
+  // Both branches still REFUSE — the gate exists so the agent never edits code it cannot verify,
+  // and "align could not look" is not a licence to proceed. Only the reason differs, because only
+  // the reason tells the user what to do next.
+  const reason =
+    scannedTestFileCount === 0 ? coverageRefusal.noTestFilesScanned(patterns) : coverageRefusal.uncovered(scannedTestFileCount);
+  return { status: 'escalated', file, reason };
 }
 
 /** DISCOVER + GROUP + PLAN only — used for `--dry-run`. Applies the same zero-coverage guard as

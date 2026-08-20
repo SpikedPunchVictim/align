@@ -18,10 +18,20 @@ agent's guards reduce that risk but do not eliminate it:
   exported symbol, requiring explicit `--allow-symbol-removals` consent.
 - **Zero-coverage refusal** declines to propose a fix for a file with no detected test coverage
   unless `--allow-untested` is passed. The v1 heuristic is **reachability, not real coverage**: a
-  file is "covered" if any scanned test file (`**/*.{test,spec}.*`) imports it directly or
-  transitively in the dependency graph. A test that imports a module but never exercises the
-  specific lines being changed still counts as "covered" — this catches the worst case (nothing
-  tests this file at all) cheaply, at the cost of false confidence on partially-exercised code.
+  file is "covered" if any scanned test file imports it directly or transitively in the dependency
+  graph. A test that imports a module but never exercises the specific lines being changed still
+  counts as "covered" — this catches the worst case (nothing tests this file at all) cheaply, at the
+  cost of false confidence on partially-exercised code.
+
+  Test files are matched by `align.config.ts`'s optional `testFiles` export (align's glob dialect),
+  defaulting to `**/*.test.*` and `**/*.spec.*`. A repository using `__tests__/` or `.e2e.` must say
+  so, or its tests are invisible here — that is configuration, not a verdict about the code.
+
+  **Two refusals, not one** (LEDGER D051). If the scan matched test files and none reach the target,
+  that is a finding about the file and the message says so, with the count. If the scan matched
+  **zero** test files anywhere, align cannot tell whether the file is tested, and says *that*
+  instead — pointing at `excludes` and `testFiles` rather than at writing tests. Both still refuse
+  by default; only the remedy differs.
 
 A third bound is on **what the scan saw at all**. A file can be present on disk and still absent
 from align's scan — behind an `excludes` pattern, under a `node_modules`-class directory, inside a

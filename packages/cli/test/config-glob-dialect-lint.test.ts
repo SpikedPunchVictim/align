@@ -22,6 +22,7 @@ import { runCheck } from '../src/commands/check.js';
  *   - `includeNestedCheckouts` -> `scanner.ts`'s `isExcludedPath`, "matched the same way excludes
  *                                 matches" (its own doc comment in `config.ts`)
  *   - `knownPublicDeepImports` -> `gates/deep-imports.ts`'s `isAllowlisted`
+ *   - `testFiles`              -> `packages/agent`'s `assessCoverage` (added by D051)
  *
  * Measured, on a two-component repo with an api->ui violation and
  * `export const excludes = ['src/+(api|legacy)/**']`:
@@ -93,6 +94,9 @@ const GLOB_EXPORTS: readonly { readonly name: string; readonly pattern: string; 
   { name: 'excludes', pattern: 'src/+(api|legacy)/**', label: /extglob|alternation/ },
   { name: 'includeNestedCheckouts', pattern: 'vendor/[ab]*', label: /character class/ },
   { name: 'knownPublicDeepImports', pattern: 'typescript/lib/!(internal)/**', label: /extglob|alternation/ },
+  // Added with the export itself (LEDGER D051) rather than after someone noticed — this table is
+  // the register D044 exists to keep, and a glob-carrying export that is not in it is the defect.
+  { name: 'testFiles', pattern: 'src/**/*.[jt]s', label: /character class/ },
 ];
 
 describe('every glob-carrying config export is linted against align’s dialect [D044]', () => {

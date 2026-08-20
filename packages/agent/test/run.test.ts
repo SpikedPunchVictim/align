@@ -201,7 +201,11 @@ describe('runAgentLoop — green≠correct guards', () => {
     const v1 = violation({ id: 'v1', ruleId: 'arch.no-dependency', file: 'src/a.ts' });
     const fake = new FakeFixProvider();
     const handle = createFakeEffects(fake, { 'src/a.ts': 'bad' });
-    handle.setGraph(graph([node('src/a.ts', 'core')], [])); // no test file in the graph at all
+    // A test file EXISTS in the scan and simply does not reach `src/a.ts` — the per-file finding
+    // this test is about. It used to pass an empty graph, which since LEDGER D051 is the separate
+    // "align saw no test files at all, so it cannot tell" case (covered by
+    // `coverage-refusal-reason.test.ts`). Testing the intended branch means giving it a test file.
+    handle.setGraph(graph([node('src/a.ts', 'core'), node('src/b.ts', 'core'), node('src/b.test.ts', 'core')], [edge('src/b.test.ts', 'src/b.ts')]));
     handle.setCheckRuns([checkRun([v1])]);
 
     const result = await runAgentLoop(handle.effects, emptyRuleset, opts({ allowUntested: false }));
@@ -278,7 +282,9 @@ describe('runAgentLoop — dry-run', () => {
     const v1 = violation({ id: 'v1', ruleId: 'arch.no-dependency', file: 'src/a.ts' });
     const fake = new FakeFixProvider();
     const handle = createFakeEffects(fake, { 'src/a.ts': 'bad' });
-    handle.setGraph(graph([node('src/a.ts', 'core')], [])); // no test file in the graph at all
+    // Same change as the guard test above (LEDGER D051): a scanned test file that does not reach
+    // the target, rather than an empty graph, so this exercises "uncovered" and not "cannot tell".
+    handle.setGraph(graph([node('src/a.ts', 'core'), node('src/b.ts', 'core'), node('src/b.test.ts', 'core')], [edge('src/b.test.ts', 'src/b.ts')]));
     handle.setCheckRuns([checkRun([v1])]);
 
     const result = await runAgentLoop(handle.effects, emptyRuleset, opts({ dryRun: true, allowUntested: false }));

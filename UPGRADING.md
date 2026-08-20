@@ -629,6 +629,53 @@ early return was originally there for. Separately, `align build --apply` now per
 under one lock with the baseline read hoisted before the first write, so the partial state above is
 much harder to reach in the first place.
 
+### `align agent run` tells you when it could not see your tests
+
+`align agent run` refuses to propose a fix for a file with no detected test coverage, because it
+must not edit code it cannot verify. That refusal has always had two causes, and until now it
+reported both with one sentence:
+
+```
+zero test coverage — no scanned test file transitively imports this file
+(pass --allow-untested to override)
+```
+
+The first cause is a real finding about the file: tests were scanned, none reach it. The second is
+not about the file at all — align matched **no test files anywhere**, so it cannot answer the
+question. That happens when an `excludes` pattern hides the test tree, or when tests are named in a
+convention align was not told about. The old message pointed both at writing tests, which is the
+wrong action for the second, and on a repository where it fired for every file the whole run
+escalated with nothing to act on.
+
+**What you will see.** The no-test-files case now reports itself as unknown rather than as zero, and
+names the two things that cause it:
+
+```
+coverage unknown — this scan matched 0 test files anywhere in the repository, so align cannot
+tell whether this file is tested. That is usually configuration rather than missing tests: check
+that your test files are not hidden by an `excludes` pattern in align.config.ts, and that they
+match `testFiles` ... Pass --allow-untested to proceed anyway.
+```
+
+The per-file case now carries the count (`3 test file(s) were scanned and none transitively imports
+this file`), so you can tell the two apart at a glance.
+
+**Naming your test files.** align matches them with the optional `testFiles` export, in the same
+glob dialect as `excludes`:
+
+```ts
+export const testFiles = ['**/*.test.*', '**/*.spec.*', '**/__tests__/**'];
+```
+
+Absent, it defaults to `['**/*.test.*', '**/*.spec.*']` — the same set the previous hardcoded
+pattern matched, so a repository that adds nothing behaves exactly as before. Set it if your tests
+live in `__tests__/`, end in `.e2e.`, or follow any other convention.
+
+**Nothing about the refusal itself changed.** A file whose coverage align cannot determine is still
+refused by default; `--allow-untested` still overrides. If you want the agent to work on a
+repository whose tests align cannot see, the durable fix is `testFiles` (or the `excludes` pattern
+hiding them), not the override.
+
 ### Changes that need nothing from you
 
 Worth knowing about, but no migration:

@@ -59,6 +59,13 @@ export interface LoadedConfig {
   // everything else with its own `.git` is auto-excluded by default. Read from an optional named
   // `includeNestedCheckouts` export; `[]` when absent.
   readonly includeNestedCheckouts: readonly string[];
+  /** LEDGER D051: glob patterns naming this repository's test files, consumed by `align agent run`'s
+   * zero-coverage gate. Same deviation shape as `excludes` — a scan-time concern, not a
+   * rule-evaluation one. `[]` when absent, which the agent reads as "use the defaults"
+   * (`DEFAULT_TEST_FILE_PATTERNS`, `**\/*.test.*` and `**\/*.spec.*`) rather than as "this repo has
+   * no test files" — an empty array here must never be the reason the agent refuses every file,
+   * which is the defect that produced this export. */
+  readonly testFiles: readonly string[];
   // ADR 006:40-43 / ADR 024: the single gate over every MCP-reachable write to
   // `.align/baseline.json` — today that's `align_propose_rules`'s `accept_new_into_baseline`
   // (`mcp/server.ts`). Default `false` (an agent cannot grant itself amnesty from a rule it is
@@ -192,6 +199,7 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
     compositionRoots?: readonly string[];
     knownPublicDeepImports?: readonly string[];
     includeNestedCheckouts?: readonly string[];
+    testFiles?: readonly string[];
     allowBaselineFromMcp?: boolean;
   };
   try {
@@ -219,6 +227,7 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
   const compositionRoots = readStringArrayExport(mod.compositionRoots, 'compositionRoots');
   const knownPublicDeepImports = readGlobPatternArrayExport(mod.knownPublicDeepImports, 'knownPublicDeepImports');
   const includeNestedCheckouts = readGlobPatternArrayExport(mod.includeNestedCheckouts, 'includeNestedCheckouts');
+  const testFiles = readGlobPatternArrayExport(mod.testFiles, 'testFiles');
   const allowBaselineFromMcp = readBooleanExport(mod.allowBaselineFromMcp, 'allowBaselineFromMcp');
 
   if (!includeGenerated) {
@@ -229,6 +238,7 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
       compositionRoots,
       knownPublicDeepImports,
       includeNestedCheckouts,
+      testFiles,
       allowBaselineFromMcp,
       ...telemetry,
     };
@@ -243,6 +253,7 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
       compositionRoots,
       knownPublicDeepImports,
       includeNestedCheckouts,
+      testFiles,
       allowBaselineFromMcp,
       ...telemetry,
     };
@@ -256,6 +267,7 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
     compositionRoots,
     knownPublicDeepImports,
     includeNestedCheckouts,
+    testFiles,
     allowBaselineFromMcp,
     ...telemetry,
   };

@@ -11,11 +11,11 @@
 // `migration-notes-drift.test.ts` fails if UPGRADING_MD_CONTENT_HASH below no longer matches
 // the doc's current content — that is the drift detector, not a suggestion.
 //
-// Generated at: 2026-08-20T07:45:09.193Z
+// Generated at: 2026-08-20T16:16:27.464Z
 import type { MigrationNote } from './types.js';
 
 /** sha256Hex (16-char) of UPGRADING.md's full text at compile time. */
-export const UPGRADING_MD_CONTENT_HASH = "f35cfef8c43b3321";
+export const UPGRADING_MD_CONTENT_HASH = "66fe9fb5ab53f515";
 
 /** Migration notes compiled from UPGRADING.md, keyed by the exact version heading text
  * ("## <version>") it was compiled from. */
@@ -132,6 +132,10 @@ export const COMPILED_NOTES: Readonly<Record<string, readonly MigrationNote[]>> 
     {
       heading: "`align build --verify` reports doc-built rules with no lockfile",
       body: "`.align/generated-rules.json` is merged into your effective ruleset on every load, and\n`.align/rules.lock.json` is the record of which document produced it. If the first exists without\nthe second — an `align build --apply` interrupted partway, a hand-deleted file, a `git clean` — the\nrules are being enforced with no record of where they came from, and `align build --verify` /\n`align check --frozen-rules` reported `ok` for exactly that state, because a missing lockfile was\nread as \"this repo never ran a build.\"\n\nBoth now report it:\n\n```\n.align/generated-rules.json is in force but .align/rules.lock.json is missing, so align cannot\ntell which document produced the rules it is enforcing — most likely an `align build --apply`\nthat did not finish. Re-run `align build --apply` to rebuild both, or delete\n.align/generated-rules.json to drop the doc-built rules.\n```\n\nA repository that has never run `align build` is unaffected and stays silent, which is what the\nearly return was originally there for. Separately, `align build --apply` now performs its writes\nunder one lock with the baseline read hoisted before the first write, so the partial state above is\nmuch harder to reach in the first place.",
+    },
+    {
+      heading: "`align agent run` tells you when it could not see your tests",
+      body: "`align agent run` refuses to propose a fix for a file with no detected test coverage, because it\nmust not edit code it cannot verify. That refusal has always had two causes, and until now it\nreported both with one sentence:\n\n```\nzero test coverage — no scanned test file transitively imports this file\n(pass --allow-untested to override)\n```\n\nThe first cause is a real finding about the file: tests were scanned, none reach it. The second is\nnot about the file at all — align matched **no test files anywhere**, so it cannot answer the\nquestion. That happens when an `excludes` pattern hides the test tree, or when tests are named in a\nconvention align was not told about. The old message pointed both at writing tests, which is the\nwrong action for the second, and on a repository where it fired for every file the whole run\nescalated with nothing to act on.\n\n**What you will see.** The no-test-files case now reports itself as unknown rather than as zero, and\nnames the two things that cause it:\n\n```\ncoverage unknown — this scan matched 0 test files anywhere in the repository, so align cannot\ntell whether this file is tested. That is usually configuration rather than missing tests: check\nthat your test files are not hidden by an `excludes` pattern in align.config.ts, and that they\nmatch `testFiles` ... Pass --allow-untested to proceed anyway.\n```\n\nThe per-file case now carries the count (`3 test file(s) were scanned and none transitively imports\nthis file`), so you can tell the two apart at a glance.\n\n**Naming your test files.** align matches them with the optional `testFiles` export, in the same\nglob dialect as `excludes`:\n\n```ts\nexport const testFiles = ['**/*.test.*', '**/*.spec.*', '**/__tests__/**'];\n```\n\nAbsent, it defaults to `['**/*.test.*', '**/*.spec.*']` — the same set the previous hardcoded\npattern matched, so a repository that adds nothing behaves exactly as before. Set it if your tests\nlive in `__tests__/`, end in `.e2e.`, or follow any other convention.\n\n**Nothing about the refusal itself changed.** A file whose coverage align cannot determine is still\nrefused by default; `--allow-untested` still overrides. If you want the agent to work on a\nrepository whose tests align cannot see, the durable fix is `testFiles` (or the `excludes` pattern\nhiding them), not the override.",
     },
     {
       heading: "Changes that need nothing from you",
