@@ -5,7 +5,7 @@ import {
 import {
   computeContentFingerprint, toComponentName, type BaselineEntry, type CheckRun, type ViolationId } from '@spikedpunch/align-core';
 import { TypeScriptPlugin } from '@spikedpunch/align-plugin-typescript';
-import { detectComponents } from '../init/detect-components.js';
+import { detectComponents, partitionByGlobDialect } from '../init/detect-components.js';
 import { suggestLayers } from '../init/suggest-layers.js';
 import { renderConfig } from '../init/render-config.js';
 import { assertAgentInstructionsWellFormed, writeAgentInstructions } from '../init/claude-md.js';
@@ -21,6 +21,7 @@ import { refuseIfRunErrored, refuseIfRunIncomplete } from '../errored-run.js';
 import { describeRetainedEntries, partitionBlindSpotCandidates, retainedEntries } from '../scan-blind-spot-retention.js';
 import { createFileExistenceProbe } from '../file-existence.js';
 import { defaultConfirm } from '../prompt.js';
+import { writeFileAtomic } from '../fs-atomic.js';
 
 export interface InitOptions {
   readonly acceptExisting: boolean;
@@ -146,7 +147,32 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
   // comes into being exactly when, and only when, something is actually about to be written into
   // it, on the success path, same as before.
   if (!fs.existsSync(configPath)) {
-    const detected = detectComponents(rootDir);
+    const partitioned = partitionByGlobDialect(detectComponents(rootDir));
+    const detected = partitioned.expressible;
+    // A directory name may legally contain characters align's glob dialect cannot express, and it
+    // has no escape syntax (`components/glob.ts`) — `docs (old)` is the realistic case, and the
+    // adversarial one is D041's injection payload. Writing such a pattern into align.config.ts
+    // produces a config that fails to load on the next command, which is what `align init` did
+    // before LEDGER D045 made the dialect lint reachable at scan time. Dropped here instead, and
+    // SAID OUT LOUD: silently omitting a component leaves a whole directory ungoverned with no
+    // trace, which is the shape this project treats as severity-zero when a verdict depends on it.
+    if (partitioned.inexpressible.length > 0) {
+      console.log(
+        `Skipped ${partitioned.inexpressible.length} director(y/ies) whose name align's glob dialect cannot ` +
+          `express: ${partitioned.inexpressible.map((c) => `'${c.pattern}'`).join(', ')}. They are NOT governed by ` +
+          `the generated config. Rename them, or add a component by hand with a selector that reaches them.`,
+      );
+    }
+    if (detected.length === 0) {
+      return reportCliError(
+        'align init',
+        new Error(
+          `every directory align detected has a name its glob dialect cannot express, so there is no component ` +
+            `to write. Rename at least one of ${partitioned.inexpressible.map((c) => `'${c.pattern}'`).join(', ')}, ` +
+            `or author align.config.ts by hand.`,
+        ),
+      );
+    }
     console.log(`Detected ${detected.length} component(s): ${detected.map((c) => c.name).join(', ')}`);
 
     // Scan once with components-only (no rules yet) to derive layer suggestions from real edges.
@@ -170,7 +196,7 @@ export async function runInit(rootDir: string, options: InitOptions): Promise<nu
       detected.filter((c) => options.greenfield === true || !populatedNames.has(toComponentName(c.name))).map((c) => c.name),
     );
 
-    fs.writeFileSync(configPath, renderConfig(detected, layers, greenfieldComponents), 'utf8');
+    writeFileAtomic(configPath, renderConfig(detected, layers, greenfieldComponents));
     console.log(`Wrote ${CONFIG_FILENAME} (cycles-first starter ruleset; ${layers.length} layer suggestion(s) commented out).`);
     if (greenfieldComponents.size > 0) {
       const reason = options.greenfield === true ? '--greenfield' : 'matched zero files';

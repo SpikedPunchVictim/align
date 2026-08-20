@@ -7,6 +7,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline/promises';
+import { writeFileAtomic } from '../fs-atomic.js';
 
 const ALIGN_SCRIPT_NAME = 'align';
 const ALIGN_SCRIPT_COMMAND = 'align check';
@@ -71,7 +72,7 @@ export async function offerAlignScript(rootDir: string, isInteractive: boolean, 
 
   const result = addAlignScript(packageJson);
   if (result.changed) {
-    fs.writeFileSync(pkgPath, `${JSON.stringify(result.packageJson, null, 2)}\n`, 'utf8');
+    writeFileAtomic(pkgPath, `${JSON.stringify(result.packageJson, null, 2)}\n`);
     console.log(`Added "${ALIGN_SCRIPT_NAME}": "${ALIGN_SCRIPT_COMMAND}" script to package.json.`);
   }
 }

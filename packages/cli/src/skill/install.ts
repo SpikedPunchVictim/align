@@ -4,6 +4,7 @@ import type { Command } from 'commander';
 import { ALIGN_VERSION } from '../telemetry/index.js';
 import { renderSkillMarkdown } from './render.js';
 import { renderVersionStamp, renderContentHashStamp, computeSkillContentHash } from './version-stamp.js';
+import { writeFileAtomic } from '../fs-atomic.js';
 
 const START_MARKER = '<!-- align:start -->';
 const END_MARKER = '<!-- align:end -->';
@@ -53,6 +54,6 @@ export function writeSkillFile(rootDir: string, program: Command): string {
   const contentHash = computeSkillContentHash(body);
   const content =
     `${FRONTMATTER}\n\n${START_MARKER}\n${renderVersionStamp(ALIGN_VERSION)}\n${renderContentHashStamp(contentHash)}\n\n${body}\n${END_MARKER}\n`;
-  fs.writeFileSync(filePath, content, 'utf8');
+  writeFileAtomic(filePath, content);
   return filePath;
 }

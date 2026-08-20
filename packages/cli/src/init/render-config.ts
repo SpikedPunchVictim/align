@@ -20,11 +20,26 @@ export function renderConfig(
   layers: readonly LayerSuggestion[],
   greenfieldComponents: ReadonlySet<string> = new Set(),
 ): string {
+  // `JSON.stringify` on the PATTERN as well as the name (LEDGER D041). Both arms used to interpolate
+  // the pattern into a single-quoted literal raw, while escaping the name with `JSON.stringify` on
+  // the same line. The pattern comes straight off a directory name (`detect-components.ts` builds it
+  // as the entry name plus `/**`), so a repository could choose it.
+  //
+  // An apostrophe was enough to write an unparseable config, and `init` had already written CLAUDE.md
+  // and .gitignore by then, failed with a message naming no file, and refuses to repair on a re-run.
+  // But the file is TypeScript that align then LOADS, so the real exposure was code execution: a
+  // directory named to close the quote and open an expression put that expression in expression
+  // position, and the next `align check` evaluated it. Cloning an untrusted repository and running
+  // `align init` was enough. Measured both before and after in `cli/test/init-config-escaping.test.ts`.
+  //
+  // Nothing is rejected or rewritten, only quoted: `"don't/**"` still matches the directory it names.
+  // Component NAMES are unchanged — `sanitizeName`/`dedupeNames` already reduce them to
+  // identifier-safe camelCase, because they are emitted as `c.<name>` accesses rather than strings.
   const componentLines = components
     .map((c) =>
       greenfieldComponents.has(c.name)
-        ? `    ${JSON.stringify(c.name)}: { pattern: '${c.pattern}', empty: 'until-populated' }, // matched zero files at init time — architecture-first component, see the note above`
-        : `    ${JSON.stringify(c.name)}: '${c.pattern}',`,
+        ? `    ${JSON.stringify(c.name)}: { pattern: ${JSON.stringify(c.pattern)}, empty: 'until-populated' }, // matched zero files at init time — architecture-first component, see the note above`
+        : `    ${JSON.stringify(c.name)}: ${JSON.stringify(c.pattern)},`,
     )
     .join('\n');
 

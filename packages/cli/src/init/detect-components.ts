@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { lintGlobPattern } from '@spikedpunch/align-core';
 import { loadWorkspacePackages, readWorkspaceGlobs, type WorkspacePackage } from '@spikedpunch/align-plugin-typescript';
 
 export interface DetectedComponent {
@@ -23,6 +24,34 @@ export interface DetectedComponent {
  * heuristic the human reviews and edits, not a gating rule (cf. ADR 019's rejection of heuristics
  * for enforcement — this is suggestion). */
 const MAX_PER_PACKAGE_COMPONENTS = 25;
+
+/**
+ * Splits detected components by whether align's glob dialect can express their selector at all —
+ * LEDGER D045's `align init` half.
+ *
+ * Every detected pattern is `${directoryName}/**`, and a directory name is free to contain
+ * characters the dialect reserves or does not support: `(`, `)`, `[`, `]`, `|`. There is no escape
+ * syntax (`components/glob.ts` is a deliberately minimal hand-rolled matcher), so such a directory
+ * genuinely cannot be selected — the pattern is not merely awkward, it is unexpressible. Writing it
+ * into `align.config.ts` anyway is what produced D041's stuck repository and, once the dialect lint
+ * became reachable at scan time, a hard load failure on the very next command.
+ *
+ * A partition rather than a filter: the caller must be able to SAY which directories it dropped.
+ * Silently omitting a component leaves a directory ungoverned with no trace anywhere — no advisory,
+ * no ungrounded-component entry, nothing — and an unreported omission is the shape this project
+ * ranks worst.
+ */
+export function partitionByGlobDialect(detected: readonly DetectedComponent[]): {
+  readonly expressible: DetectedComponent[];
+  readonly inexpressible: DetectedComponent[];
+} {
+  const expressible: DetectedComponent[] = [];
+  const inexpressible: DetectedComponent[] = [];
+  for (const component of detected) {
+    (lintGlobPattern(component.pattern) === undefined ? expressible : inexpressible).push(component);
+  }
+  return { expressible, inexpressible };
+}
 
 export function detectComponents(rootDir: string): DetectedComponent[] {
   const patterns = readWorkspaceGlobs(rootDir);

@@ -1,6 +1,13 @@
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { mergeGeneratedRules, type HostPredicate, type HostPredicateRegistry, type RulesetIR } from '@spikedpunch/align-core';
+import {
+  lintGlobPattern,
+  mergeGeneratedRules,
+  SUPPORTED_GLOB_VOCABULARY,
+  type HostPredicate,
+  type HostPredicateRegistry,
+  type RulesetIR,
+} from '@spikedpunch/align-core';
 import { readGeneratedRules } from './align-dir.js';
 import { toAlignCoreMissingError } from './errors.js';
 
@@ -80,6 +87,44 @@ function readStringArrayExport(value: unknown, exportName: string): readonly str
     throw new Error(`\`${exportName}\` in ${CONFIG_FILENAME} must be a string[] — got ${got}.`);
   }
   return value;
+}
+
+/**
+ * `readStringArrayExport` plus the glob-dialect lint every component selector already gets
+ * (`validateSelectorSyntax`, core's `components/registry.ts`) — LEDGER D044.
+ *
+ * **Why these three and not the other string[] export.** align's glob matcher is deliberately
+ * minimal (`components/glob.ts`): `*`, `**`, `?`, flat `{a,b}` braces, literals. `globToRegExp`
+ * ESCAPES every other metacharacter, so an unsupported construct neither errors nor approximates —
+ * it compiles to a literal that matches nothing, silently, forever. `excludes`,
+ * `includeNestedCheckouts` and `knownPublicDeepImports` are all matched by that same `globMatch`
+ * (`scanner.ts`'s `matchingExcludePattern`/`isExcludedPath`, `gates/deep-imports.ts`'s
+ * `isAllowlisted`), so all three carry the hazard. `compositionRoots` does not: those are component
+ * names, resolved by `Set.has` in `computeUngovernedEdgeGaps` (verified 2026-08-19, not assumed).
+ *
+ * Measured before the fix: `export const excludes = ['src/+(api|legacy)/**']` on a repo with an
+ * api->ui violation printed the violation the exclude was written to suppress, exit 1, with no
+ * mention of the pattern — while the identical string as a component selector is a hard error
+ * naming the exact construct. The asymmetry is the defect; none of the three is a false green.
+ *
+ * At config load rather than at scan time, deliberately: two of the three (`excludes`,
+ * `includeNestedCheckouts`) shape what the scan LOOKS at, so a scan-time report would already be
+ * describing a walk performed under the broken pattern.
+ */
+function readGlobPatternArrayExport(value: unknown, exportName: string): readonly string[] {
+  const patterns = readStringArrayExport(value, exportName);
+  for (const pattern of patterns) {
+    const problem = lintGlobPattern(pattern);
+    if (problem !== undefined) {
+      throw new Error(
+        `\`${exportName}\` in ${CONFIG_FILENAME} contains '${pattern}', which uses ${problem} — ` +
+          `align's glob dialect does not support it, and an unsupported pattern silently matches ` +
+          `nothing rather than failing. It supports ${SUPPORTED_GLOB_VOCABULARY} — list patterns ` +
+          `explicitly (e.g. ['dist/**', 'build/**']) or use a \`*\` wildcard.`,
+      );
+    }
+  }
+  return patterns;
 }
 
 /** Same fail-fast discipline as `readStringArrayExport`, for the one boolean-shaped sibling export
@@ -164,12 +209,16 @@ export async function loadConfig(rootDir: string, options: LoadConfigOptions = {
   if (mod.default === undefined) {
     throw new Error(`${CONFIG_FILENAME} must have a default export (the result of defineProject(...)).`);
   }
-  const excludes = readStringArrayExport(mod.excludes, 'excludes');
+  const excludes = readGlobPatternArrayExport(mod.excludes, 'excludes');
   const hostRules = toHostPredicateRegistry(mod.hostRules);
   const telemetry = mod.telemetry !== undefined ? { telemetry: mod.telemetry } : {};
+  // NOT `readGlobPatternArrayExport`: these are component NAMES. `doctor.ts` turns them into a
+  // `Set<ComponentName>` and `computeUngovernedEdgeGaps` asks `compositionRoots.has(from)` — exact
+  // membership, never a pattern match. Linting them would encode the wrong idea about what the
+  // export is — see `readGlobPatternArrayExport`'s note.
   const compositionRoots = readStringArrayExport(mod.compositionRoots, 'compositionRoots');
-  const knownPublicDeepImports = readStringArrayExport(mod.knownPublicDeepImports, 'knownPublicDeepImports');
-  const includeNestedCheckouts = readStringArrayExport(mod.includeNestedCheckouts, 'includeNestedCheckouts');
+  const knownPublicDeepImports = readGlobPatternArrayExport(mod.knownPublicDeepImports, 'knownPublicDeepImports');
+  const includeNestedCheckouts = readGlobPatternArrayExport(mod.includeNestedCheckouts, 'includeNestedCheckouts');
   const allowBaselineFromMcp = readBooleanExport(mod.allowBaselineFromMcp, 'allowBaselineFromMcp');
 
   if (!includeGenerated) {

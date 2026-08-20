@@ -1,5 +1,5 @@
 import type { CheckRun, ComponentName } from '@spikedpunch/align-core';
-import { isRunComplete } from '@spikedpunch/align-core';
+import { describeErroredGates, isRunComplete } from '@spikedpunch/align-core';
 import { reportCliError } from './cli-error.js';
 import type { ScanHistory } from './scan-history.js';
 
@@ -35,13 +35,21 @@ import type { ScanHistory } from './scan-history.js';
  *
  * **Tier 2 — `refuseIfRunIncomplete`, below.** `complete: false` (`isRunComplete`,
  * `gates/advisories.ts` — the shared predicate, also used by the MCP payload builder's `complete`
- * field) means a `missing-dependencies` advisory fired: the graph was built without some of the
+ * field) means this scan evaluated less than the repository contains. Its first axis is a
+ * `missing-dependencies` advisory: the graph was built without some of the
  * repo's dependencies, dropping edges. A cycle or dependency routed through a dropped edge becomes
  * UNOBSERVABLE, not fixed, so a baseline entry that looks orphaned on an incomplete scan might just
  * be unverified. Unlike tier 1, this scan DID evaluate real rules, so its results are partially
  * meaningful — deletion refuses by default (naming the count at risk) but is overridable with
  * `--allow-incomplete`, because some repos can't practically reach a complete install and a rule
  * with no escape hatch just gets routed around.
+ *
+ * The two tiers now OVERLAP rather than partition: since LEDGER D043 `isRunComplete` is also false
+ * for an errored run, so an errored run is refused by whichever guard it meets. The tiers are still
+ * ordered, not merged — tier 1 is the correct answer for an errored run because it cannot be
+ * overridden, and both call sites reach it first, which is what keeps `--allow-incomplete` from
+ * becoming a way to prune off a crashed scan. Tier 2's errored branch exists only so a future site
+ * that somehow reaches it alone refuses with the right reason instead of the wrong one.
  *
  * Both guards: callers must call them BEFORE writing any file (tier 1, additionally, before even
  * consulting the store — see its own note below). `deriveVerdict` guarantees any errored gate ⇒
@@ -54,15 +62,17 @@ import type { ScanHistory } from './scan-history.js';
  */
 export function refuseIfRunErrored(command: string, run: CheckRun, refusal: string): number | undefined {
   if (run.verdict !== 'error') return undefined;
-  const detail = run.gates
-    .filter((g) => g.status === 'error')
-    .map((g) => `${g.gate} gate: ${g.errorMessage ?? 'unknown error'}`)
-    .join('; ');
+  // `describeErroredGates` (core) rather than the local join this used to build — `packages/agent`
+  // had grown an identical copy and the MCP surface needed a third (LEDGER D047).
+  const detail = describeErroredGates(run);
   return reportCliError(
     command,
     new Error(
+      // No `|| 'a gate errored'` fallback: `deriveVerdict` sets `verdict: 'error'` only when some
+      // gate has `status: 'error'`, and `describeErroredGates` renders a message-less gate as
+      // "<gate> gate: unknown error" — so this is never empty on the path that reaches it.
       `${refusal} — this scan did not complete, so its empty violation set means "not verified", never "fixed". ` +
-        `${detail || 'a gate errored'}`,
+        detail,
     ),
   );
 }
@@ -111,7 +121,15 @@ export function refuseIfRunIncomplete(
   // them somewhere they cannot fix it. Name the axis that actually fired.
   const ungrounded = run.ungroundedComponents;
   const reason =
-    ungrounded.length > 0
+    run.verdict === 'error'
+      ? // Unreachable from either call site today — tier 1 refuses an errored run first, without an
+        // override, and both sites call it first. Written anyway because `isRunComplete` gained the
+        // errored axis (LEDGER D043) and a future site that reaches only this guard must not be told
+        // to install dependencies when a gate crashed. Same reason the ungrounded branch above
+        // exists: naming the wrong axis sends the user somewhere they cannot fix it.
+        'a gate errored, so this scan evaluated no rules at all and every absent violation is unverified rather ' +
+        'than fixed. Fix the gate error reported above (`align check` prints it)'
+      : ungrounded.length > 0
       ? `${ungrounded.length} declared component(s) matched no files (` +
         `${ungrounded
           .map((c) => `${c.name} → '${c.selector}'${describeGroundingHistory(history, c.name)}`)

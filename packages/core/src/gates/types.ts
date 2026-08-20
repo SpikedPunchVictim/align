@@ -20,7 +20,14 @@ export interface GateResult {
   readonly violations: readonly Violation[]; // only if 'red' — new, post-baseline
   readonly baselinedCount: number; // tolerated debt — count only, never payloads (ADR 007)
   readonly passCount?: number;
-  readonly errorMessage?: string; // only if 'error' — environmental, never LLM-facing
+  /** Only if `status === 'error'` — the environmental reason the gate could not run.
+   *
+   * This said "never LLM-facing" until LEDGER D047, and that exclusion was costing more than it
+   * saved: the MCP payload and `align check --json` both dropped it, so a machine consumer got a
+   * bare `verdict: "error"` and no diagnosis on either stream while the human surface printed the
+   * whole thing. It is now carried on the payload's errored gates (`payload/builder.ts`).
+   * `describeErroredGates` (`gates/advisories.ts`) is the one formatter for every prose consumer. */
+  readonly errorMessage?: string;
   readonly durationMs: number;
   readonly cacheHits: number; // always 0 in v1 (ADR 005); field exists for the growth path
   readonly dependsOn: readonly (GateResult['gate'])[]; // declared metadata, not hardcoded order (ADR 008)

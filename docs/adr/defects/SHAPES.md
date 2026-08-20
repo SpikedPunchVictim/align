@@ -151,18 +151,30 @@ discovered in production — or, if you are lucky, on a scenario's first run.
 
 **Instances**: ADR 027 F1 (S0), **D010 (S0)**, D016 (S1), D017 (S1), **D020 (S2, twice over)**,
 D024(a) (S1), **D025 (S2)**, D028 (S1), **D030 (S0)**, **D034 (S0)**, **D035 (S0)**, D037 (S2),
-D038 (S2), D039 (S1). **Rung**: brief, **plus two executable invariants** — see below.
+D038 (S2), D039 (S1), **D041 (S0)**, **D042 (S0)**, D043 (S2), D044 (S2), D045 (S2), D046 (S1),
+**D047 (S0)**. **Rung**: brief, **plus three executable invariants** — see below.
 
 **This is the project's dominant shape, and the number is measured, not impressionistic.** Recounted
-from `LEDGER.md`'s Shape column on 2026-08-19: **13 of 39 rows**, one in three, and all three defects
-of that day's phase 4 (D037/D038/D039) were instances. No other shape is close. Recount before
-quoting — this register went stale by six rows between 2026-08-17 and 2026-08-19, which is the second
-time this exact file has been a sample presenting as a census (see the paragraph below). The count
-that matters is the Shape column specifically. `grep -c S-09 LEDGER.md` returns 16 for three
-different reasons at once: 13 rows carry it as their Shape, one more (D018) mentions it in another
-column without being an instance, and two hits are not rows at all — the undated ADR 027 F1 entry and
-a line of the file's own prose. Four ways to be off by a little, in a register whose whole failure
-mode is being read as exact.
+from `LEDGER.md`'s Shape column on 2026-08-19 after phase 5: **20 of 47 rows**, more than two in
+five. Both phase-4 and phase-5 sweeps were near-total — D037/D038/D039, then
+D041/D042/D043/D044/D045/D046/D047, seven in a row. No other shape is close. Recount before quoting; this register went stale by six rows
+between 2026-08-17 and 2026-08-19, the second time this exact file has been a sample presenting as a
+census (see the paragraph below).
+
+**Counting it correctly takes more care than it looks, and the attempt found a second defect.** The
+count that matters is the Shape column specifically, and neither `grep -c S-09` nor a naive
+`awk -F'|'` gets it right: the first over-counts (rows mentioning S-09 in another column, plus
+non-row lines — **24 hits against 20 real instances**), and the second mis-splits any row containing
+an escaped `\|` in its prose, silently shifting the column index. The census above splits on
+UNESCAPED pipes only and reads field 6, cross-checked against the previous count plus the rows added
+since (13 + 7 = 20) — CLAUDE.md §1.4, two independent derivations of one `n`.
+
+Writing that counter is what surfaced the second defect: **two rows carried bare `|` characters
+inside shell snippets and prose** (`D026`'s `align skill … | wc -c`, and `D047`'s quotation of the
+`|| 'a gate errored'` fallback), so both rendered as 11-column rows in every markdown viewer and were
+invisible to any column-indexed count. Both are escaped now, and every row parses to exactly 9 cells
+— which is the property a future counter should assert rather than tolerate. A parser that silently
+coerces a malformed row is wrong in a way nobody would see.
 
 **D025 is the sharpest instance yet and the cheapest to have avoided**: a guard refusing to write the
 scan record from an ERRORED run, shipped hours before review asked what *else* makes a run know less
@@ -207,6 +219,27 @@ find one, that is the promotion signal.
 > **Ask, when the two arms should legitimately differ**: can the *choice* be made declarable, so an
 > unclassified call site fails a test? A register with reasons beats an assertion that must be wrong
 > for somebody.
+
+**Third executable invariant, 2026-08-19 (D046) — the same register pattern, second application, and
+that is the finding.** `cli/test/writes-are-atomic.test.ts` enumerates every direct `fs` write under
+`packages/cli/src` and requires each to be routed through `writeFileAtomic` or listed in an exemption
+register with its reason. It was written by copying the D037 register almost line for line, which is
+the evidence the pattern transfers: the two mechanise completely unrelated properties (concurrency
+policy; crash atomicity) with the same three assertions — every call site classified, no stale
+exemption, every exemption carries a reason. **When a shape has produced two registers, reach for a
+register first rather than deriving one.**
+
+**The phase-5 sweep says something the per-row entries do not.** Seven consecutive instances, and in
+five of them the unfixed arm was the one that mattered MORE than the fixed arm: D046 protected
+align's own regenerable artifacts and left the human's files exposed; D043 zeroed four fields of an
+errored run and left the fifth claiming completeness; D044 linted the pattern source align authors
+and not the three a human writes by hand; D045's lint was reachable only for the policy its own
+comment treats as the afterthought; D047 gave the human surface the full diagnosis and the machine
+surfaces none of it. That is not coincidence — the arm that gets built is the arm the
+author was thinking about, and the one that matters is often the one they were not.
+
+> **Ask, once you have found the first arm**: which arm did the author have in mind, and which one is
+> load-bearing? If those are different, look at the second one first.
 
 **Second instance, 2026-08-18 (D016), and the promotion decision.** `computeBaselineDebt` already
 refused to report a debt drop on an errored run, with a comment naming that exact hazard. ADR 028

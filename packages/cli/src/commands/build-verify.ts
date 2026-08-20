@@ -57,13 +57,42 @@ function checkGeneratedRulesDivergence(rootDir: string, expectedHash: string): r
 /**
  * `--verify` / `align check --frozen-rules` (ADR 011): red iff the doc's section hashes no longer
  * match the lockfile (`doc-drift`) or generated-rules.json diverges from it (`divergence` — see
- * `checkGeneratedRulesDivergence` for the either-hash transition). No lockfile yet is a deliberate
- * no-op (`ok: true`) — `runBuild`'s own `--verify` path treats that as an explicit failure instead,
- * since the user asked specifically to verify build state.
+ * `checkGeneratedRulesDivergence` for the either-hash transition). No lockfile AND no generated
+ * rules is a deliberate no-op (`ok: true`) — `runBuild`'s own `--verify` path treats that as an
+ * explicit failure instead, since the user asked specifically to verify build state.
  */
 export function verifyFrozenRules(rootDir: string): VerifyResult {
   const lock = readRulesLock(rootDir);
-  if (lock === undefined) return { ok: true, advisories: [] };
+  if (lock === undefined) {
+    // ABSENT IS NOT NOTHING when generated-rules.json is sitting next to it (LEDGER D042). This used
+    // to return `ok: true` on a missing lockfile unconditionally, described as "a deliberate no-op".
+    // That is right for a repo which never ran `align build --apply`, and wrong the moment doc-built
+    // rules exist: `loadConfig` merges generated-rules.json into the effective ruleset on every load,
+    // so those rules are IN FORCE, and the artifact that says which build produced them is gone.
+    //
+    // Reachable from a `build --apply` that threw between its writes, a `SIGKILL`, a `git clean` that
+    // took the gitignored lockfile but not the committed rules, or a hand-deleted file. The verifier
+    // must recognise the STATE rather than any one cause — which is the whole reason this half of the
+    // fix exists alongside the atomic write sequence, since no preflight covers a full disk.
+    //
+    // Same discipline as BUG #1 and ADR 028, in the one place it costs most: this function IS the
+    // check for "are the rules in force the rules that were built", so reporting success here is
+    // CLAUDE.md rule 6 in the verifier itself.
+    if (readGeneratedRulesRaw(rootDir) === undefined) return { ok: true, advisories: [] };
+    return {
+      ok: false,
+      advisories: [
+        {
+          kind: 'generated-rules-without-lockfile',
+          message:
+            '.align/generated-rules.json is in force but .align/rules.lock.json is missing, so align cannot tell ' +
+            'which document produced the rules it is enforcing — most likely an `align build --apply` that did not ' +
+            'finish. Re-run `align build --apply` to rebuild both, or delete .align/generated-rules.json to drop the ' +
+            'doc-built rules.',
+        },
+      ],
+    };
+  }
 
   const advisories: Advisory[] = [];
   const absDocPath = path.join(rootDir, lock.docPath);

@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { writeFileAtomic } from '../fs-atomic.js';
 
 // The `.align/*` artifacts that are MACHINE-LOCAL rather than portable. The committed ones are
 // `baseline.json`, `version.json`, `generated-rules.json`, `rules.lock.json`, `ruleset-ir.json` and
@@ -49,6 +50,6 @@ export function ensureAlignLocalFilesGitignored(rootDir: string): boolean {
   const trimmed = existing.replace(/\s*$/, '');
   const block = `# align machine-local files — telemetry (opt-in: ALIGN_TELEMETRY=1 / --telemetry / align.config.ts telemetry:true)\n# and the scan-observation record, which is evidence about THIS checkout only (ADR 029).\n${missing.join('\n')}\n`;
   const content = trimmed.length === 0 ? block : `${trimmed}\n\n${block}`;
-  fs.writeFileSync(gitignorePath, content, 'utf8');
+  writeFileAtomic(gitignorePath, content);
   return true;
 }

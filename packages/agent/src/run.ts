@@ -8,6 +8,7 @@
  */
 import {
   applyFixProposalFiles,
+  describeErroredGates,
   isRunComplete,
   toRepoRelativePath,
   toRuleId,
@@ -327,14 +328,15 @@ export async function runAgentLoop(effects: AgentEffects, ruleset: RulesetIR, op
   const initialCheck = await effects.runCheck();
   if (initialCheck.verdict === 'error') {
     // Surface WHICH gate errored and WHY — the environmental detail lives on each GateResult's
-    // errorMessage; the agent cannot fix it, but the user needs it to act (agent.ts prints next steps).
-    const erroring = initialCheck.gates.filter((g) => g.status === 'error');
-    const detail = erroring
-      .map((g) => `${g.gate} gate: ${g.errorMessage ?? 'unknown error'}`)
-      .join('; ');
+    // errorMessage; the agent cannot fix it, but the user needs it to act (agent.ts prints next
+    // steps). Formatted by core's `describeErroredGates`, not a local join: this was one of the two
+    // independent copies that made the shared function necessary (LEDGER D047).
+    const detail = describeErroredGates(initialCheck);
     return {
       verdict: 'refused',
-      refusalReason: `initial \`align check\` could not complete — ${detail || 'a gate errored'}. This is an environment/config problem, not a code violation the agent can fix.`,
+      // No `||` fallback: `verdict === 'error'` implies an errored gate (`deriveVerdict`), and
+      // `describeErroredGates` renders a message-less one as "<gate> gate: unknown error".
+      refusalReason: `initial \`align check\` could not complete — ${detail}. This is an environment/config problem, not a code violation the agent can fix.`,
       groups: [],
       finalCheck: initialCheck,
     };

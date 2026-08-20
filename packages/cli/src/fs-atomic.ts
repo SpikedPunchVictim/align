@@ -2,7 +2,16 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 /**
- * Crash-atomic file replacement for everything align persists under `.align/`.
+ * Crash-atomic file replacement for every file align writes — its own artifacts under `.align/`,
+ * and the files it edits in someone else's repository (`CLAUDE.md`, `align.config.ts`,
+ * `.gitignore`, `package.json`, `.claude/skills/*`, and the sources `align agent` repairs).
+ *
+ * It said "everything align persists under `.align/`" until LEDGER D046, and that was not a wording
+ * slip: the eight writers of human-owned files really were still calling `fs.writeFileSync`, so the
+ * arm that got the protection was the one align could regenerate and the arm that did not was the
+ * one it cannot. `writes-are-atomic.test.ts` now enumerates every direct `fs` write in
+ * `packages/cli/src` and fails on an unclassified one, so this sentence cannot quietly become
+ * untrue again.
  *
  * **The defect this closes.** `fs.writeFileSync` opens with `O_TRUNC`: the old contents are gone
  * before the new ones land. A process killed in that window — Ctrl-C, an OOM kill, a laptop
@@ -88,8 +97,14 @@ export function writeFileAtomic(file: string, contents: string): void {
         // Already closed or never valid — the rm below is what actually matters.
       }
     }
-    // Never leave the temp file behind: `.align/` is a directory users read, and a litter of
-    // `.baseline.json.4821.3.tmp` files is indistinguishable from corruption to someone debugging.
+    // Never leave the temp file behind. This mattered when `.align/` was the only destination — a
+    // litter of `.baseline.json.4821.3.tmp` files is indistinguishable from corruption to someone
+    // debugging — and it matters more since D046 put the temp file in the user's REPOSITORY ROOT
+    // for `CLAUDE.md`, `package.json` and `.gitignore` (same directory as the target, because a
+    // cross-filesystem rename is not atomic). The residual, stated because it is a real cost and
+    // not a hypothetical one: a SIGKILL between `openSync` and `renameSync` runs no catch block and
+    // does leave a dotfile in someone's repo. That is the trade being made — a visible, harmless,
+    // trivially-deleted temp file instead of a silently truncated file the user wrote by hand.
     try {
       fs.rmSync(tmp, { force: true });
     } catch {

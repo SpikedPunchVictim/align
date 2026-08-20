@@ -51,6 +51,7 @@ import { createNodeGitEffects } from '@spikedpunch/align-agent';
 import { CONFIG_FILENAME } from '../../config.js';
 import { findAffectedGlobDoubleStarSelectors, type AffectedGlobSelector } from '../glob-double-star-shared.js';
 import type { Transform, TransformPreview } from '../types.js';
+import { writeFileAtomic } from '../../fs-atomic.js';
 
 interface LocatedLiteral {
   /** Index of the literal token's opening quote character. */
@@ -215,6 +216,6 @@ export const globDoubleStarSelectorRewriteTransform: Transform = {
       console.error(`align upgrade: transform 'glob-double-star-selector-rewrite' did not apply — ${reason}.`);
       return;
     }
-    fs.writeFileSync(plan.configPath, applyEdits(plan), 'utf8');
+    writeFileAtomic(plan.configPath, applyEdits(plan));
   },
 };

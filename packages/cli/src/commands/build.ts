@@ -49,6 +49,8 @@ import { computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/inde
 // (`runBuild`) and artifact-writing (`writeBuildArtifacts`). Re-exported below so existing callers
 // (`commands/check.ts`, tests) keep importing from `commands/build.js` unchanged.
 import { reproducibleGeneratedRulesHash, verifyFrozenRules } from './build-verify.js';
+import { withAlignDirLock } from '../align-lock.js';
+import { alignDirPath, preflightVersionStamp } from '../align-version-file.js';
 
 export { reproducibleGeneratedRulesHash, verifyFrozenRules, type VerifyResult } from './build-verify.js';
 
@@ -280,22 +282,53 @@ export function writeBuildArtifacts(
     generatedAt: Date.now(),
     rules: [...result.proposal.rules],
   };
-  writeGeneratedRules(rootDir, generatedFile);
   const generatedRulesContentHash = reproducibleGeneratedRulesHash(generatedFile);
-  writeGeneratedRulesNote(path.join(rootDir, CONFIG_FILENAME));
+  const seedsBaseline = options.acceptNewIntoBaseline && result.impact.addedNew.length > 0;
 
-  if (options.acceptNewIntoBaseline && result.impact.addedNew.length > 0) {
+  // ONE LOCK ACROSS THE WHOLE SEQUENCE, with every read that can throw hoisted above the first write
+  // (LEDGER D042). The comment above claims this sequence was made atomic when the marker validation
+  // moved up, and that is true only of the cause it names. `readBaselineSnapshot` throws on a corrupt
+  // baseline and used to run AFTER `writeGeneratedRules`, so a corrupt `.align/baseline.json` left
+  // doc-built rules in force — `loadConfig` merges them on every load — with no lockfile, no baseline
+  // entries, `align.config.ts` already edited, and the command reporting failure.
+  //
+  // `withAlignDirLock` is re-entrant (`align-lock.ts`), so the inner writers run inside the
+  // exclusivity acquired here rather than each taking and dropping their own. That closes the other
+  // half: previously another align could take the lock BETWEEN two of these writes, and only the
+  // second one would fail. Acquiring once means the contention is resolved before anything lands.
+  //
+  // `preflightVersionStamp` for the same reason it exists on the individual writers (D034): every
+  // `.align/` write stamps the version afterwards and throws on a corrupt stamp, so it is validated
+  // once, up front, rather than midway through.
+  return withAlignDirLock(alignDirPath(rootDir), 'align build --apply', () => {
+    preflightVersionStamp(rootDir);
     // Add-only (CLAUDE.md rule 4's exemption): this path only ever calls `accept` + `snapshot`, so
     // neither probe is consulted. The real `fileExists` is passed anyway — see `commands/baseline.ts`'s
     // `baselineAccept` for why a stub would be a false statement rather than a harmless one, and for
     // why the scan-history probe is the one exception to that (no scan scope in hand, no reachable
     // question).
-    const baseline = readBaselineSnapshot(rootDir);
-    const store = new InMemoryBaselineStore(baseline.entries, createFileExistenceProbe(rootDir), noScanHistory());
-    store.accept(result.impact.addedNew, 'manual');
-    writeBaseline(rootDir, store.snapshot(), baseline.token);
-  }
+    const baseline = seedsBaseline ? readBaselineSnapshot(rootDir) : undefined;
 
+    writeGeneratedRules(rootDir, generatedFile);
+    writeGeneratedRulesNote(path.join(rootDir, CONFIG_FILENAME));
+
+    if (baseline !== undefined) {
+      const store = new InMemoryBaselineStore(baseline.entries, createFileExistenceProbe(rootDir), noScanHistory());
+      store.accept(result.impact.addedNew, 'manual');
+      writeBaseline(rootDir, store.snapshot(), baseline.token);
+    }
+    return finishBuildArtifacts(rootDir, result, options, generatedRulesContentHash);
+  });
+}
+
+/** The tail of `writeBuildArtifacts`: the lockfile, the report, and the success message. Split out
+ * only so the locked section above reads as a sequence rather than as one long closure. */
+function finishBuildArtifacts(
+  rootDir: string,
+  result: DryRunResult,
+  options: { readonly acceptNewIntoBaseline: boolean },
+  generatedRulesContentHash: string,
+): ApplyResult {
   const lock: RulesLock = {
     irVersion: '1',
     docPath: result.docRelPath,

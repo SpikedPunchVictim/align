@@ -12,7 +12,15 @@ import * as path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { buildMcpCheckPayload, proposeRulesFromDoc, ruleFragmentSchema, toRepoRelativePath, type BaselineDebt, type CheckRun } from '@spikedpunch/align-core';
+import {
+  buildMcpCheckPayload,
+  describeErroredGates,
+  proposeRulesFromDoc,
+  ruleFragmentSchema,
+  toRepoRelativePath,
+  type BaselineDebt,
+  type CheckRun,
+} from '@spikedpunch/align-core';
 import { loadConfig } from '../config.js';
 import { createOrchestrator } from '../composition-root.js';
 import { readBaselineSnapshot, writeBaseline } from '../align-dir.js';
@@ -169,6 +177,34 @@ export function createMcpServer(rootDir: string): McpServer {
         checked = await freshCheck(rootDir);
       } catch (err) {
         return { isError: true, content: [{ type: 'text', text: err instanceof Error ? err.message : String(err) }] };
+      }
+      // LEDGER D047. This tool returns ONLY the violation list, so an errored run reached the agent
+      // as `{"violations": []}` with `isError: false` — byte-identical to the answer for a clean
+      // repository, for a scan that evaluated no rule at all. `align_check` at least reports
+      // `verdict: "error"` beside its empty list; here there was nothing to branch on. Absent means
+      // "never verified", never "none", and this is the one surface that could not say so.
+      //
+      // Refuses rather than answering, because the tool has one job and cannot do it: there is no
+      // violation list, partial or otherwise. `isError` is what this handler already returns when
+      // `freshCheck` throws, so the agent's existing error path carries the reason. A
+      // `{violations: [], error: ...}` hybrid was rejected — it leaves the misreadable `[]` in place
+      // for any caller that reads the field it asked for.
+      //
+      // ERRORED only. A RED run's list is real and complete, and refusing there would disable the
+      // tool in exactly the case it exists for.
+      if (checked.run.verdict === 'error') {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text:
+                'align could not evaluate this repository, so there is no violation list to return — an empty ' +
+                'list here would mean "nothing was checked", not "nothing is wrong". ' +
+                `${describeErroredGates(checked.run)}. Fix the reported problem and call this tool again.`,
+            },
+          ],
+        };
       }
       const payload = buildMcpCheckPayload(checked.run, { maxPerRule: 10, pageSize: 50, ...(cursor === undefined ? {} : { cursor }) });
       return {

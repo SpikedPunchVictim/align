@@ -26,6 +26,7 @@ import { openScanHistory } from '../scan-history.js';
 import { readBaseline } from '../align-dir.js';
 import { reportCliError } from '../cli-error.js';
 import { computeRulesetIrHash, createTelemetryRecorder } from '../telemetry/index.js';
+import { writeFileAtomic } from '../fs-atomic.js';
 
 /**
  * `--model <id>` beats `ALIGN_AGENT_MODEL` beats the provider's own default.
@@ -85,7 +86,7 @@ function buildEffects(
     readFile: async (p: RepoRelativePath) => fs.readFileSync(path.join(rootDir, p), 'utf8'),
     writeFile: async (p: RepoRelativePath, content: string) => {
       fs.mkdirSync(path.dirname(path.join(rootDir, p)), { recursive: true });
-      fs.writeFileSync(path.join(rootDir, p), content, 'utf8');
+      writeFileAtomic(path.join(rootDir, p), content);
     },
     formatIfAvailable: (paths: readonly RepoRelativePath[]) => formatIfAvailable(rootDir, paths),
     git: createNodeGitEffects(rootDir),

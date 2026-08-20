@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { assertBlockWellFormed, spliceOrAppendBlock } from './marker-block.js';
+import { writeFileAtomic } from '../fs-atomic.js';
 
 const START_MARKER = '<!-- align:start -->';
 const END_MARKER = '<!-- align:end -->';
@@ -33,13 +34,13 @@ export function writeAgentInstructions(rootDir: string, filename = 'CLAUDE.md'):
   const newBlock = block();
 
   if (!fs.existsSync(filePath)) {
-    fs.writeFileSync(filePath, `${newBlock}\n`, 'utf8');
+    writeFileAtomic(filePath, `${newBlock}\n`);
     return;
   }
 
   const existing = fs.readFileSync(filePath, 'utf8');
   const next = spliceOrAppendBlock(existing, newBlock, filePath, START_MARKER, END_MARKER);
-  fs.writeFileSync(filePath, next, 'utf8');
+  writeFileAtomic(filePath, next);
 }
 
 /**

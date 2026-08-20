@@ -9,6 +9,7 @@
  */
 import * as fs from 'node:fs';
 import { assertBlockWellFormed, spliceOrAppendBlock } from './marker-block.js';
+import { writeFileAtomic } from '../fs-atomic.js';
 
 const START_MARKER = '// align:generated-rules-note:start';
 const END_MARKER = '// align:generated-rules-note:end';
@@ -40,7 +41,7 @@ export function writeGeneratedRulesNote(configPath: string): void {
   const existing = fs.readFileSync(configPath, 'utf8');
   const newBlock = block();
   const next = spliceOrAppendBlock(existing, newBlock, configPath, START_MARKER, END_MARKER);
-  fs.writeFileSync(configPath, next, 'utf8');
+  writeFileAtomic(configPath, next);
 }
 
 /**

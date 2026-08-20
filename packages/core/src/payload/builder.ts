@@ -31,6 +31,12 @@ export interface McpCheckPayload {
     readonly violationCount: number;
     readonly baselinedCount: number;
     readonly passCount?: number;
+    /** Present ONLY on a gate whose status is `error` — LEDGER D047. ADR 007 bans per-item text
+     * from PASSING gates for token economy, and that ban stands: this is one string per ERRORED
+     * gate, across at most three gates, and it is the only thing in the payload that says what
+     * broke. Without it `align check --json` exited 1 with the reason on neither stream while the
+     * human surface printed six lines of diagnosis. */
+    readonly errorMessage?: string;
   }[];
   readonly violations: readonly Violation[]; // priority-sorted, capped, paginated — failures only
   readonly pagination?: { readonly cursor: string; readonly hasMore: boolean };
@@ -57,11 +63,17 @@ export interface McpCheckPayload {
    * (docs/adr/proposals/deep-import-provenance/reconciled-build-order.md #2). Structured so agents can read the ratchet
    * without parsing prose. */
   readonly baselineDebt: BaselineDebt;
-  /** `false` when the graph was built without the repo's external dependencies (a
-   * `missing-dependencies` advisory fired) — external-edge rules could not be fully evaluated, so a
-   * `green` verdict here is provisional, not authoritative. Structured so a consumer reading
-   * `verdict` alone isn't misled by a lying green (same false-green doctrine as `--frozen-rules`,
-   * docs/adr/proposals/deep-import-provenance/reconciled-build-order.md #1). `true` for a normal, dependency-complete scan. */
+  /** `false` when this scan did not resolve everything it was asked to (`isRunComplete`,
+   * `gates/advisories.ts`) — the graph was built without some of the repo's external dependencies,
+   * a declared component matched no files, or a gate errored outright. In each case rules were
+   * evaluated over less than the repository contains, so a `green` verdict here is provisional, not
+   * authoritative. Structured so a consumer reading `verdict` alone isn't misled by a lying green
+   * (same false-green doctrine as `--frozen-rules`,
+   * docs/adr/proposals/deep-import-provenance/reconciled-build-order.md #1).
+   *
+   * `true` for a normal, fully-resolved scan, red or green alike: finding a violation is a scan that
+   * worked. Never `true` beside `verdict: 'error'` — that pairing was LEDGER D043, and it told an
+   * agent the run it is reading is trustworthy at the exact moment it is not. */
   readonly complete: boolean;
 }
 
@@ -104,6 +116,9 @@ export function buildMcpCheckPayload(run: CheckRun, options: BuildCheckPayloadOp
       violationCount: g.violations.length,
       baselinedCount: g.baselinedCount,
       ...(g.passCount === undefined ? {} : { passCount: g.passCount }),
+      // Spread rather than assigned, so a passing gate carries no `errorMessage` KEY at all — an
+      // explicit `undefined` would survive into the JSON shape as a field consumers must handle.
+      ...(g.status === 'error' && g.errorMessage !== undefined ? { errorMessage: g.errorMessage } : {}),
     })),
     violations: page,
     ...(capped.length > pageSize ? { pagination: { cursor: String(offset + pageSize), hasMore } } : {}),

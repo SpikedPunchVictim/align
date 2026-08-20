@@ -20,8 +20,33 @@ export function areAdvisoriesComplete(advisories: readonly Advisory[]): boolean 
 }
 
 /**
- * Whether a `CheckRun` resolved the whole dependency graph — `false` iff a `missing-dependencies`
- * advisory fired (built below, when unresolvable external specifiers are found). This is the ONE
+ * Every errored gate and its message, as one interpolatable phrase — LEDGER D047.
+ *
+ * **This exists because it was already written twice.** `errored-run.ts`'s ADR 023 tier-1 refusal
+ * and `packages/agent`'s initial-check refusal had each built
+ * `gates.filter(status === 'error').map(g => \`${g.gate} gate: ${g.errorMessage ?? 'unknown error'}\`).join('; ')`
+ * independently, down to the `|| 'a gate errored'` fallback. D047 needed it a third time (the MCP
+ * `align_violations` refusal) and a fourth was one edit away. ADR 023 exists because five copies of
+ * a related asymmetry drifted apart; this is the same story one step earlier.
+ *
+ * **Empty means "nothing to describe", and only that.** `''` is returned when no gate errored, so a
+ * caller appending it unconditionally cannot manufacture prose about an error that did not happen.
+ * It is never `''` for an errored run: `deriveVerdict` sets `verdict: 'error'` only when some gate
+ * has `status: 'error'`, and a gate that errored without a message still renders as
+ * `"<gate> gate: unknown error"`.
+ *
+ * Both prior copies ended in `|| 'a gate errored'`, and that arm was unreachable in both — `join`
+ * returns `''` only for an empty list, which is precisely the case this function now answers with
+ * `''` on purpose. Dropped rather than carried forward: a defensive branch no input can reach reads
+ * as a case someone considered, and the next reader has to re-derive that it cannot happen.
+ */
+export function describeErroredGates(run: CheckRun): string {
+  const errored = run.gates.filter((g) => g.status === 'error');
+  return errored.map((g) => `${g.gate} gate: ${g.errorMessage ?? 'unknown error'}`).join('; ');
+}
+
+/**
+ * Whether a `CheckRun` resolved everything it was asked to. This is the ONE
  * shared predicate for that axis (ADR 023's "second axis: incomplete ≠ errored"): it started as an
  * expression inlined at the MCP payload builder's `complete` field
  * (`payload/builder.ts`, `!run.advisories.some((a) => a.kind === 'missing-dependencies')`), and
@@ -51,7 +76,29 @@ export function isRunComplete(run: CheckRun): boolean {
   // otherwise" — which is exactly the situation — and it is OVERRIDABLE, so an architecture-first
   // repo that legitimately has empty components can still prune with `--allow-incomplete`. A
   // non-overridable guard here is what trapped legitimate repositories last time (LEDGER D002).
-  return areAdvisoriesComplete(run.advisories) && run.ungroundedComponents.length === 0;
+  //
+  // THREE axes (added 2026-08-19, LEDGER D043). An ERRORED run satisfies both axes above trivially
+  // — no `missing-dependencies` advisory fired and `ungroundedComponents` is `[]` because nothing
+  // got far enough to look — so this predicate used to answer "yes, it resolved everything" about a
+  // run that evaluated no rule at all. Measured on the wire: `align check --json` on a repo with a
+  // stale component selector printed `"verdict": "error"` beside `"complete": true`, with every
+  // other field honestly zeroed.
+  //
+  // `orchestrator.ts`'s `untrustworthyScanScope()` is the same judgement, already made: it forces
+  // FOUR sibling fields to their knows-nothing value on every errored early return, precisely so no
+  // consumer reads a completeness claim off a run that has none. `complete` belongs to that set and
+  // was outside it only because it is derived rather than stored — which made it invisible to the
+  // `Pick` that makes the compiler enumerate those returns [S-09].
+  //
+  // Placed here rather than at the payload builder deliberately. A manifest scanner that throws
+  // errors the SECURITY gate while the architecture pipeline runs to completion, so that run reaches
+  // the ordinary return with a real scan scope — a payload-level patch keyed off the zeroed fields
+  // would have missed it, and every non-payload consumer besides.
+  //
+  // ADR 023's two tiers are unaffected: tier 1 (`refuseIfRunErrored`, no override) precedes tier 2 at
+  // both destructive call sites, so no errored run reaches the overridable guard. The change is what
+  // a FUTURE site calling only tier 2 gets — a refusal instead of a pass.
+  return run.verdict !== 'error' && areAdvisoriesComplete(run.advisories) && run.ungroundedComponents.length === 0;
 }
 
 /**

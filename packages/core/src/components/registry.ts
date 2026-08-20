@@ -5,8 +5,11 @@ import type { ScanBlindSpot } from '../types/graph.js';
 import { describeBlindSpots } from '../baseline/scan-blind-spots.js';
 import { globMatch, lintGlobPattern, staticPrefixOf } from './glob.js';
 
-/** One-sentence statement of align's supported glob dialect, reused in load-time error messages. */
-const SUPPORTED_GLOB_VOCABULARY =
+/** One-sentence statement of align's supported glob dialect, reused in load-time error messages —
+ * this one, and the CLI's `readGlobPatternArrayExport` for the three glob-carrying config exports
+ * (LEDGER D044). Exported so the two never drift into describing different dialects; there is only
+ * one matcher (`globMatch`), so there is only one sentence. */
+export const SUPPORTED_GLOB_VOCABULARY =
   '`*` (one path segment), `**` (any depth), `?` (one character), `{a,b,c}` brace expansion, and literal path segments';
 
 /** Package name -> repo-relative directory (with trailing slash), e.g. from pnpm-workspace.yaml. */
@@ -147,6 +150,14 @@ export function validateComponents(
   workspacePackages: WorkspacePackageIndex,
   blindSpots: readonly ScanBlindSpot[] = [],
 ): void {
+  // Syntax before semantics (LEDGER D045). An unsupported construct compiles to a literal that
+  // matches nothing (`globToRegExp` escapes it), so a bad selector ALWAYS reaches the zero-match
+  // branch below — which then blames a renamed directory that never moved. This check runs in the
+  // PARSE gate via the plugin scanner; `validateSelectorSyntax`'s other caller (`orchestrator.ts`,
+  // the ARCHITECTURE gate) never got the chance, so the precise message its own doc comment
+  // promises was reachable only for `empty: 'allow' | 'until-populated'`, where the zero-match
+  // branch is skipped. Pure and idempotent, so running it at both moments costs nothing.
+  validateSelectorSyntax(components);
   for (const name of Object.keys(components) as ComponentName[]) {
     const def = components[name];
     if (def === undefined) continue;
