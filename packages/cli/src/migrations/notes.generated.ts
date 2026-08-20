@@ -11,11 +11,11 @@
 // `migration-notes-drift.test.ts` fails if UPGRADING_MD_CONTENT_HASH below no longer matches
 // the doc's current content — that is the drift detector, not a suggestion.
 //
-// Generated at: 2026-08-20T18:54:47.749Z
+// Generated at: 2026-08-20T19:10:25.267Z
 import type { MigrationNote } from './types.js';
 
 /** sha256Hex (16-char) of UPGRADING.md's full text at compile time. */
-export const UPGRADING_MD_CONTENT_HASH = "8565ec0ef0b17ace";
+export const UPGRADING_MD_CONTENT_HASH = "155170d7c9b79cc6";
 
 /** Migration notes compiled from UPGRADING.md, keyed by the exact version heading text
  * ("## <version>") it was compiled from. */
@@ -46,8 +46,8 @@ export const COMPILED_NOTES: Readonly<Record<string, readonly MigrationNote[]>> 
       body: "The silence above is what let that defect survive review, a release, and align's own CI. An edge\nwhose target was never scanned was skipped by every rule with nothing printed.\n\n`align check` now reports them:\n\n```\nadvisory (unevaluatable-edges): 5 import edge(s) point at files this scan did not include, so NO\nRULE can evaluate them — a dependency routed through one of these is invisible to every\narchitecture rule, and a green verdict does not cover it. Affected target(s): ...\n```\n\nAdvisory only — it does not change your verdict. Treat a non-zero count as a hole in what align\nchecked, and the named directories as where to look.",
     },
     {
-      heading: "A source directory named `build`, `dist`, `out` or `coverage` is not scanned",
-      body: "**Identified, not yet fixed** — recorded here because the advisory above will name it and you should\nknow what it means.\n\nalign always skips directories called `node_modules`, `dist`, `build`, `out`, `coverage`, `.next`,\n`.turbo`, `.cache` and similar. That match is on the directory NAME, at any depth — so a real source\ndirectory such as `src/build/` is skipped too, and its files are governed by no rule. Measured in\nalign's own repository: `packages/core/src/build/` holds 14 source files and none of them is\nscanned.\n\nIf the new advisory names a directory that holds real source, that is this issue. There is no\nconfiguration switch for it today; the fix changes what align scans in every repository and is being\nsequenced deliberately rather than slipped in.",
+      heading: "A source directory named `build`, `dist`, `out` or `coverage` is now scanned",
+      body: "**This changes what align looks at, so it can surface violations you have not seen before.** They are\nnot new problems — align simply was not reading those files.\n\nalign skips generated directories, and it used to match them by NAME at any depth. So a real source\ndirectory such as `src/build/` was skipped too, and every file in it was governed by no rule.\nMeasured in align's own repository: `packages/core/src/build/` holds 14 source files and **none of\nthem was ever scanned**.\n\nThe exclusion now distinguishes where build output actually lives:\n\n- `node_modules` and `.git` — skipped **at any depth**, unchanged.\n- `dist`, `build`, `out`, `coverage`, `.next`, `.turbo`, `.cache`, `.build`, `.history` — skipped\n  only at a **package root** (beside the `package.json` that declares the output) or at the\n  repository root.\n\n**What you will see.** If your repo has a source directory with one of those names, its files enter\nthe graph for the first time: new nodes, new edges, and possibly new violations. Review them —\n`align baseline accept` what you intend to keep. A repository with no such directory sees no change\nat all.\n\nReal build output is still skipped exactly as before, so nothing generated starts being checked.",
     },
   ],
   "0.2.0": [

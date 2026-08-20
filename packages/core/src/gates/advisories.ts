@@ -310,8 +310,9 @@ export function buildUnevaluatableEdgeAdvisories(graph: DependencyGraph): Adviso
         `evaluate them — a dependency routed through one of these is invisible to every architecture rule, ` +
         `and a green verdict does not cover it. Affected target(s): ${sample.join(', ')}` +
         `${targets.length > sample.length ? `, +${targets.length - sample.length} more` : ''}. ` +
-        `Most often the target directory is excluded from the scan (align always skips \`node_modules\`, ` +
-        `\`dist\`, \`build\`, \`out\`, \`coverage\` and similar, at any depth) — if one of ` +
+        `Most often the target directory is excluded from the scan (align skips \`node_modules\` and ` +
+        `\`.git\` at any depth, and build-output names like \`dist\`, \`build\`, \`out\`, ` +
+        `\`coverage\` where they sit at a package root) — if one of ` +
         `${dirs.slice(0, 3).join(', ')} holds real source, that is the thing to fix.`,
     },
   ];

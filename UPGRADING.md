@@ -180,20 +180,29 @@ architecture rule, and a green verdict does not cover it. Affected target(s): ..
 Advisory only — it does not change your verdict. Treat a non-zero count as a hole in what align
 checked, and the named directories as where to look.
 
-### A source directory named `build`, `dist`, `out` or `coverage` is not scanned
+### A source directory named `build`, `dist`, `out` or `coverage` is now scanned
 
-**Identified, not yet fixed** — recorded here because the advisory above will name it and you should
-know what it means.
+**This changes what align looks at, so it can surface violations you have not seen before.** They are
+not new problems — align simply was not reading those files.
 
-align always skips directories called `node_modules`, `dist`, `build`, `out`, `coverage`, `.next`,
-`.turbo`, `.cache` and similar. That match is on the directory NAME, at any depth — so a real source
-directory such as `src/build/` is skipped too, and its files are governed by no rule. Measured in
-align's own repository: `packages/core/src/build/` holds 14 source files and none of them is
-scanned.
+align skips generated directories, and it used to match them by NAME at any depth. So a real source
+directory such as `src/build/` was skipped too, and every file in it was governed by no rule.
+Measured in align's own repository: `packages/core/src/build/` holds 14 source files and **none of
+them was ever scanned**.
 
-If the new advisory names a directory that holds real source, that is this issue. There is no
-configuration switch for it today; the fix changes what align scans in every repository and is being
-sequenced deliberately rather than slipped in.
+The exclusion now distinguishes where build output actually lives:
+
+- `node_modules` and `.git` — skipped **at any depth**, unchanged.
+- `dist`, `build`, `out`, `coverage`, `.next`, `.turbo`, `.cache`, `.build`, `.history` — skipped
+  only at a **package root** (beside the `package.json` that declares the output) or at the
+  repository root.
+
+**What you will see.** If your repo has a source directory with one of those names, its files enter
+the graph for the first time: new nodes, new edges, and possibly new violations. Review them —
+`align baseline accept` what you intend to keep. A repository with no such directory sees no change
+at all.
+
+Real build output is still skipped exactly as before, so nothing generated starts being checked.
 
 ## 0.2.0
 

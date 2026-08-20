@@ -32,7 +32,7 @@ import {
 import { extractExportedSymbols } from './exports.js';
 import { TsconfigResolver } from './tsconfig-resolver.js';
 import { loadWorkspacePackages, type WorkspacePackage } from './workspace.js';
-import { DEFAULT_EXCLUDED_DIR_NAMES } from './scan-scope.js';
+import { ALWAYS_EXCLUDED_DIR_NAMES, BUILD_OUTPUT_DIR_NAMES } from './scan-scope.js';
 
 // Sentinel component for a scanned file matching no component selector — exported so `align
 // doctor`'s "unmapped files" advisory (Stage 2) can identify these nodes without duplicating the
@@ -251,6 +251,11 @@ function walkSourceFiles(
       record(relDir, { kind: 'unreadable', error: err instanceof Error ? err.message : String(err) });
       return;
     }
+    // Build output is emitted beside the manifest that declares it (LEDGER D053). Derived from the
+    // entry list already in hand — no extra `stat`. The repository root counts even without a
+    // `package.json`, since a root-level `dist/` or `coverage/` is build output regardless.
+    const isPackageRoot = relDir === '' || entries.some((e) => e.name === 'package.json' && !e.isDirectory());
+
     for (const entry of entries) {
       const relEntry = path.relative(repoRoot, path.join(absDir, entry.name)).split(path.sep).join('/');
       // BEFORE the isDirectory()/isFile() branch, deliberately. `readdirSync(…, {withFileTypes:
@@ -260,7 +265,12 @@ function walkSourceFiles(
       // symlink records (which are surprising and DO need attention). Checked this repo: its
       // `node_modules` directories are real, so this is not the universal case an earlier draft
       // claimed — but it occurs in generated and container layouts, and the fix is free.
-      if (DEFAULT_EXCLUDED_DIR_NAMES.has(entry.name)) {
+      // Two lists, not one (LEDGER D053). `node_modules`/`.git` are excluded wherever they appear.
+      // Build-output names are excluded only where build output lives — at a package root, beside
+      // the package.json that declares it, or at the repository root. A directory named `build`
+      // under `src/` is a module called build, and skipping it governed 14 of align's own source
+      // files by nothing at all.
+      if (ALWAYS_EXCLUDED_DIR_NAMES.has(entry.name) || (isPackageRoot && BUILD_OUTPUT_DIR_NAMES.has(entry.name))) {
         record(relEntry, { kind: 'default-excluded-dir', name: entry.name });
         continue;
       }
