@@ -16,8 +16,18 @@ per version. (Guided remediation is `align upgrade`'s job.)
 
 ### Cross-package edges were invisible in a built workspace (false green)
 
-**If you are on 0.2.0 or 0.1.x with a monorepo whose packages are built and installed, your green
-verdict did not mean what it looked like.** This is the most serious defect align has shipped.
+**If you are on any version before 0.2.1 with a monorepo whose packages are built and installed,
+your green verdict did not mean what it looked like.** This is the most serious defect align has
+shipped.
+
+**Every published version is affected — 0.1.1, 0.1.2, 0.1.3, 0.1.4 and 0.2.0 all carry the identical
+code.** Verified against each release tag. This is not a 0.2.0 regression, so **downgrading does not
+help**; 0.2.1 is the first release that resolves cross-package imports correctly in a built
+workspace.
+
+**How to tell whether it affected you**, without upgrading: hide one package's build output
+(`mv packages/<name>/dist /tmp/`) and re-run `align check`. If violations appear that were not there
+before, every cross-package rule was evaluating over nothing.
 
 In a workspace where a package is built (`main` points into `dist/`, and `dist/` exists) and
 installed (`node_modules/<pkg>` symlinks to it), TypeScript resolved a sibling import to
