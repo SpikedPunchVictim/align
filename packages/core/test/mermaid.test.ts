@@ -17,6 +17,10 @@ function noCyclesViolation(chain: CycleEdge[], suggestedBreakEdge: CycleEdge): V
     kind: 'no-cycles',
     chain,
     suggestedBreakEdge,
+    // The SCC this cycle came from (LEDGER D054). Derived from the chain here rather than passed
+    // in: these fixtures are all single-cycle groups, so the cycle IS the group, and hard-coding a
+    // wider group would make the mermaid fixtures assert something they are not about.
+    cycleGroup: [...new Set(chain.flatMap((e) => [e.from, e.to]))].sort(),
   };
 }
 

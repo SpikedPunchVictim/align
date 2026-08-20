@@ -46,6 +46,32 @@ could not see them. Expect the largest change in repositories with the most pack
 **There is no baseline churn from this** — no fingerprint changed. What changes is which violations
 exist to be found. Review them; `align baseline accept` what you intend to keep.
 
+### `arch.no-cycles` now says when a reported cycle is one of several in a group
+
+align reports **one cycle per strongly connected component** — a group of files that can all reach
+each other. That has always been true; what is new is that the message says so.
+
+Why it matters: if a group holds more than one cycle, fixing the reported one promotes another and
+the violation count does not move. One reporter's repository showed 12 cycles and needed 17 distinct
+fixes, with the number static across most of them — which reads as no progress when real progress
+was being made.
+
+A cycle whose group is exactly the files in the cycle — a plain two-file cycle, which is most of
+them — is unchanged. A larger group now reads:
+
+```
+Import cycle of 2 edge(s) detected: src/b3.ts -> src/b1.ts -> src/b3.ts. These 3 files form one
+mutually-dependent group (src/b1.ts, src/b2.ts, src/b3.ts); align reports one cycle per group, so
+breaking the cycle above may leave other cycles among these files.
+```
+
+`--json` and MCP consumers get the same information as a `cycleGroup` array on the violation.
+
+**No baseline churn.** A cycle violation's identity is its chain, and neither the chain nor which
+cycle is selected changed — only the rendered message and one added field. Accepted cycle entries
+keep matching.
+
+
 ### align now tells you when it is holding an edge it cannot evaluate
 
 The silence above is what let that defect survive review, a release, and align's own CI. An edge

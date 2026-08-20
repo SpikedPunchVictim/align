@@ -178,6 +178,8 @@ export const evaluateNoCycles: RuleEvaluator<ArchNoCyclesRule> = (rule, graph) =
       kind: 'no-cycles',
       chain,
       suggestedBreakEdge: breakHop,
+      // The whole SCC, sorted for a stable message — `chain` is one cycle drawn from it (D054).
+      cycleGroup: [...scc].sort(),
     });
   }
   return violations;

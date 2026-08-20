@@ -85,6 +85,19 @@ export type Violation =
       readonly kind: 'no-cycles';
       readonly chain: readonly CycleEdge[]; // per-edge detail, not just file names (ADR 004)
       readonly suggestedBreakEdge: CycleEdge;
+      /** Every file in the strongly connected component this cycle was drawn from — LEDGER D054.
+       *
+       * align reports ONE cycle per SCC, because enumerating every cycle in a component is
+       * exponential and an SCC is genuinely one architectural problem. But `chain` alone presents a
+       * representative as if it were the whole finding: a user reads the violation count as a work
+       * estimate, fixes the reported cycle, and watches a previously-hidden cycle in the same group
+       * take its place with the count unchanged. Reported from a 50-package monorepo where align
+       * said 12 and it took 17 distinct fixes.
+       *
+       * Carried as data rather than baked into the message so `--json`/MCP consumers can see the
+       * group too. NOT part of the fingerprint — the id is `['no-cycles', ruleId, ...chain]`, and
+       * adding to it would re-identify every baselined cycle entry in every repository. */
+      readonly cycleGroup: readonly RepoRelativePath[];
     })
   | (ViolationBase & {
       readonly kind: 'layers';
@@ -168,8 +181,19 @@ export function renderViolationMessage(v: Violation): string {
       const nodeNames: string[] = v.chain.map((e) => String(e.from));
       if (lastHop !== undefined) nodeNames.push(String(lastHop.to));
       const path = nodeNames.join(' -> ');
+      // Only when the group is BIGGER than the cycle shown (LEDGER D054). The overwhelming majority
+      // of cycles are two files that are the whole group, and appending group prose to every one of
+      // those is noise that teaches people to skim the message.
+      const inCycle = new Set(nodeNames);
+      const groupNote =
+        v.cycleGroup.length > inCycle.size
+          ? ` These ${v.cycleGroup.length} files form one mutually-dependent group ` +
+            `(${v.cycleGroup.join(', ')}); align reports one cycle per group, so breaking the cycle above ` +
+            'may leave other cycles among these files.'
+          : '';
       return (
         `Import cycle of ${v.chain.length} edge(s) detected: ${path}.` +
+        groupNote +
         (v.because !== undefined ? ` ${v.because}` : '')
       );
     }

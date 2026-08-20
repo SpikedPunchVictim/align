@@ -11,11 +11,11 @@
 // `migration-notes-drift.test.ts` fails if UPGRADING_MD_CONTENT_HASH below no longer matches
 // the doc's current content — that is the drift detector, not a suggestion.
 //
-// Generated at: 2026-08-20T16:47:32.567Z
+// Generated at: 2026-08-20T17:40:13.495Z
 import type { MigrationNote } from './types.js';
 
 /** sha256Hex (16-char) of UPGRADING.md's full text at compile time. */
-export const UPGRADING_MD_CONTENT_HASH = "0ab159c060a67087";
+export const UPGRADING_MD_CONTENT_HASH = "b15a7ff4a910ef5f";
 
 /** Migration notes compiled from UPGRADING.md, keyed by the exact version heading text
  * ("## <version>") it was compiled from. */
@@ -24,6 +24,10 @@ export const COMPILED_NOTES: Readonly<Record<string, readonly MigrationNote[]>> 
     {
       heading: "Cross-package edges were invisible in a built workspace (false green)",
       body: "**If you are on 0.2.0 or 0.1.x with a monorepo whose packages are built and installed, your green\nverdict did not mean what it looked like.** This is the most serious defect align has shipped.\n\nIn a workspace where a package is built (`main` points into `dist/`, and `dist/` exists) and\ninstalled (`node_modules/<pkg>` symlinks to it), TypeScript resolved a sibling import to\n`<pkg>/dist/index.d.ts`. align classified that correctly as an internal edge — and `dist/` is a\ndirectory align never scans, so the target was not in the graph. Every rule skips an edge whose\nendpoints are not both scanned, so **every cross-package dependency was invisible to every\narchitecture rule**, silently, with no advisory.\n\nThe reporter's evidence, which is the clearest way to see it: emptying 40 component allowlists to\n`canOnlyDependOn()` produced only 9 violations from 2 components — and those 2 were exactly the\npackages with no `node_modules` installed. Hiding `libs/core/dist` made 62 edges to that package\nappear; restoring it dropped them to 0.\n\n**align had this defect against itself.** 44 of 44 edges from its CLI into its core package pointed\nat `packages/core/dist/*.d.ts`, so its own layering rules could not fire.\n\n**What changed.** When TypeScript resolves an internal target into a directory align never scans,\nalign now remaps it through the workspace inventory to that package's source entry. Resolution is\notherwise unchanged — your `tsconfig` `paths` and `exports` conditions are still honoured, which is\nwhy this is a remap and not a wholesale replacement.\n\n**What you will see.** Cross-package edges appear for the first time, so rules that were silently\npassing may now report real violations. They are not new problems; they were always there and align\ncould not see them. Expect the largest change in repositories with the most packages built.\n\n**There is no baseline churn from this** — no fingerprint changed. What changes is which violations\nexist to be found. Review them; `align baseline accept` what you intend to keep.",
+    },
+    {
+      heading: "`arch.no-cycles` now says when a reported cycle is one of several in a group",
+      body: "align reports **one cycle per strongly connected component** — a group of files that can all reach\neach other. That has always been true; what is new is that the message says so.\n\nWhy it matters: if a group holds more than one cycle, fixing the reported one promotes another and\nthe violation count does not move. One reporter's repository showed 12 cycles and needed 17 distinct\nfixes, with the number static across most of them — which reads as no progress when real progress\nwas being made.\n\nA cycle whose group is exactly the files in the cycle — a plain two-file cycle, which is most of\nthem — is unchanged. A larger group now reads:\n\n```\nImport cycle of 2 edge(s) detected: src/b3.ts -> src/b1.ts -> src/b3.ts. These 3 files form one\nmutually-dependent group (src/b1.ts, src/b2.ts, src/b3.ts); align reports one cycle per group, so\nbreaking the cycle above may leave other cycles among these files.\n```\n\n`--json` and MCP consumers get the same information as a `cycleGroup` array on the violation.\n\n**No baseline churn.** A cycle violation's identity is its chain, and neither the chain nor which\ncycle is selected changed — only the rendered message and one added field. Accepted cycle entries\nkeep matching.",
     },
     {
       heading: "align now tells you when it is holding an edge it cannot evaluate",
