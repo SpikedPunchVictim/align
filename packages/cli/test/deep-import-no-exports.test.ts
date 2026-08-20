@@ -76,6 +76,25 @@ describe('a package with no exports map declares no surface [D055]', () => {
     expect(packageDeclaresExportsMap(nested, 'reactflow')).toBe(false);
   });
 
+  it('finds a dependency in the IMPORTING package\'s own node_modules (pnpm strict layout)', () => {
+    // The case that made this whole check inert in the field (LEDGER D062). pnpm does not hoist:
+    // `packages/app/node_modules/legacy` is where the dependency lives, and the repo root has no
+    // copy at all. Measured on n8n — `n8n-nodes-base` sits in
+    // `packages/@n8n/nodes-langchain/node_modules/` with no exports map, and doctor reported five
+    // deep-import advisories against it anyway because the lookup started at the repo root, found
+    // nothing, and the unknown-is-true rule kept reporting.
+    const dir = (tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-deep-surface-')));
+    const consumer = path.join(dir, 'packages', 'app');
+    const dep = path.join(consumer, 'node_modules', 'legacy');
+    fs.mkdirSync(dep, { recursive: true });
+    fs.writeFileSync(path.join(dep, 'package.json'), JSON.stringify({ name: 'legacy', main: 'dist/index.js' }), 'utf8');
+
+    // From the repo root there is nothing to find — this is what the bug looked like.
+    expect(packageDeclaresExportsMap(dir, 'legacy')).toBe(true);
+    // From the importing file's directory it resolves, the way Node itself would.
+    expect(packageDeclaresExportsMap(path.join(consumer, 'src'), 'legacy')).toBe(false);
+  });
+
   it('reports TRUE when the package cannot be found, so an unlocatable dep keeps reporting [S-04]', () => {
     // The direction matters and is the opposite of what "not found" suggests. This predicate GATES a
     // false-positive filter: answering `false` for a package we could not read would silently
@@ -135,6 +154,35 @@ describe('doctor consults the surface check [D055]', () => {
 
   it('does not report a deep import into a package with no exports map', async () => {
     const dir = repoImporting({ name: 'legacy', version: '1.0.0', main: 'dist/index.js' });
+
+    expect(await deepImportAdvisoryCount(dir)).toBe(0);
+  });
+
+  it('resolves the dependency from the IMPORTING file, not the repo root (pnpm strict layout)', async () => {
+    // LEDGER D062 — the wiring defect the unit tests above structurally could not catch, because
+    // `packageDeclaresExportsMap` was correct all along and `doctor` handed it `rootDir`.
+    //
+    // pnpm does not hoist: the dependency lives in the importing package's own node_modules and the
+    // repo root has no copy. Starting the walk at the root finds nothing, the unknown-is-true rule
+    // keeps reporting, and the D055 filter is INERT for the layout align targets most. Measured on
+    // n8n: `n8n-nodes-base` has no exports map, sits in
+    // `packages/@n8n/nodes-langchain/node_modules/`, and doctor emitted five advisories against it.
+    const dir = (tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'align-doctor-pnpm-')));
+    const app = path.join(dir, 'packages', 'app');
+    fs.mkdirSync(path.join(app, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(app, 'node_modules', 'legacy', 'dist'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'node_modules', '@spikedpunch'), { recursive: true });
+    fs.symlinkSync(path.join(repoRoot, 'packages', 'core'), path.join(dir, 'node_modules', '@spikedpunch', 'align-core'), 'dir');
+    fs.writeFileSync(path.join(app, 'src/index.ts'), "import { x } from 'legacy/dist/internal';\nexport const y = x;\n", 'utf8');
+    fs.writeFileSync(path.join(app, 'node_modules/legacy/dist/internal.js'), 'export const x = 1;\n', 'utf8');
+    // No exports map, and NO copy at the repo root — only inside the consuming package.
+    fs.writeFileSync(path.join(app, 'node_modules/legacy/package.json'), JSON.stringify({ name: 'legacy', main: 'dist/index.js' }), 'utf8');
+    fs.writeFileSync(path.join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext' } }), 'utf8');
+    fs.writeFileSync(
+      path.join(dir, 'align.config.ts'),
+      "import { defineProject } from '@spikedpunch/align-core/dsl';\nexport default defineProject({ components: { app: 'packages/app/**' } });\n",
+      'utf8',
+    );
 
     expect(await deepImportAdvisoryCount(dir)).toBe(0);
   });

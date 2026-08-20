@@ -19,7 +19,13 @@ import { ensureDir, exists, removeDir, cloneDir, writeJson, sha256String } from 
 function installFingerprint(project) {
   const npmVersion = run('npm', ['--version']).stdout.trim();
   const installCmdStr = `${project.installCmd.command} ${project.installCmd.args.join(' ')}`;
-  return sha256String(JSON.stringify({ installCmdStr, nodeVersion: process.version, npmVersion })).slice(0, 12);
+  // `buildCmd` joins the key for exactly the reason F11 gave for `installCmd` (LEDGER D060):
+  // adding or changing a build step changes what the cached checkout CONTAINS — the presence of
+  // `dist/` is the single property that separates a corpus which can reproduce D052 from one that
+  // cannot. Omitting it would let a warm cache keep serving an UNBUILT tree after a project gained
+  // a build step, which is the same silent-stale-cache failure F11 exists to prevent.
+  const buildCmdStr = project.buildCmd === undefined ? '' : `${project.buildCmd.command} ${project.buildCmd.args.join(' ')}`;
+  return sha256String(JSON.stringify({ installCmdStr, buildCmdStr, nodeVersion: process.version, npmVersion })).slice(0, 12);
 }
 
 function baseDir(cacheRoot, project) {
@@ -85,6 +91,21 @@ export function prepareProjectBase(project, cacheRoot, log = () => {}) {
     throw new Error(
       `${project.installCmd.command} ${project.installCmd.args.join(' ')} failed (exit ${install.exitCode}):\n${install.stderr.slice(-4000)}`,
     );
+  }
+
+  // OPTIONAL build step (LEDGER D060). Without it the corpus is structurally incapable of holding
+  // the shape D052 lived in: a workspace whose packages are BUILT, so `main` points at a real
+  // `dist/`, so `ts.resolveModuleName` succeeds and lands outside the scan. Measured 2026-08-20 on
+  // the nest base — 0 built dist directories, 0 workspace symlinks — which is why 28/28 green said
+  // nothing about that class. A project that declares no `buildCmd` behaves exactly as before.
+  if (project.buildCmd !== undefined) {
+    log(`[project] building: ${project.buildCmd.command} ${project.buildCmd.args.join(' ')}`);
+    const build = run(project.buildCmd.command, project.buildCmd.args, { cwd: dir, timeoutMs: 30 * 60 * 1000 });
+    if (build.exitCode !== 0) {
+      throw new Error(
+        `${project.buildCmd.command} ${project.buildCmd.args.join(' ')} failed (exit ${build.exitCode}):\n${build.stderr.slice(-4000)}`,
+      );
+    }
   }
 
   writeJson(marker, { sha: head, readyAt: new Date().toISOString() });

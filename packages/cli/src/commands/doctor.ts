@@ -293,16 +293,30 @@ async function collectDoctorReport(rootDir: string, program: Command | undefined
       // claim would be false by construction (LEDGER D055). Memoized per package name: one manifest
       // read per distinct dependency, not per hit — a repo importing forty subpaths of one package
       // reads its manifest once.
+      //
+      // Resolved from the IMPORTING FILE's directory, never from `rootDir` (LEDGER D062). pnpm does
+      // not hoist: a dependency lives in the consuming package's own `node_modules`, and starting
+      // the walk at the repo root finds nothing — which the unknown-is-true rule then turns into
+      // "keep reporting", making this filter INERT for the layout align targets most. Measured on
+      // n8n: `n8n-nodes-base` has no exports map, sits in
+      // `packages/@n8n/nodes-langchain/node_modules/`, and doctor reported five deep-import
+      // advisories against it anyway.
+      //
+      // Memoized per (importing directory, package) rather than per package: under pnpm the same
+      // name can resolve to different installs in different packages, so a per-name cache would let
+      // the first lookup answer for all of them.
       const declaresSurface = new Map<string, boolean>();
-      const hasSurface = (pkg: string): boolean => {
-        const cached = declaresSurface.get(pkg);
+      const hasSurface = (fromFile: string, pkg: string): boolean => {
+        const fromDir = path.dirname(path.join(rootDir, fromFile));
+        const key = `${fromDir}\u0000${pkg}`;
+        const cached = declaresSurface.get(key);
         if (cached !== undefined) return cached;
-        const answer = packageDeclaresExportsMap(rootDir, pkg);
-        declaresSurface.set(pkg, answer);
+        const answer = packageDeclaresExportsMap(fromDir, pkg);
+        declaresSurface.set(key, answer);
         return answer;
       };
       for (const hit of computeDeepImportHits(graph, { allowlist: deepImportAllowlist })) {
-        if (!hasSurface(hit.targetPackage)) continue;
+        if (!hasSurface(hit.from, hit.targetPackage)) continue;
         const partialNote = deepImportsIncomplete ? ' (results partial — dependencies not fully installed)' : '';
         advisories.push({
           kind: 'deep-import',
