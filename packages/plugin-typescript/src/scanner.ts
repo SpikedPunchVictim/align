@@ -32,6 +32,7 @@ import {
 import { extractExportedSymbols } from './exports.js';
 import { TsconfigResolver } from './tsconfig-resolver.js';
 import { loadWorkspacePackages, type WorkspacePackage } from './workspace.js';
+import { DEFAULT_EXCLUDED_DIR_NAMES } from './scan-scope.js';
 
 // Sentinel component for a scanned file matching no component selector — exported so `align
 // doctor`'s "unmapped files" advisory (Stage 2) can identify these nodes without duplicating the
@@ -44,19 +45,6 @@ export const UNMAPPED_COMPONENT = toComponentName('__unmapped__');
 // them identically, and TS's own module resolution already understands the extension-specific
 // import/require semantics (NodeNext), so no separate parse or resolution path is needed.
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts']);
-const DEFAULT_EXCLUDED_DIR_NAMES = new Set([
-  'node_modules',
-  'dist',
-  'build',
-  '.build',
-  '.history',
-  '.git',
-  '.next',
-  '.turbo',
-  '.cache',
-  'coverage',
-  'out',
-]);
 const ASSET_EXTENSIONS = new Set([
   '.css',
   '.scss',

@@ -11,6 +11,7 @@ import type { Advisory, CheckRun, GateResult } from './gates/types.js';
 import {
   buildBaselineGrowthAdvisories,
   buildScanBlindSpotAdvisories,
+  buildUnevaluatableEdgeAdvisories,
   buildUncertaintyAdvisories,
   buildUngroundedExternalSelectorAdvisories,
 } from './gates/advisories.js';
@@ -153,6 +154,7 @@ export class GateOrchestrator {
         advisories: [
           ...buildUncertaintyAdvisories(graph.uncertain),
           ...buildScanBlindSpotAdvisories(graph.blindSpots),
+          ...buildUnevaluatableEdgeAdvisories(graph),
           ...movedAdvisories(securityMoves),
         ],
         scannedAt,
@@ -184,6 +186,7 @@ export class GateOrchestrator {
         advisories: [
           ...buildUncertaintyAdvisories(graph.uncertain),
           ...buildScanBlindSpotAdvisories(graph.blindSpots),
+          ...buildUnevaluatableEdgeAdvisories(graph),
           ...movedAdvisories(securityMoves),
         ],
         scannedAt,
@@ -227,6 +230,9 @@ export class GateOrchestrator {
     const advisories: Advisory[] = [
       ...buildUncertaintyAdvisories(graph.uncertain),
       ...buildScanBlindSpotAdvisories([...graph.blindSpots, ...manifestBlindSpots]),
+      // Every surface that reports blind spots must report unevaluatable edges too — they are the
+      // same class of hole, one at directory grain and one at edge grain (LEDGER D052).
+      ...buildUnevaluatableEdgeAdvisories(graph),
       ...movedAdvisories([...moves, ...securityMoves]),
       // ADR 017 Part A: computed after evaluation succeeds (same "trustworthy ruleset" precondition
       // as `ungroundedComponents` below) — an ungrounded external selector is vacuously green, not

@@ -1,4 +1,4 @@
-import type { ScanBlindSpot, ScanBlindSpotReason, UncertaintyMarker, UncertaintyReason } from '../types/graph.js';
+import type { DependencyGraph, ScanBlindSpot, ScanBlindSpotReason, UncertaintyMarker, UncertaintyReason } from '../types/graph.js';
 import type { ExternalPackageNode } from '../types/graph.js';
 import type { RepoRelativePath } from '../types/branded.js';
 import type { RuleIR } from '../types/ir.js';
@@ -268,6 +268,55 @@ function labelBlindSpot(spot: ScanBlindSpot): string {
  * See `components/registry.ts`'s `blindSpotsMatchingSelector` for the sharper, per-component
  * diagnosis this advisory alone cannot give — it fires once per scan, not once per component.
  */
+/**
+ * Edges the graph contains but no rule can evaluate — LEDGER D052's safety net.
+ *
+ * **Why this exists separately from the defect it shipped with.** Every evaluator opens its loop
+ * with `if (fromNode === undefined || toNode === undefined) continue`, so an edge whose target was
+ * never scanned is skipped by every rule, silently. D052 reached a user as a green verdict on a
+ * repository with forty emptied allowlists precisely because of that silence: a resolution bug put
+ * cross-package edges into `dist/`, the walk had never scanned `dist/`, and nothing said so. The
+ * resolution bug was the cause; the silence is what let it survive review, a release, and align's
+ * own self-dogfood.
+ *
+ * So the rule this encodes is not about `dist` at all: **align must never hold an edge it cannot
+ * evaluate without saying so.** Any future resolution quirk that lands outside the scan reports
+ * here instead of vanishing.
+ *
+ * Measured on align's own repository the day it was written: 820 such edges, bucketing entirely
+ * into `dist` (818) and `build` (2) — the second being D053, a separate defect this advisory found
+ * rather than one it was written for.
+ *
+ * Internal edges only. `externalEdges` are a disjoint collection resolved against `externalNodes`;
+ * folding them in would fire on every repository that imports anything from npm.
+ */
+export function buildUnevaluatableEdgeAdvisories(graph: DependencyGraph): Advisory[] {
+  const nodeFiles = new Set(graph.nodes.map((n) => n.file));
+  const unevaluatable = graph.edges.filter((e) => !nodeFiles.has(e.to));
+  if (unevaluatable.length === 0) return [];
+
+  const targets = [...new Set(unevaluatable.map((e) => e.to))];
+  // The directory that most likely explains it, named because it is where the fix goes. Derived
+  // from the targets themselves rather than from a list of known-excluded names — this advisory
+  // must keep working for a cause nobody has thought of yet.
+  const dirs = [...new Set(targets.map((t) => t.split('/').slice(0, -1).join('/')).filter((d) => d !== ''))];
+  const sample = targets.slice(0, 5);
+
+  return [
+    {
+      kind: 'unevaluatable-edges',
+      message:
+        `${unevaluatable.length} import edge(s) point at files this scan did not include, so NO RULE can ` +
+        `evaluate them — a dependency routed through one of these is invisible to every architecture rule, ` +
+        `and a green verdict does not cover it. Affected target(s): ${sample.join(', ')}` +
+        `${targets.length > sample.length ? `, +${targets.length - sample.length} more` : ''}. ` +
+        `Most often the target directory is excluded from the scan (align always skips \`node_modules\`, ` +
+        `\`dist\`, \`build\`, \`out\`, \`coverage\` and similar, at any depth) — if one of ` +
+        `${dirs.slice(0, 3).join(', ')} holds real source, that is the thing to fix.`,
+    },
+  ];
+}
+
 export function buildScanBlindSpotAdvisories(blindSpots: readonly ScanBlindSpot[]): Advisory[] {
   const byKind = new Map<ScanBlindSpotReason['kind'], ScanBlindSpot[]>();
   for (const spot of blindSpots) {

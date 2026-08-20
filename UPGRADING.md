@@ -12,6 +12,71 @@ misnamed or out-of-place heading as a build failure, not a section it can silent
 This document does not tell you what commands to run. It explains what changed and why, factually,
 per version. (Guided remediation is `align upgrade`'s job.)
 
+## 0.2.1
+
+### Cross-package edges were invisible in a built workspace (false green)
+
+**If you are on 0.2.0 or 0.1.x with a monorepo whose packages are built and installed, your green
+verdict did not mean what it looked like.** This is the most serious defect align has shipped.
+
+In a workspace where a package is built (`main` points into `dist/`, and `dist/` exists) and
+installed (`node_modules/<pkg>` symlinks to it), TypeScript resolved a sibling import to
+`<pkg>/dist/index.d.ts`. align classified that correctly as an internal edge — and `dist/` is a
+directory align never scans, so the target was not in the graph. Every rule skips an edge whose
+endpoints are not both scanned, so **every cross-package dependency was invisible to every
+architecture rule**, silently, with no advisory.
+
+The reporter's evidence, which is the clearest way to see it: emptying 40 component allowlists to
+`canOnlyDependOn()` produced only 9 violations from 2 components — and those 2 were exactly the
+packages with no `node_modules` installed. Hiding `libs/core/dist` made 62 edges to that package
+appear; restoring it dropped them to 0.
+
+**align had this defect against itself.** 44 of 44 edges from its CLI into its core package pointed
+at `packages/core/dist/*.d.ts`, so its own layering rules could not fire.
+
+**What changed.** When TypeScript resolves an internal target into a directory align never scans,
+align now remaps it through the workspace inventory to that package's source entry. Resolution is
+otherwise unchanged — your `tsconfig` `paths` and `exports` conditions are still honoured, which is
+why this is a remap and not a wholesale replacement.
+
+**What you will see.** Cross-package edges appear for the first time, so rules that were silently
+passing may now report real violations. They are not new problems; they were always there and align
+could not see them. Expect the largest change in repositories with the most packages built.
+
+**There is no baseline churn from this** — no fingerprint changed. What changes is which violations
+exist to be found. Review them; `align baseline accept` what you intend to keep.
+
+### align now tells you when it is holding an edge it cannot evaluate
+
+The silence above is what let that defect survive review, a release, and align's own CI. An edge
+whose target was never scanned was skipped by every rule with nothing printed.
+
+`align check` now reports them:
+
+```
+advisory (unevaluatable-edges): 5 import edge(s) point at files this scan did not include, so NO
+RULE can evaluate them — a dependency routed through one of these is invisible to every
+architecture rule, and a green verdict does not cover it. Affected target(s): ...
+```
+
+Advisory only — it does not change your verdict. Treat a non-zero count as a hole in what align
+checked, and the named directories as where to look.
+
+### A source directory named `build`, `dist`, `out` or `coverage` is not scanned
+
+**Identified, not yet fixed** — recorded here because the advisory above will name it and you should
+know what it means.
+
+align always skips directories called `node_modules`, `dist`, `build`, `out`, `coverage`, `.next`,
+`.turbo`, `.cache` and similar. That match is on the directory NAME, at any depth — so a real source
+directory such as `src/build/` is skipped too, and its files are governed by no rule. Measured in
+align's own repository: `packages/core/src/build/` holds 14 source files and none of them is
+scanned.
+
+If the new advisory names a directory that holds real source, that is this issue. There is no
+configuration switch for it today; the fix changes what align scans in every repository and is being
+sequenced deliberately rather than slipped in.
+
 ## 0.2.0
 
 ### Why violation fingerprints changed

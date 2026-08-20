@@ -11,15 +11,29 @@
 // `migration-notes-drift.test.ts` fails if UPGRADING_MD_CONTENT_HASH below no longer matches
 // the doc's current content — that is the drift detector, not a suggestion.
 //
-// Generated at: 2026-08-20T16:16:27.464Z
+// Generated at: 2026-08-20T16:47:32.567Z
 import type { MigrationNote } from './types.js';
 
 /** sha256Hex (16-char) of UPGRADING.md's full text at compile time. */
-export const UPGRADING_MD_CONTENT_HASH = "66fe9fb5ab53f515";
+export const UPGRADING_MD_CONTENT_HASH = "0ab159c060a67087";
 
 /** Migration notes compiled from UPGRADING.md, keyed by the exact version heading text
  * ("## <version>") it was compiled from. */
 export const COMPILED_NOTES: Readonly<Record<string, readonly MigrationNote[]>> = {
+  "0.2.1": [
+    {
+      heading: "Cross-package edges were invisible in a built workspace (false green)",
+      body: "**If you are on 0.2.0 or 0.1.x with a monorepo whose packages are built and installed, your green\nverdict did not mean what it looked like.** This is the most serious defect align has shipped.\n\nIn a workspace where a package is built (`main` points into `dist/`, and `dist/` exists) and\ninstalled (`node_modules/<pkg>` symlinks to it), TypeScript resolved a sibling import to\n`<pkg>/dist/index.d.ts`. align classified that correctly as an internal edge — and `dist/` is a\ndirectory align never scans, so the target was not in the graph. Every rule skips an edge whose\nendpoints are not both scanned, so **every cross-package dependency was invisible to every\narchitecture rule**, silently, with no advisory.\n\nThe reporter's evidence, which is the clearest way to see it: emptying 40 component allowlists to\n`canOnlyDependOn()` produced only 9 violations from 2 components — and those 2 were exactly the\npackages with no `node_modules` installed. Hiding `libs/core/dist` made 62 edges to that package\nappear; restoring it dropped them to 0.\n\n**align had this defect against itself.** 44 of 44 edges from its CLI into its core package pointed\nat `packages/core/dist/*.d.ts`, so its own layering rules could not fire.\n\n**What changed.** When TypeScript resolves an internal target into a directory align never scans,\nalign now remaps it through the workspace inventory to that package's source entry. Resolution is\notherwise unchanged — your `tsconfig` `paths` and `exports` conditions are still honoured, which is\nwhy this is a remap and not a wholesale replacement.\n\n**What you will see.** Cross-package edges appear for the first time, so rules that were silently\npassing may now report real violations. They are not new problems; they were always there and align\ncould not see them. Expect the largest change in repositories with the most packages built.\n\n**There is no baseline churn from this** — no fingerprint changed. What changes is which violations\nexist to be found. Review them; `align baseline accept` what you intend to keep.",
+    },
+    {
+      heading: "align now tells you when it is holding an edge it cannot evaluate",
+      body: "The silence above is what let that defect survive review, a release, and align's own CI. An edge\nwhose target was never scanned was skipped by every rule with nothing printed.\n\n`align check` now reports them:\n\n```\nadvisory (unevaluatable-edges): 5 import edge(s) point at files this scan did not include, so NO\nRULE can evaluate them — a dependency routed through one of these is invisible to every\narchitecture rule, and a green verdict does not cover it. Affected target(s): ...\n```\n\nAdvisory only — it does not change your verdict. Treat a non-zero count as a hole in what align\nchecked, and the named directories as where to look.",
+    },
+    {
+      heading: "A source directory named `build`, `dist`, `out` or `coverage` is not scanned",
+      body: "**Identified, not yet fixed** — recorded here because the advisory above will name it and you should\nknow what it means.\n\nalign always skips directories called `node_modules`, `dist`, `build`, `out`, `coverage`, `.next`,\n`.turbo`, `.cache` and similar. That match is on the directory NAME, at any depth — so a real source\ndirectory such as `src/build/` is skipped too, and its files are governed by no rule. Measured in\nalign's own repository: `packages/core/src/build/` holds 14 source files and none of them is\nscanned.\n\nIf the new advisory names a directory that holds real source, that is this issue. There is no\nconfiguration switch for it today; the fix changes what align scans in every repository and is being\nsequenced deliberately rather than slipped in.",
+    },
+  ],
   "0.2.0": [
     {
       heading: "Why violation fingerprints changed",

@@ -8,6 +8,7 @@ import { builtinModules } from 'node:module';
 import * as path from 'node:path';
 import ts from 'typescript';
 import { resolveWorkspaceSpecifier, type WorkspacePackage } from './workspace.js';
+import { DEFAULT_EXCLUDED_DIR_NAMES } from './scan-scope.js';
 
 const BUILTINS = new Set(builtinModules);
 
@@ -70,6 +71,13 @@ export class TsconfigResolver {
     const inNodeModules = rel.split(path.sep).includes('node_modules');
     if (!insideRepo || inNodeModules) {
       return { kind: 'external', packageName: packageNameFromSpecifier(specifier), isBuiltin: false };
+    }
+    // OPTION A: TS stays authoritative, EXCEPT when its internal answer lands somewhere the walk
+    // will never turn into a node — a default-excluded directory (`dist`, `build`, ...). Remap
+    // through the workspace inventory to the package's source entry.
+    if (rel.split(path.sep).some((seg) => DEFAULT_EXCLUDED_DIR_NAMES.has(seg))) {
+      const remapped = resolveWorkspaceSpecifier(specifier, this.workspacePackages, this.repoRoot);
+      if (remapped !== undefined) return { kind: 'internal', absolutePath: remapped };
     }
     return { kind: 'internal', absolutePath: realPath };
   }
