@@ -79,6 +79,13 @@ const archNoDependencySchema = z.object({
   id: ruleId,
   from: componentRef,
   to: dependencyTargetSchema,
+  /** LEDGER D056. OPTIONAL, and `undefined` means `true` — the opposite of `arch.no-cycles`'
+   * required `includeTypeOnly`, deliberately. A type-only import is still a compile-time coupling
+   * across an architectural boundary, so layering counts it by default; cycles exclude it by
+   * default, which is what makes `import type` a legitimate cycle fix. Optional rather than
+   * required because a required field would fail validation on every `.align/ruleset-ir.json` and
+   * `.align/generated-rules.json` written by an earlier align. */
+  includeTypeOnly: z.boolean().optional(),
   provenance: ruleProvenanceSchema,
 });
 
@@ -93,6 +100,9 @@ const archNoCyclesSchema = z.object({
 const archLayersSchema = z.object({
   kind: z.literal('arch.layers'),
   id: ruleId,
+  /** See `arch.no-dependency`'s field of the same name (LEDGER D056): optional, undefined means
+   * true, and the internal arms of both rules share the one filter. */
+  includeTypeOnly: z.boolean().optional(),
   layers: z
     .array(
       z.object({

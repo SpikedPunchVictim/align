@@ -15,7 +15,7 @@ function violation(ruleId: string, n: number): Violation {
     range: { startLine: n, endLine: n },
     snippet: `import x from './b${n}'`,
     fixHint: { code: 'manual-review' },
-    kind: 'no-dependency',
+    kind: 'no-dependency', edgeKind: 'import',
     fromFile: toRepoRelativePath(`a${n}.ts`),
     toFile: toRepoRelativePath(`b${n}.ts`),
     fromComponent: toComponentName('x'),

@@ -13,7 +13,7 @@ function noDependencyViolation(id: string, file = 'a.ts'): Violation {
     range: { startLine: 1, endLine: 1 },
     snippet: 'import x',
     fixHint: { code: 'manual-review' },
-    kind: 'no-dependency',
+    kind: 'no-dependency', edgeKind: 'import',
     fromFile: toRepoRelativePath(file),
     toFile: toRepoRelativePath('b.ts'),
     fromComponent: toComponentName('api'),

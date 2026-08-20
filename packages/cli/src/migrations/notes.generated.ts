@@ -11,11 +11,11 @@
 // `migration-notes-drift.test.ts` fails if UPGRADING_MD_CONTENT_HASH below no longer matches
 // the doc's current content — that is the drift detector, not a suggestion.
 //
-// Generated at: 2026-08-20T17:50:00.697Z
+// Generated at: 2026-08-20T18:10:09.779Z
 import type { MigrationNote } from './types.js';
 
 /** sha256Hex (16-char) of UPGRADING.md's full text at compile time. */
-export const UPGRADING_MD_CONTENT_HASH = "7c63754dbb39f6c1";
+export const UPGRADING_MD_CONTENT_HASH = "edbc0a7a728ff619";
 
 /** Migration notes compiled from UPGRADING.md, keyed by the exact version heading text
  * ("## <version>") it was compiled from. */
@@ -32,6 +32,10 @@ export const COMPILED_NOTES: Readonly<Record<string, readonly MigrationNote[]>> 
     {
       heading: "`align doctor`'s deep-import advisory stops making two false claims",
       body: "Two false-positive classes are gone. Both were reported against one specifier —\n`import 'reactflow/dist/style.css'`, which produced *\"reaches past reactflow's public surface via\n'dist'\"*.\n\n**Assets are no longer deep imports.** A stylesheet has no public surface to reach past. align's\nscanner already classified it as an asset; the advisory was discarding that classification before\nasking the question it answers.\n\n**Neither is a package that declares no `exports` map.** Without one, every subpath is public under\nNode resolution — `reactflow/dist/style.css` is that package's documented stylesheet path — so there\nis no boundary the import could violate. align now checks whether the target package declares a\nsurface at all before claiming you reached past it.\n\nA package that *does* declare `exports` is still reported exactly as before: that is the case the\nadvisory exists for. And if align cannot read the target package's manifest — not installed,\nunreadable — it keeps reporting, so this never silently suppresses the advisory on a repository\nwithout `node_modules`.\n\nAdvisory-only, so no verdict or baseline effect. Expect fewer `deep-import` lines from `align\ndoctor`, all of them removals of claims that were wrong.",
+    },
+    {
+      heading: "`import type` edges: layering still counts them, and now says so",
+      body: "Two of align's rules have always disagreed about `import type`, and neither said so:\n\n- `arch.no-cycles` **excludes** type-only edges by default. This is why `import type` is a legitimate\n  way to break an import cycle.\n- `arch.layers` / `arch.no-dependency` **count** them, with no way to opt out.\n\nBoth defaults are defensible — a type-only import erases at runtime but is still a compile-time\ncoupling across an architectural boundary — but hitting them in the same session, as one reporter\ndid, looks like align contradicting itself. Nothing in either message mentioned the edge kind.\n\n**The defaults are unchanged.** A type-only import still violates layering, so no existing rule\nbecomes weaker and no baseline churns.\n\n**The message now explains itself:**\n\n```\nsrc/a/index.ts (layer 'a') imports src/b/index.ts (layer 'b') via './b' at line 1, which rule\n'arch.layers:a' forbids. The import is type-only (erased at runtime), which\narch.layers/arch.no-dependency count by default and arch.no-cycles does not; pass\nincludeTypeOnly: false on the rule to exclude it.\n```\n\n**And there is now an opt-out**, on the layer rather than the verb:\n\n```ts\nc.arch.layer(c.ui, { includeTypeOnly: false }).canOnlyDependOn(c.core)\n```\n\nIt applies to every rule that layer builds — both `canOnlyDependOn` and `cannotDependOn`.\n`--json` and MCP consumers get the edge kind as `edgeKind` on the violation.",
     },
     {
       heading: "align now tells you when it is holding an edge it cannot evaluate",

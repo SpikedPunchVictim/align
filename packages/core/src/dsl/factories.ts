@@ -97,6 +97,11 @@ export function ruleBuilder(makeBase: (provenance: RuleProvenance) => readonly R
   return self;
 }
 
+/** Options shared by every rule a `layer(...)` builds — see `ArchFactory.layer` (LEDGER D056). */
+export interface LayerOptions {
+  readonly includeTypeOnly?: boolean;
+}
+
 export interface LayerRuleBuilder {
   /** dependencies outside this allowlist are violations. Accepts `external(...)` selectors
    * alongside components (ADR 017 Part A) — naming >=1 external selector opts this layer's
@@ -126,7 +131,13 @@ export interface NoCyclesOptions {
 }
 
 export interface ArchFactory {
-  layer(token: ComponentToken): LayerRuleBuilder;
+  /** `options.includeTypeOnly: false` excludes `import type` edges from every rule this layer
+   * builds — LEDGER D056. Defaults to including them, which is the opposite of `noCycles`' default
+   * and is deliberate: a type-only import is a compile-time coupling across a boundary even though
+   * it erases at runtime. The option exists because a user hit both defaults in one session — align
+   * accepted `import type` as the fix for a cycle and then failed the same edge on layering — and
+   * had no way to reconcile the two. */
+  layer(token: ComponentToken, options?: LayerOptions): LayerRuleBuilder;
   component(token: ComponentToken): ComponentRuleBuilder;
   /** Not in ADR 002's illustrative vocabulary table, but `arch.no-cycles` is a v1 IR rule kind
    * with no other documented authoring path — added following the same negation-free, positive
@@ -225,7 +236,11 @@ export function makeSecurityFactory(): SecurityFactory {
 
 export function makeArchFactory(allComponents: readonly ComponentToken[]): ArchFactory {
   return {
-    layer(token: ComponentToken): LayerRuleBuilder {
+    layer(token: ComponentToken, options?: LayerOptions): LayerRuleBuilder {
+      // Spread rather than assigned: `exactOptionalPropertyTypes` forbids an explicit `undefined`,
+      // and an IR that carries the key only when the author set it keeps `export-ir` output and
+      // `generated-rules.json` byte-identical for every ruleset that does not use the option.
+      const typeOnly = options?.includeTypeOnly === undefined ? {} : { includeTypeOnly: options.includeTypeOnly };
       return {
         canOnlyDependOn(...refs: readonly DependencyRefToken[]): RuleBuilder {
           return ruleBuilder((provenance) => {
@@ -233,6 +248,7 @@ export function makeArchFactory(allComponents: readonly ComponentToken[]): ArchF
               kind: 'arch.layers',
               id: toRuleId(`arch.layers:${token.name}`),
               layers: [{ layer: token.name, canDependOn: refs.map(toDependencyTarget) }],
+              ...typeOnly,
               provenance,
             };
             return [rule];
@@ -247,6 +263,7 @@ export function makeArchFactory(allComponents: readonly ComponentToken[]): ArchF
                 id: toRuleId(`arch.no-dependency:${token.name}->${isExternal ? `external:${ref.pattern}` : ref.name}`),
                 from: token.name,
                 to: toDependencyTarget(ref),
+                ...typeOnly,
                 provenance,
               };
             }),

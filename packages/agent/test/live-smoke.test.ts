@@ -25,7 +25,7 @@ describe.skipIf(!shouldRun)('AnthropicFixProvider — live smoke (ALIGN_LIVE_SMO
           range: { startLine: 1, endLine: 1 },
           snippet: `import { forbidden } from '../other/module.js';`,
           fixHint: { code: 'remove-import', file, line: 1 },
-          kind: 'no-dependency',
+          kind: 'no-dependency', edgeKind: 'import',
           fromFile: file,
           toFile: toRepoRelativePath('src/other/module.ts'),
           fromComponent: 'a' as never,

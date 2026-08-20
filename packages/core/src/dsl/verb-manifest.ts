@@ -28,11 +28,11 @@ export interface DslVerbEntry {
 // code-review miss like any other stale comment.
 const VERB_DESCRIPTIONS: Record<string, Omit<DslVerbEntry, 'path'>> = {
   'arch.layer(x).canOnlyDependOn(...refs)': {
-    description: 'x may depend only on the listed components — any other outgoing dependency from x is a violation.',
+    description: 'x may depend only on the listed targets — any other outgoing dependency from x is a violation. A target is a component OR an external selector, e.g. canOnlyDependOn(c.core, external("react")). Pass { includeTypeOnly: false } to arch.layer(x) to exclude `import type` edges, which are counted by default.',
     producesRuleKind: ['arch.layers'],
   },
   'arch.layer(x).cannotDependOn(...refs)': {
-    description: 'x must not depend on any of the listed components — one arch.no-dependency rule per listed component.',
+    description: 'x must not depend on any of the listed targets — one arch.no-dependency rule per target. A target is a component OR an external selector, e.g. cannotDependOn(external("node:*")) to keep a browser bundle free of node builtins. Pass { includeTypeOnly: false } to arch.layer(x) to exclude `import type` edges, which are counted by default.',
     producesRuleKind: ['arch.no-dependency'],
   },
   'arch.component(x).isIsolated()': {

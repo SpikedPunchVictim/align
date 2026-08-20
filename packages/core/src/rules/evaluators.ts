@@ -35,6 +35,23 @@ export function becauseField(because: string | undefined): { readonly because: s
   return because === undefined ? {} : { because };
 }
 
+/**
+ * The type-only filter for the INTERNAL arms of `arch.no-dependency` and `arch.layers` — LEDGER D056.
+ *
+ * `undefined` means INCLUDE, which is the opposite of `arch.no-cycles`' default and is the whole
+ * point. A user reported hitting both directions in one session: align accepts `import type` as the
+ * fix for a cycle (they used it eleven times) and the same erased edge is a hard layering violation.
+ * Both defaults are defensible — a type-only import genuinely is a compile-time coupling across a
+ * boundary, and genuinely does not participate in a runtime cycle — so the defect was that only
+ * three of the four arms had the option, and no message said which kind of edge it had caught.
+ *
+ * Flipping this default to match no-cycles would silently stop enforcing layering across every
+ * type-only edge in every repository using align, and would look like a fix.
+ */
+function excludedAsTypeOnly(edge: { readonly kind: EdgeKind }, includeTypeOnly: boolean | undefined): boolean {
+  return edge.kind === 'type-only' && includeTypeOnly === false;
+}
+
 export const evaluateNoDependency: RuleEvaluator<ArchNoDependencyRule> = (rule, graph) => {
   // ADR 017 Part A: `to` widened to `ComponentRef | ExternalSelector`. An external target is
   // matched against `graph.externalEdges` only — `graph.nodes`/`graph.edges` (the internal-only
@@ -48,6 +65,7 @@ export const evaluateNoDependency: RuleEvaluator<ArchNoDependencyRule> = (rule, 
   const nodeByFile = new Map(graph.nodes.map((n) => [n.file, n]));
   const violations: Violation[] = [];
   for (const edge of graph.edges) {
+    if (excludedAsTypeOnly(edge, rule.includeTypeOnly)) continue;
     const fromNode = nodeByFile.get(edge.from);
     const toNode = nodeByFile.get(edge.to);
     if (fromNode === undefined || toNode === undefined) continue;
@@ -65,6 +83,7 @@ export const evaluateNoDependency: RuleEvaluator<ArchNoDependencyRule> = (rule, 
       fixHint: { code: 'remove-import', file: edge.from, line: edge.line },
       ...becauseField(rule.provenance.because),
       kind: 'no-dependency',
+      edgeKind: edge.kind,
       fromFile: edge.from,
       toFile: edge.to,
       fromComponent: fromNode.component,
@@ -197,6 +216,7 @@ export const evaluateLayers: RuleEvaluator<ArchLayersRule> = (rule, graph) => {
     const externalSelectors = layerDef.canDependOn.filter((entry): entry is ExternalSelector => typeof entry !== 'string');
 
     for (const edge of graph.edges) {
+      if (excludedAsTypeOnly(edge, rule.includeTypeOnly)) continue;
       const fromNode = nodeByFile.get(edge.from);
       const toNode = nodeByFile.get(edge.to);
       if (fromNode === undefined || toNode === undefined) continue;
@@ -216,6 +236,7 @@ export const evaluateLayers: RuleEvaluator<ArchLayersRule> = (rule, graph) => {
         fixHint: { code: 'remove-import', file: edge.from, line: edge.line },
         ...becauseField(rule.provenance.because),
         kind: 'layers',
+      edgeKind: edge.kind,
         fromLayer: fromNode.component,
         toLayer: toNode.component,
         fromFile: edge.from,

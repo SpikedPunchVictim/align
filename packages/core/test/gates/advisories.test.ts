@@ -111,7 +111,7 @@ function noDependencyViolation(file: string, ruleId: string): Violation {
     range: { startLine: 1, endLine: 1 },
     snippet: `import './other'`,
     fixHint: { code: 'remove-import', file: filePath, line: 1 },
-    kind: 'no-dependency',
+    kind: 'no-dependency', edgeKind: 'import',
     fromFile: filePath,
     toFile,
     fromComponent: toComponentName('api'),

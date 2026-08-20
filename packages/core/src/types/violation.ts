@@ -1,4 +1,5 @@
 import type { ComponentName, RepoRelativePath, RuleId, ViolationId } from './branded.js';
+import type { EdgeKind } from './graph.js';
 
 // v1 executes 'architecture' and 'security' gates only ('types'/'lint'/'format' are the Stage 5
 // tool-wrapping growth path, IMPLEMENTATION_PLAN.md); the union is fixed now so ADR 007/008's
@@ -58,6 +59,11 @@ interface ViolationBase {
 export type Violation =
   | (ViolationBase & {
       readonly kind: 'no-dependency';
+      /** Which kind of import produced this edge — LEDGER D056. Carried so the message can say
+       * "type-only", because a user comparing a red `arch.layers` against a green `arch.no-cycles`
+       * on the SAME edge had nothing in either message explaining the disagreement. Never part of
+       * the fingerprint. */
+      readonly edgeKind: EdgeKind;
       readonly fromFile: RepoRelativePath;
       readonly toFile: RepoRelativePath;
       readonly fromComponent: ComponentName;
@@ -101,6 +107,8 @@ export type Violation =
     })
   | (ViolationBase & {
       readonly kind: 'layers';
+      /** See `no-dependency`'s field of the same name (LEDGER D056). */
+      readonly edgeKind: EdgeKind;
       readonly fromLayer: ComponentName;
       readonly toLayer: ComponentName;
       readonly fromFile: RepoRelativePath;
@@ -162,13 +170,19 @@ export type Violation =
  * measured 3.6x token reduction, 182 -> 51 tokens/violation, by keeping this out of the machine
  * payload entirely).
  */
+/** " (type-only import)" when the edge was erased at runtime, else nothing — LEDGER D056. Shared by
+ * `no-dependency` and `layers` so the two cannot drift into describing the same edge differently. */
+function edgeKindSuffix(kind: EdgeKind): string {
+  return kind === 'type-only' ? ' The import is type-only (erased at runtime), which arch.layers/arch.no-dependency count by default and arch.no-cycles does not; pass includeTypeOnly: false on the rule to exclude it.' : '';
+}
+
 export function renderViolationMessage(v: Violation): string {
   switch (v.kind) {
     case 'no-dependency':
       return (
         `${v.fromFile} (component '${v.fromComponent}') imports ${v.toFile} ` +
         `(component '${v.toComponent}') via '${v.specifier}' at line ${v.line}, which rule ` +
-        `'${v.ruleId}' forbids.` + (v.because !== undefined ? ` ${v.because}` : '')
+        `'${v.ruleId}' forbids.` + edgeKindSuffix(v.edgeKind) + (v.because !== undefined ? ` ${v.because}` : '')
       );
     case 'no-dependency-external':
       return (
@@ -201,6 +215,7 @@ export function renderViolationMessage(v: Violation): string {
       return (
         `${v.fromFile} (layer '${v.fromLayer}') imports ${v.toFile} (layer '${v.toLayer}') via ` +
         `'${v.specifier}' at line ${v.line}, which rule '${v.ruleId}' forbids.` +
+        edgeKindSuffix(v.edgeKind) +
         (v.because !== undefined ? ` ${v.because}` : '')
       );
     case 'layers-external':

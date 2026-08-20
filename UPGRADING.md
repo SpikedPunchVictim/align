@@ -96,6 +96,40 @@ Advisory-only, so no verdict or baseline effect. Expect fewer `deep-import` line
 doctor`, all of them removals of claims that were wrong.
 
 
+### `import type` edges: layering still counts them, and now says so
+
+Two of align's rules have always disagreed about `import type`, and neither said so:
+
+- `arch.no-cycles` **excludes** type-only edges by default. This is why `import type` is a legitimate
+  way to break an import cycle.
+- `arch.layers` / `arch.no-dependency` **count** them, with no way to opt out.
+
+Both defaults are defensible — a type-only import erases at runtime but is still a compile-time
+coupling across an architectural boundary — but hitting them in the same session, as one reporter
+did, looks like align contradicting itself. Nothing in either message mentioned the edge kind.
+
+**The defaults are unchanged.** A type-only import still violates layering, so no existing rule
+becomes weaker and no baseline churns.
+
+**The message now explains itself:**
+
+```
+src/a/index.ts (layer 'a') imports src/b/index.ts (layer 'b') via './b' at line 1, which rule
+'arch.layers:a' forbids. The import is type-only (erased at runtime), which
+arch.layers/arch.no-dependency count by default and arch.no-cycles does not; pass
+includeTypeOnly: false on the rule to exclude it.
+```
+
+**And there is now an opt-out**, on the layer rather than the verb:
+
+```ts
+c.arch.layer(c.ui, { includeTypeOnly: false }).canOnlyDependOn(c.core)
+```
+
+It applies to every rule that layer builds — both `canOnlyDependOn` and `cannotDependOn`.
+`--json` and MCP consumers get the edge kind as `edgeKind` on the violation.
+
+
 ### align now tells you when it is holding an edge it cannot evaluate
 
 The silence above is what let that defect survive review, a release, and align's own CI. An edge
