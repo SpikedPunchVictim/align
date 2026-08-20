@@ -152,11 +152,10 @@ discovered in production — or, if you are lucky, on a scenario's first run.
 **Instances**: ADR 027 F1 (S0), **D010 (S0)**, D016 (S1), D017 (S1), **D020 (S2, twice over)**,
 D024(a) (S1), **D025 (S2)**, D028 (S1), **D030 (S0)**, **D034 (S0)**, **D035 (S0)**, D037 (S2),
 D038 (S2), D039 (S1), **D041 (S0)**, **D042 (S0)**, D043 (S2), D044 (S2), D045 (S2), D046 (S1),
-**D047 (S0)**. **Rung**: brief, **plus three executable invariants** — see below.
+**D047 (S0)**, D048(a) (S2). **Rung**: brief, **plus three executable invariants** — see below.
 
 **This is the project's dominant shape, and the number is measured, not impressionistic.** Recounted
-from `LEDGER.md`'s Shape column on 2026-08-19 after phase 5: **20 of 47 rows**, more than two in
-five. Both phase-4 and phase-5 sweeps were near-total — D037/D038/D039, then
+from `LEDGER.md`'s Shape column on 2026-08-20: **21 of 48 rows**, more than two in five. Both phase-4 and phase-5 sweeps were near-total — D037/D038/D039, then
 D041/D042/D043/D044/D045/D046/D047, seven in a row. No other shape is close. Recount before quoting; this register went stale by six rows
 between 2026-08-17 and 2026-08-19, the second time this exact file has been a sample presenting as a
 census (see the paragraph below).
@@ -164,10 +163,10 @@ census (see the paragraph below).
 **Counting it correctly takes more care than it looks, and the attempt found a second defect.** The
 count that matters is the Shape column specifically, and neither `grep -c S-09` nor a naive
 `awk -F'|'` gets it right: the first over-counts (rows mentioning S-09 in another column, plus
-non-row lines — **24 hits against 20 real instances**), and the second mis-splits any row containing
+non-row lines — 24 hits against 20 real instances when last compared), and the second mis-splits any row containing
 an escaped `\|` in its prose, silently shifting the column index. The census above splits on
 UNESCAPED pipes only and reads field 6, cross-checked against the previous count plus the rows added
-since (13 + 7 = 20) — CLAUDE.md §1.4, two independent derivations of one `n`.
+since (13 + 7 + 1 = 21) — CLAUDE.md §1.4, two independent derivations of one `n`.
 
 Writing that counter is what surfaced the second defect: **two rows carried bare `|` characters
 inside shell snippets and prose** (`D026`'s `align skill … | wc -c`, and `D047`'s quotation of the
@@ -376,8 +375,9 @@ at three, the list stops being a list and starts being a class.
 
 ## S-13 — A defect that disables the instrument that would find it
 
-**Instances**: D033 (S3, three files at once), **D040 (S3 — in the report about D033)**. **Rung**:
-**invariant**, widened on the second instance.
+**Instances**: D033 (S3, three files at once), **D040 (S3 — in the report about D033)**,
+**D048's near-miss (a fix that disabled Ctrl-C)**. **Rung**: **invariant**, widened on the second
+instance.
 
 Most defects are found by an instrument. This shape is the one that breaks the instrument first, so its
 own detection probability drops to near zero and stays there. D033 is the clean example: three source
@@ -393,6 +393,24 @@ chased the contradiction instead of recording the absence.
 > itself — what would make it *invisible* to the tool we check it with, rather than merely wrong in it?
 > An absence result that surprises you is the signal; treat "grep found nothing" as a claim to verify,
 > not an answer.
+
+**Third instance, 2026-08-20 (D048's near-miss), and the first where the shape was introduced by a
+FIX rather than found in existing code.** Hardening the integration harness against interruption meant
+registering SIGINT/SIGTERM handlers so a killed run still reports what it proved. The handlers were
+inert: every scenario step runs through `spawnSync`, so `await runScenario(...)` yields to the
+microtask queue only and libuv never reaches the phase that delivers a queued signal. On its own that
+would merely be a guard that never fires — but **a registered handler suppresses Node's default
+terminate**, so the change turned a Ctrl-C that worked into one that does nothing at all. The
+instrument disabled was the one a developer reaches for to stop a 25-minute run.
+
+Caught by measuring the handler rather than trusting its registration: sending a real SIGINT to a real
+run and watching it complete normally with exit 0. Reduced to a 20-line reproduction — an async loop
+of `execSync('sleep 3')` ignored SIGINT and exited 0; the same loop with one
+`await new Promise(r => setImmediate(r))` exited 130.
+
+> **Ask, for any control you ADD**: fire it. Registration is not evidence it can run, and a control
+> that displaces a working default while being unable to run is a net loss. This is the same question
+> S-05 asks of a test, pointed at a guard.
 
 **Second instance, 2026-08-19 (D040), and it is the sharpest illustration this register will get: the
 report documenting D033 contained a raw NUL of its own**, at the exact spot where it wrote "instead of

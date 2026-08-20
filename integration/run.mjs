@@ -217,9 +217,174 @@ async function main() {
   /** @type {{target: string, scenarioId: string, pass: boolean, errored: boolean}[]} */
   const matrix = [];
 
+  /** Pinned scenario/target pairs that were exercised this run and PASSED anyway — the calibration
+   * break. Shared by the per-target line and `finishRun` so the two can never disagree. */
+  const calibrationBreaksIn = (targets) => {
+    const breaks = [];
+    for (const scenario of scenarios) {
+      for (const target of scenario.expectFailOn ?? []) {
+        if (!targets.includes(target)) continue; // not exercised this run — nothing to check
+        const m = matrix.find((m2) => m2.target === target && m2.scenarioId === scenario.id);
+        if (m !== undefined && m.pass) breaks.push(`${scenario.id}@${target}`);
+      }
+    }
+    return breaks;
+  };
+
+  const logTargetCalibration = (target) => {
+    const pinned = scenarios.filter((s) => (s.expectFailOn ?? []).includes(target));
+    if (pinned.length === 0) return;
+    const broke = calibrationBreaksIn([target]);
+    log(
+      broke.length === 0
+        ? `\n[run] target '${target}' calibration: all ${pinned.length} pinned scenario(s) went RED as required.`
+        : `\n[run] target '${target}' CALIBRATION BROKEN: ${broke.join(', ')}`,
+    );
+  };
+
+  /**
+   * Everything that turns a matrix into a verdict: the summary table, `summary.json`, the gate
+   * check, the informational non-gate note, and the release-blocking calibration check.
+   *
+   * **Extracted so an interrupted run still produces it (LEDGER D048).** All of this used to sit
+   * inline at the end of `main`, which made the most important assertion this harness makes — "the
+   * scenarios pinned to prove a real bug still prove it" — the very last thing to execute and the
+   * first thing lost to a Ctrl-C, a CI cancellation, or a killed background job. Measured
+   * 2026-08-20: three interrupted matrix runs left 16 result directories with no `summary.json` at
+   * all, and the calibration verdict for each had to be reconstructed by hand from PASS/FAIL lines
+   * in a truncated log.
+   *
+   * `complete: false` marks a run that did not finish. It is written INTO `summary.json` rather than
+   * left implicit in the file's absence: this repository's whole absence-inference doctrine (ADR
+   * 028) is that a reader must not have to infer "incomplete" from a missing artifact, and a partial
+   * matrix that looks like a full one is the same class of lie the scenarios themselves hunt.
+   */
+  let finished = false;
+  const finishRun = ({ complete }) => {
+    if (finished) return; // a signal arriving during the normal tail must not double-report
+    finished = true;
+
+    log('\n=== summary ===');
+    const width = matrix.length === 0 ? 1 : Math.max(...matrix.map((m) => m.scenarioId.length));
+    for (const target of args.targets) {
+      const rows = matrix.filter((m2) => m2.target === target);
+      if (rows.length === 0) continue;
+      log(`  target ${target}:`);
+      for (const m of rows) {
+        const status = m.errored ? 'ERROR' : m.pass ? 'PASS' : 'FAIL';
+        log(`    ${m.scenarioId.padEnd(width)}  ${status}`);
+      }
+    }
+
+    const expected = args.targets.length * scenarios.length;
+    writeJson(path.join(outDir, 'summary.json'), {
+      runId,
+      project: args.project,
+      targets: args.targets,
+      gateTarget,
+      complete,
+      ranScenarios: matrix.length,
+      expectedScenarios: expected,
+      matrix,
+    });
+
+    if (!complete) {
+      log(
+        `\n[run] RUN INTERRUPTED: ${matrix.length} of ${expected} scenario/target pairs ran. summary.json records ` +
+          `complete:false — this run PROVES NOTHING about the pairs that never executed, and its gate result below ` +
+          `covers only what did.`,
+      );
+    }
+
+    const gateRan = matrix.filter((m) => m.target === gateTarget);
+    const gateFailures = gateRan.filter((m) => !m.pass);
+    if (gateFailures.length > 0) {
+      log(`\n[run] GATE FAILED for target '${gateTarget}': ${gateFailures.map((m) => m.scenarioId).join(', ')}`);
+      process.exitCode = 1;
+    } else if (!complete || gateRan.length < scenarios.length) {
+      // Never say "all scenarios passed" about a set that was not all run — that sentence is the
+      // one a reader quotes, and on a truncated run it would be false in the direction that matters.
+      log(`\n[run] gate target '${gateTarget}': ${gateRan.length} of ${scenarios.length} scenario(s) ran, none failed. NOT a pass — the rest never ran.`);
+      process.exitCode = 1;
+    } else {
+      log(`\n[run] gate target '${gateTarget}': all scenarios passed.`);
+    }
+
+    const nonGateFailures = matrix.filter((m) => m.target !== gateTarget && !m.pass);
+    if (nonGateFailures.length > 0) {
+      log(
+        `[run] non-gate target failure(s) (informational — e.g. the red/green proof against a known-buggy published version): ` +
+          nonGateFailures.map((m) => `${m.scenarioId}@${m.target}`).join(', '),
+      );
+    }
+
+    // F3: enforce the red-on-known-buggy-version proof instead of treating it as purely
+    // informational. A scenario's `expectFailOn` (e.g. `['0.1.4']` on
+    // prune-errored-run-destroys-baseline) names targets it is PINNED to fail against — if one of
+    // those targets was actually tested this run and it PASSED, the harness's ability to detect the
+    // bug it exists to catch has broken (a normalization change, an F1-style typo, or an actual
+    // upstream fix landing in a version this harness still expects to be buggy). This check is
+    // independent of `--gate-target`: a calibration break is a harness-integrity failure, not a
+    // per-target result, so it fails the run regardless of which target is being gated on.
+    //
+    // Safe on a partial matrix: a pair that never ran has no row, and only a row that PASSED counts
+    // as a break — so an interrupted run under-reports rather than inventing a break.
+    const calibrationBreaks = calibrationBreaksIn(args.targets);
+    if (calibrationBreaks.length > 0) {
+      log(
+        `\n[run] RED/GREEN CALIBRATION BROKEN: these scenario/target pairs are pinned (via 'expectFailOn') to prove a real bug by ` +
+          `going RED, but they PASSED instead: ${calibrationBreaks.join(', ')}. The harness can no longer demonstrate the regression ` +
+          `it exists to catch — treat this as a release blocker, not an informational note.`,
+      );
+      process.exitCode = 1;
+    }
+  };
+
+  /**
+   * SIGINT/SIGTERM: report what ran, then clean up what a `finally` cannot.
+   *
+   * There were no signal handlers anywhere in `integration/` before LEDGER D048, and F12's cleanup
+   * comment claimed it removed the tarball cache dir "unconditionally (success or failure)". A
+   * `finally` does not run on a signal, so that was true of exceptions and false of every Ctrl-C and
+   * every cancelled CI job — measured 2026-08-20 as 8 accumulated directories.
+   *
+   * SIGKILL is unhandleable and this does nothing for it; the cases this covers are the ones a human
+   * or a CI runner actually produces.
+   */
+  const onSignal = (signal, code) => {
+    process.once(signal, () => {
+      log(`\n[run] received ${signal} — finishing the report for what has run so far.`);
+      try {
+        finishRun({ complete: false });
+      } finally {
+        removeDir(tarballCacheDir);
+      }
+      process.exit(code);
+    });
+  };
+  onSignal('SIGINT', 130);
+  onSignal('SIGTERM', 143);
+
   try {
     for (const target of args.targets) {
       for (const scenario of scenarios) {
+        // Give libuv a real event-loop turn, or the signal handlers registered above are INERT.
+        //
+        // MEASURED, and it is not obvious (LEDGER D048). Every scenario step runs through
+        // `spawnSync`, so `await runScenario(...)` yields to the MICROTASK queue and nothing else —
+        // the whole run is one synchronous block as far as libuv is concerned, and a queued SIGINT
+        // never reaches its JS callback. Reduced to a 20-line reproduction: an async loop of
+        // `execSync('sleep 3')` ignored SIGINT and exited 0 having run to completion; the same loop
+        // with this one line exited 130 on the first signal.
+        //
+        // **Registering a handler without this line is worse than having no handler at all**, which
+        // is why it is here rather than in a follow-up. A default SIGINT terminates the process
+        // immediately; a registered handler suppresses that default and then never runs — so adding
+        // the handler alone would have turned a working Ctrl-C into one that does nothing. That was
+        // the state of this file for about twenty minutes, and only measuring the handler instead of
+        // trusting its registration caught it.
+        await new Promise((resolve) => setImmediate(resolve));
+
         const workDir = path.join(cacheRoot, 'work', `${runId}--${target}--${scenario.id}`);
         log(`\n=== ${scenario.id} @ ${target} ===`);
         materializeWorkingCopy(basePath, workDir);
@@ -265,9 +430,36 @@ async function main() {
 
         // Keep the working copy for post-hoc diagnosis on failure (ADR 025 §2) — remove it on
         // success to bound disk usage across a multi-target, multi-scenario run.
-        if (result.pass && !args.keepAll) removeDir(workDir);
-        else log(`    working copy preserved: ${workDir}`);
+        //
+        // A PINNED failure is not a diagnosis case (LEDGER D048). `expectFailOn: ['0.1.4']` means
+        // this scenario going red on that target IS the calibration succeeding, so preserving its
+        // tree treats the expected result as a surprise. Measured 2026-08-20 before this line
+        // existed: `integration/results/.cache/work` held 39 directories totalling **21 GB**, of
+        // which 9 came from a single 9-scenario calibration re-run where every failure was the one
+        // being deliberately checked for. Nothing ever reaped them, and a cross-version matrix run
+        // leaks ~10 copies of the whole project every time it runs.
+        //
+        // The diagnosis material is NOT lost: `results/<runId>/<target>/<scenario>/` keeps
+        // steps.json, normalized.json and result.json for every scenario regardless of outcome.
+        // Only the multi-hundred-megabyte tree goes, and `--keep-all` still keeps everything.
+        //
+        // A harness ERROR is preserved even when pinned: `expectFailOn` pins that the scenario
+        // fails its assertions, never that the harness itself blew up, and those are the runs whose
+        // tree you actually need.
+        const pinnedToFailHere = (scenario.expectFailOn ?? []).includes(target);
+        const expectedFailure = !result.pass && !result.errored && pinnedToFailHere;
+        if (args.keepAll || (!result.pass && !expectedFailure)) {
+          log(`    working copy preserved: ${workDir}`);
+        } else {
+          if (expectedFailure) log(`    working copy removed: this failure is pinned by expectFailOn, so it is the expected result`);
+          removeDir(workDir);
+        }
       }
+
+      // Per-target calibration line, so a run interrupted during a LATER target has still said out
+      // loud what it proved about this one (LEDGER D048). The authoritative check still runs in
+      // `finishRun`; this is the incremental report, not a replacement for it.
+      logTargetCalibration(target);
     }
   } finally {
     // F12: the tarball cache dir is unique to this invocation (runId + pid) — clean it up
@@ -277,58 +469,7 @@ async function main() {
     removeDir(tarballCacheDir);
   }
 
-  log('\n=== summary ===');
-  const width = Math.max(...matrix.map((m) => m.scenarioId.length));
-  for (const target of args.targets) {
-    log(`  target ${target}:`);
-    for (const m of matrix.filter((m2) => m2.target === target)) {
-      const status = m.errored ? 'ERROR' : m.pass ? 'PASS' : 'FAIL';
-      log(`    ${m.scenarioId.padEnd(width)}  ${status}`);
-    }
-  }
-
-  writeJson(path.join(outDir, 'summary.json'), { runId, project: args.project, targets: args.targets, gateTarget, matrix });
-
-  const gateFailures = matrix.filter((m) => m.target === gateTarget && !m.pass);
-  if (gateFailures.length > 0) {
-    log(`\n[run] GATE FAILED for target '${gateTarget}': ${gateFailures.map((m) => m.scenarioId).join(', ')}`);
-    process.exitCode = 1;
-  } else {
-    log(`\n[run] gate target '${gateTarget}': all scenarios passed.`);
-  }
-
-  const nonGateFailures = matrix.filter((m) => m.target !== gateTarget && !m.pass);
-  if (nonGateFailures.length > 0) {
-    log(
-      `[run] non-gate target failure(s) (informational — e.g. the red/green proof against a known-buggy published version): ` +
-        nonGateFailures.map((m) => `${m.scenarioId}@${m.target}`).join(', '),
-    );
-  }
-
-  // F3: enforce the red-on-known-buggy-version proof instead of treating it as purely
-  // informational. A scenario's `expectFailOn` (e.g. `['0.1.4']` on
-  // prune-errored-run-destroys-baseline) names targets it is PINNED to fail against — if one of
-  // those targets was actually tested this run and it PASSED, the harness's ability to detect the
-  // bug it exists to catch has broken (a normalization change, an F1-style typo, or an actual
-  // upstream fix landing in a version this harness still expects to be buggy). This check is
-  // independent of `--gate-target`: a calibration break is a harness-integrity failure, not a
-  // per-target result, so it fails the run regardless of which target is being gated on.
-  const calibrationBreaks = [];
-  for (const scenario of scenarios) {
-    for (const target of scenario.expectFailOn ?? []) {
-      if (!args.targets.includes(target)) continue; // not exercised this run — nothing to check
-      const m = matrix.find((m2) => m2.target === target && m2.scenarioId === scenario.id);
-      if (m !== undefined && m.pass) calibrationBreaks.push(`${scenario.id}@${target}`);
-    }
-  }
-  if (calibrationBreaks.length > 0) {
-    log(
-      `\n[run] RED/GREEN CALIBRATION BROKEN: these scenario/target pairs are pinned (via 'expectFailOn') to prove a real bug by ` +
-        `going RED, but they PASSED instead: ${calibrationBreaks.join(', ')}. The harness can no longer demonstrate the regression ` +
-        `it exists to catch — treat this as a release blocker, not an informational note.`,
-    );
-    process.exitCode = 1;
-  }
+  finishRun({ complete: true });
 }
 
 main().catch((err) => {

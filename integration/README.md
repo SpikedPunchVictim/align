@@ -167,7 +167,22 @@ Every run writes, per `(target, scenario)` pair, under `--out`:
 - `result.json` — the short version: pass/fail, which steps failed and why, plus `writeSetCheck`.
 
 `summary.json` (one per run, at the top of `--out`) is the whole run's matrix:
-`(target, scenarioId) -> pass/fail/errored`.
+`(target, scenarioId) -> pass/fail/errored`, plus `complete`, `ranScenarios` and
+`expectedScenarios`.
+
+**Read `complete` before reading anything else.** A run interrupted by Ctrl-C or a cancelled CI job
+still writes this file, from a SIGINT/SIGTERM handler, with `complete: false` and only the pairs that
+actually ran (LEDGER D048). The interrupted run also refuses to print "all scenarios passed" and
+exits non-zero even when nothing failed — `N of M scenario(s) ran, none failed. NOT a pass`. An
+absent `summary.json` means the run died before it could report at all (a `SIGKILL`, or a crash in
+setup); a present one with `complete: false` means it reported honestly about a partial matrix.
+
+Working copies under `results/.cache/work/` are preserved for failures so you can inspect them, with
+one exception: a failure that the scenario **pinned** via `expectFailOn` for that target is the
+expected result, not a diagnosis case, so its copy is removed. Before that exception existed a single
+cross-version matrix run leaked ~10 full project copies; the measured accumulation was 21 GB.
+`--keep-all` still keeps everything, and `results/<runId>/<target>/<scenario>/` keeps the JSON
+artifacts either way.
 
 ## Enforcing the red/green proof (`expectFailOn`)
 
