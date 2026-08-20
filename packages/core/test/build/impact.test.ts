@@ -90,8 +90,18 @@ describe('impact delta is unaffected by provenance-only rule changes (end-to-end
     expect(diff.changed).toHaveLength(0);
     expect(diff.provenanceOnlyChanged).toHaveLength(1);
 
-    const currentViolations = evaluateRule(before, g, {});
-    const proposedViolations = evaluateRule(after, g, {});
+    // Declared components, not `{}` — since LEDGER D061 `evaluateNoDependency` contracts through
+    // files belonging to no DECLARED component, so an empty map means "nothing is mapped" and the
+    // fixture would silently produce zero violations. `validateRuleComponentRefs` forbids a rule
+    // naming an undeclared component in production, so `{}` was never a faithful input here.
+    const components = Object.fromEntries(
+      (['api', 'ui'] as const).map((n) => [
+        toComponentName(n),
+        { name: n, selector: { kind: 'glob' as const, patterns: [`${n}/**`] }, empty: 'allow' as const },
+      ]),
+    );
+    const currentViolations = evaluateRule(before, g, components);
+    const proposedViolations = evaluateRule(after, g, components);
     expect(currentViolations).toHaveLength(1);
     expect(proposedViolations).toHaveLength(1);
     expect(currentViolations[0]?.id).toBe(proposedViolations[0]?.id); // stable fingerprint

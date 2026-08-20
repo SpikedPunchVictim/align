@@ -59,6 +59,13 @@ interface ViolationBase {
 export type Violation =
   | (ViolationBase & {
       readonly kind: 'no-dependency';
+      /** The unmapped files the dependency was routed through, when it was — LEDGER D061.
+       *
+       * Absent for a direct edge, which is the overwhelming majority. Present when the target
+       * belonged to no declared component and align contracted through it to reach the forbidden
+       * one: without naming the relay, the report says `a` imports `b` via a specifier that mentions
+       * neither, and the reader has nothing to act on. Never part of the fingerprint. */
+      readonly relayedThrough?: readonly RepoRelativePath[];
       /** Which kind of import produced this edge — LEDGER D056. Carried so the message can say
        * "type-only", because a user comparing a red `arch.layers` against a green `arch.no-cycles`
        * on the SAME edge had nothing in either message explaining the disagreement. Never part of
@@ -170,6 +177,18 @@ export type Violation =
  * measured 3.6x token reduction, 182 -> 51 tokens/violation, by keeping this out of the machine
  * payload entirely).
  */
+/** Names the unmapped files a forbidden dependency was routed through — LEDGER D061. Empty for a
+ * direct edge. Without it the message reports a dependency on a file the specifier never mentions,
+ * which reads as align malfunctioning rather than as a real path. */
+function relaySuffix(relayedThrough: readonly RepoRelativePath[] | undefined): string {
+  if (relayedThrough === undefined || relayedThrough.length === 0) return '';
+  return (
+    ` The dependency is routed through ${relayedThrough.join(' -> ')}, which ` +
+    `${relayedThrough.length === 1 ? 'matches' : 'match'} no component selector — a file in no component cannot ` +
+    'hold a dependency on your behalf, so align follows the edge through it. Give it a component, or remove the re-export.'
+  );
+}
+
 /** " (type-only import)" when the edge was erased at runtime, else nothing — LEDGER D056. Shared by
  * `no-dependency` and `layers` so the two cannot drift into describing the same edge differently. */
 function edgeKindSuffix(kind: EdgeKind): string {
@@ -182,7 +201,10 @@ export function renderViolationMessage(v: Violation): string {
       return (
         `${v.fromFile} (component '${v.fromComponent}') imports ${v.toFile} ` +
         `(component '${v.toComponent}') via '${v.specifier}' at line ${v.line}, which rule ` +
-        `'${v.ruleId}' forbids.` + edgeKindSuffix(v.edgeKind) + (v.because !== undefined ? ` ${v.because}` : '')
+        `'${v.ruleId}' forbids.` +
+        relaySuffix(v.relayedThrough) +
+        edgeKindSuffix(v.edgeKind) +
+        (v.because !== undefined ? ` ${v.because}` : '')
       );
     case 'no-dependency-external':
       return (

@@ -3,8 +3,25 @@ import { evaluateLayers, evaluateMetric, evaluateNoCycles, evaluateNoDependency,
 import { UnknownHostRuleError } from '../src/rules/host-rules.js';
 import type { HostPredicate } from '../src/rules/host-rules.js';
 import type { ArchLayersRule, ArchMetricRule, ArchNoCyclesRule, ArchNoDependencyRule, CustomHostRule } from '../src/types/ir.js';
-import { toRepoRelativePath } from '../src/types/branded.js';
+import { toComponentName, toRepoRelativePath } from '../src/types/branded.js';
 import { edge, externalEdge, externalNode, graph, node } from './helpers.js';
+
+
+/**
+ * The declared components these fixtures reference. Passed instead of `{}` since LEDGER D061, which
+ * made `evaluateNoDependency` contract through files belonging to no DECLARED component — so an
+ * empty map now means "nothing is mapped", and every fixture silently produced zero violations.
+ *
+ * `{}` was never a faithful input: `validateRuleComponentRefs` errors the whole architecture gate in
+ * production when a rule names a component the ruleset does not declare, so a rule over `api`/`ui`
+ * with no components declared cannot occur. These fixtures are more faithful for saying so.
+ */
+const FIXTURE_COMPONENTS = Object.fromEntries(
+  ['api', 'ui', 'core', 'common', 'app'].map((n) => [
+    toComponentName(n),
+    { name: n, selector: { kind: 'glob' as const, patterns: [`${n}/**`] }, empty: 'allow' as const },
+  ]),
+);
 
 describe('evaluateNoDependency', () => {
   it('flags an edge from the forbidden component to the target component', () => {
@@ -19,7 +36,7 @@ describe('evaluateNoDependency', () => {
       to: 'ui',
       provenance: {},
     };
-    const violations = evaluateNoDependency(rule, g, {});
+    const violations = evaluateNoDependency(rule, g, FIXTURE_COMPONENTS);
     expect(violations).toHaveLength(1);
     const v = violations[0];
     expect(v?.kind).toBe('no-dependency');
@@ -37,7 +54,7 @@ describe('evaluateNoDependency', () => {
       [edge('api/a.ts', 'core/b.ts')],
     );
     const rule: ArchNoDependencyRule = { kind: 'arch.no-dependency', id: 'r1', from: 'api', to: 'ui', provenance: {} };
-    expect(evaluateNoDependency(rule, g, {})).toHaveLength(0);
+    expect(evaluateNoDependency(rule, g, FIXTURE_COMPONENTS)).toHaveLength(0);
   });
 
   it('produces a stable fingerprint unaffected by unrelated edges', () => {
@@ -50,8 +67,8 @@ describe('evaluateNoDependency', () => {
       [edge('api/a.ts', 'ui/b.ts', { specifier: '../ui/b', line: 5 }), edge('api/a.ts', 'core/c.ts')],
     );
     const rule: ArchNoDependencyRule = { kind: 'arch.no-dependency', id: 'r1', from: 'api', to: 'ui', provenance: {} };
-    const id1 = evaluateNoDependency(rule, g1, {})[0]?.id;
-    const id2 = evaluateNoDependency(rule, g2, {})[0]?.id;
+    const id1 = evaluateNoDependency(rule, g1, FIXTURE_COMPONENTS)[0]?.id;
+    const id2 = evaluateNoDependency(rule, g2, FIXTURE_COMPONENTS)[0]?.id;
     expect(id1).toBeDefined();
     expect(id1).toBe(id2);
   });
@@ -67,7 +84,7 @@ describe('evaluateNoDependency — external selector target (ADR 017 Part A)', (
       to: { kind: 'external', pattern: 'lodash', includeTypeOnly: false },
       provenance: {},
     };
-    const violations = evaluateNoDependency(rule, g, {});
+    const violations = evaluateNoDependency(rule, g, FIXTURE_COMPONENTS);
     expect(violations).toHaveLength(1);
     const v = violations[0];
     expect(v?.kind).toBe('no-dependency-external');
@@ -91,7 +108,7 @@ describe('evaluateNoDependency — external selector target (ADR 017 Part A)', (
       to: { kind: 'external', pattern: 'node:*', includeTypeOnly: false },
       provenance: {},
     };
-    expect(evaluateNoDependency(rule, g, {})).toHaveLength(1);
+    expect(evaluateNoDependency(rule, g, FIXTURE_COMPONENTS)).toHaveLength(1);
   });
 
   it('does not flag an edge from an unrelated component', () => {
@@ -103,7 +120,7 @@ describe('evaluateNoDependency — external selector target (ADR 017 Part A)', (
       to: { kind: 'external', pattern: 'lodash', includeTypeOnly: false },
       provenance: {},
     };
-    expect(evaluateNoDependency(rule, g, {})).toHaveLength(0);
+    expect(evaluateNoDependency(rule, g, FIXTURE_COMPONENTS)).toHaveLength(0);
   });
 
   it('does not flag a non-matching external package', () => {
@@ -115,7 +132,7 @@ describe('evaluateNoDependency — external selector target (ADR 017 Part A)', (
       to: { kind: 'external', pattern: 'lodash', includeTypeOnly: false },
       provenance: {},
     };
-    expect(evaluateNoDependency(rule, g, {})).toHaveLength(0);
+    expect(evaluateNoDependency(rule, g, FIXTURE_COMPONENTS)).toHaveLength(0);
   });
 
   it('includeTypeOnly defaults false: a type-only external edge is not flagged', () => {
@@ -130,7 +147,7 @@ describe('evaluateNoDependency — external selector target (ADR 017 Part A)', (
       to: { kind: 'external', pattern: 'react', includeTypeOnly: false },
       provenance: {},
     };
-    expect(evaluateNoDependency(rule, g, {})).toHaveLength(0);
+    expect(evaluateNoDependency(rule, g, FIXTURE_COMPONENTS)).toHaveLength(0);
   });
 
   it('includeTypeOnly: true catches a type-only external edge', () => {
@@ -145,7 +162,7 @@ describe('evaluateNoDependency — external selector target (ADR 017 Part A)', (
       to: { kind: 'external', pattern: 'react', includeTypeOnly: true },
       provenance: {},
     };
-    expect(evaluateNoDependency(rule, g, {})).toHaveLength(1);
+    expect(evaluateNoDependency(rule, g, FIXTURE_COMPONENTS)).toHaveLength(1);
   });
 });
 
@@ -463,7 +480,7 @@ describe('evaluateRule — custom.host dispatch', () => {
       [edge('api/a.ts', 'ui/b.ts', { specifier: '../ui/b', line: 5 })],
     );
     const noDep: ArchNoDependencyRule = { kind: 'arch.no-dependency', id: 'r1', from: 'api', to: 'ui', provenance: {} };
-    const violations = evaluateRule(noDep, g, {}, new Map([['unrelated', (): [] => []]]));
+    const violations = evaluateRule(noDep, g, FIXTURE_COMPONENTS, new Map([['unrelated', (): [] => []]]));
     expect(violations).toHaveLength(1);
   });
 });

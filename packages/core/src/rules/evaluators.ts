@@ -1,7 +1,7 @@
 import type { ComponentName, RepoRelativePath } from '../types/branded.js';
 import { toRuleId } from '../types/branded.js';
 import type { ArchLayersRule, ArchMetricRule, ArchNoCyclesRule, ArchNoDependencyRule, ComponentDefinitionIR, ExternalSelector, RuleIR } from '../types/ir.js';
-import type { DependencyGraph, DependencyGraphEdge, EdgeKind } from '../types/graph.js';
+import type { DependencyGraph, DependencyGraphEdge, DependencyGraphNode, EdgeKind } from '../types/graph.js';
 import type { CycleEdge, Violation } from '../types/violation.js';
 import { computeFingerprint } from '../baseline/fingerprint.js';
 import { extractCycleChainNodes, tarjanScc } from './tarjan.js';
@@ -52,7 +52,69 @@ function excludedAsTypeOnly(edge: { readonly kind: EdgeKind }, includeTypeOnly: 
   return edge.kind === 'type-only' && includeTypeOnly === false;
 }
 
-export const evaluateNoDependency: RuleEvaluator<ArchNoDependencyRule> = (rule, graph) => {
+
+/**
+ * Mapped files reachable from `start` by passing ONLY through files that belong to no declared
+ * component — LEDGER D061.
+ *
+ * **The defect.** With `a cannotDependOn b`, importing `../b` was correctly RED and importing
+ * `../shared/relay` — one line, `export * from '../b'`, in a directory matching no selector — was
+ * green. Files matching no selector are still graph NODES carrying a sentinel component, and every
+ * internal rule arm matches `fromNode.component === rule.from && toNode.component === rule.to`, so
+ * `a -> relay` and `relay -> b` each fail the test and the pair is invisible. Rules are direct-edge
+ * only, so ANY unmapped intermediary defeats them — one line, no tooling, trivially discoverable by
+ * someone working around a rule, and reachable by accident (135 unmapped files in n8n, 523 in the
+ * reporting repository).
+ *
+ * **Why contracting unmapped nodes is not "make rules transitive".** A MAPPED intermediary is a
+ * component: `a -> c -> b` does not violate `a cannotDependOn b`, because `c` is an architectural
+ * entity that owns that dependency, and treating it otherwise would light up every repository. An
+ * unmapped file owns nothing — it is a hole in the component map, not a layer — so a dependency
+ * routed through it is still a dependency between the mapped endpoints.
+ *
+ * "Unmapped" is decided the way `ungoverned-edges.ts` already decides it: a component the ruleset
+ * never declared. Core needs no notion of the plugin's `UNMAPPED_COMPONENT` sentinel.
+ *
+ * Returns the reached mapped file plus the unmapped chain walked to get there, because a violation
+ * that cannot name the relay is unactionable — the user is told `a` imports `b` via a specifier that
+ * mentions neither. `visited` makes an unmapped cycle terminate; the walk covers a subgraph the rule
+ * author does not control.
+ */
+function mappedTargetsThroughUnmapped(
+  start: RepoRelativePath,
+  nodeByFile: ReadonlyMap<RepoRelativePath, DependencyGraphNode>,
+  outgoing: ReadonlyMap<RepoRelativePath, readonly DependencyGraphEdge[]>,
+  isDeclared: (component: ComponentName) => boolean,
+): readonly { readonly file: RepoRelativePath; readonly component: ComponentName; readonly via: readonly RepoRelativePath[] }[] {
+  const startNode = nodeByFile.get(start);
+  if (startNode === undefined) return [];
+  if (isDeclared(startNode.component)) return [{ file: start, component: startNode.component, via: [] }];
+
+  const out: { file: RepoRelativePath; component: ComponentName; via: readonly RepoRelativePath[] }[] = [];
+  const seenTargets = new Set<string>();
+  const visited = new Set<RepoRelativePath>([start]);
+  const stack: { file: RepoRelativePath; via: readonly RepoRelativePath[] }[] = [{ file: start, via: [start] }];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (current === undefined) break;
+    for (const next of outgoing.get(current.file) ?? []) {
+      const node = nodeByFile.get(next.to);
+      if (node === undefined) continue;
+      if (isDeclared(node.component)) {
+        if (seenTargets.has(next.to)) continue;
+        seenTargets.add(next.to);
+        out.push({ file: next.to, component: node.component, via: current.via });
+        continue;
+      }
+      if (visited.has(next.to)) continue;
+      visited.add(next.to);
+      stack.push({ file: next.to, via: [...current.via, next.to] });
+    }
+  }
+  return out;
+}
+
+export const evaluateNoDependency: RuleEvaluator<ArchNoDependencyRule> = (rule, graph, components) => {
   // ADR 017 Part A: `to` widened to `ComponentRef | ExternalSelector`. An external target is
   // matched against `graph.externalEdges` only — `graph.nodes`/`graph.edges` (the internal-only
   // arm below) are untouched by construction, so a rule with a plain component `to` is byte-
@@ -63,15 +125,28 @@ export const evaluateNoDependency: RuleEvaluator<ArchNoDependencyRule> = (rule, 
   }
 
   const nodeByFile = new Map(graph.nodes.map((n) => [n.file, n]));
+  const declared = new Set(Object.keys(components));
+  const isDeclared = (c: ComponentName): boolean => declared.has(c);
+  const outgoing = new Map<RepoRelativePath, DependencyGraphEdge[]>();
+  for (const e of graph.edges) {
+    const list = outgoing.get(e.from);
+    if (list === undefined) outgoing.set(e.from, [e]);
+    else list.push(e);
+  }
+
   const violations: Violation[] = [];
   for (const edge of graph.edges) {
     if (excludedAsTypeOnly(edge, rule.includeTypeOnly)) continue;
     const fromNode = nodeByFile.get(edge.from);
-    const toNode = nodeByFile.get(edge.to);
-    if (fromNode === undefined || toNode === undefined) continue;
-    if (fromNode.component !== rule.from || toNode.component !== rule.to) continue;
+    if (fromNode === undefined || fromNode.component !== rule.from) continue;
 
-    const id = computeFingerprint(['no-dependency', rule.id, edge.from, edge.to, edge.specifier]);
+    // An unmapped target is contracted to whatever mapped files it reaches (D061). For a MAPPED
+    // target this returns that file with an empty `via`, so the direct case is byte-identical —
+    // including the fingerprint, which is computed over the RESOLVED target and therefore unchanged.
+    for (const target of mappedTargetsThroughUnmapped(edge.to, nodeByFile, outgoing, isDeclared)) {
+      if (target.component !== rule.to) continue;
+
+    const id = computeFingerprint(['no-dependency', rule.id, edge.from, target.file, edge.specifier]);
     violations.push({
       id,
       ruleId: toRuleId(rule.id),
@@ -85,12 +160,16 @@ export const evaluateNoDependency: RuleEvaluator<ArchNoDependencyRule> = (rule, 
       kind: 'no-dependency',
       edgeKind: edge.kind,
       fromFile: edge.from,
-      toFile: edge.to,
+      toFile: target.file,
       fromComponent: fromNode.component,
-      toComponent: toNode.component,
+      toComponent: target.component,
       specifier: edge.specifier,
       line: edge.line,
+      // Absent for a direct edge; present when the dependency was routed through files belonging to
+      // no component, which is the only way the reader can find what to change.
+      ...(target.via.length === 0 ? {} : { relayedThrough: target.via }),
     });
+    }
   }
   return violations;
 };

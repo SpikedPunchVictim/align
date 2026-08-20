@@ -164,6 +164,52 @@ c.arch.layer(c.core).cannotDependOn(external('react', { includeTypeOnly: true })
 predicate to express "this component must not import node modules", `external('node:*')` replaces it.
 
 
+### A file in no component no longer launders a forbidden dependency
+
+**This can surface violations you have not seen before, and they were always real.**
+
+`cannotDependOn` matched direct edges only. So with `a cannotDependOn b`, this was RED:
+
+```ts
+import { thing } from '../b'          // caught
+```
+
+and this was **green**:
+
+```ts
+// src/shared/relay.ts — in a directory matching no component selector
+export * from '../b'
+
+// src/a/index.ts
+import { thing } from '../shared/relay'   // NOT caught, before 0.2.1
+```
+
+One line in an unmapped directory defeated the rule entirely, with no advisory. It is trivially
+discoverable by anyone working around a rule, and reachable by accident — a repository with many
+unmapped files has that many potential relays.
+
+align now follows a dependency through files that belong to **no declared component**, because such
+a file is a hole in your component map rather than a layer: it cannot hold a dependency on your
+behalf. The message names the chain:
+
+```
+The dependency is routed through src/shared/relay.ts, which matches no component selector — a file
+in no component cannot hold a dependency on your behalf, so align follows the edge through it.
+Give it a component, or remove the re-export.
+```
+
+**This is not "rules are now transitive".** A dependency through a *declared* component is
+unchanged: `a -> c -> b` still does not violate `a cannotDependOn b`, because `c` is a real
+component that owns that dependency. Only files matching no selector are followed through.
+
+**Two ways to resolve a new violation**: give the relaying directory a component (usually the right
+answer — a file governed by nothing is worth knowing about), or remove the indirection. `align
+baseline accept` if you intend to keep it.
+
+**No baseline churn.** A direct violation's fingerprint is computed over the resolved target, which
+for a direct edge is unchanged — verified identical before and after.
+
+
 ### align now tells you when it is holding an edge it cannot evaluate
 
 The silence above is what let that defect survive review, a release, and align's own CI. An edge

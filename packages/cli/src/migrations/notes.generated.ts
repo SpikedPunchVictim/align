@@ -11,11 +11,11 @@
 // `migration-notes-drift.test.ts` fails if UPGRADING_MD_CONTENT_HASH below no longer matches
 // the doc's current content — that is the drift detector, not a suggestion.
 //
-// Generated at: 2026-08-20T19:10:25.267Z
+// Generated at: 2026-08-20T20:23:36.967Z
 import type { MigrationNote } from './types.js';
 
 /** sha256Hex (16-char) of UPGRADING.md's full text at compile time. */
-export const UPGRADING_MD_CONTENT_HASH = "155170d7c9b79cc6";
+export const UPGRADING_MD_CONTENT_HASH = "c5f35e8dd99d6e8b";
 
 /** Migration notes compiled from UPGRADING.md, keyed by the exact version heading text
  * ("## <version>") it was compiled from. */
@@ -40,6 +40,10 @@ export const COMPILED_NOTES: Readonly<Record<string, readonly MigrationNote[]>> 
     {
       heading: "`external()` is now documented — it always worked, you just could not find it",
       body: "No behaviour change. `external()` has shipped working since 0.1.x and appeared in **no** guidance\nsurface: `align skill --topic authoring`, `--topic all`, `align docs config`, `docs verbs` and\n`docs rules` all contained zero mentions of it. The verb table described `cannotDependOn(...refs)` as\ntaking \"the listed components\", which implies an external target is not possible.\n\nIt is. A dependency target can be an external package pattern instead of a component:\n\n```ts\n// keep a browser bundle free of node builtins — fires on bare `crypto` as well as `node:crypto`\nc.arch.layer(c.chromeExtension).cannotDependOn(external('node:*'))\n\n// forbid one package outright\nc.arch.layer(c.core).cannotDependOn(external('lodash'))\n\n// type-only imports are excluded by default here; opt in per selector\nc.arch.layer(c.core).cannotDependOn(external('react', { includeTypeOnly: true }))\n```\n\n`align skill --topic authoring` and `align docs verbs` now describe it. If you wrote a `custom.host`\npredicate to express \"this component must not import node modules\", `external('node:*')` replaces it.",
+    },
+    {
+      heading: "A file in no component no longer launders a forbidden dependency",
+      body: "**This can surface violations you have not seen before, and they were always real.**\n\n`cannotDependOn` matched direct edges only. So with `a cannotDependOn b`, this was RED:\n\n```ts\nimport { thing } from '../b'          // caught\n```\n\nand this was **green**:\n\n```ts\n// src/shared/relay.ts — in a directory matching no component selector\nexport * from '../b'\n\n// src/a/index.ts\nimport { thing } from '../shared/relay'   // NOT caught, before 0.2.1\n```\n\nOne line in an unmapped directory defeated the rule entirely, with no advisory. It is trivially\ndiscoverable by anyone working around a rule, and reachable by accident — a repository with many\nunmapped files has that many potential relays.\n\nalign now follows a dependency through files that belong to **no declared component**, because such\na file is a hole in your component map rather than a layer: it cannot hold a dependency on your\nbehalf. The message names the chain:\n\n```\nThe dependency is routed through src/shared/relay.ts, which matches no component selector — a file\nin no component cannot hold a dependency on your behalf, so align follows the edge through it.\nGive it a component, or remove the re-export.\n```\n\n**This is not \"rules are now transitive\".** A dependency through a *declared* component is\nunchanged: `a -> c -> b` still does not violate `a cannotDependOn b`, because `c` is a real\ncomponent that owns that dependency. Only files matching no selector are followed through.\n\n**Two ways to resolve a new violation**: give the relaying directory a component (usually the right\nanswer — a file governed by nothing is worth knowing about), or remove the indirection. `align\nbaseline accept` if you intend to keep it.\n\n**No baseline churn.** A direct violation's fingerprint is computed over the resolved target, which\nfor a direct edge is unchanged — verified identical before and after.",
     },
     {
       heading: "align now tells you when it is holding an edge it cannot evaluate",
