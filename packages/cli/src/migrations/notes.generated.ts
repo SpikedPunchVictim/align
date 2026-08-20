@@ -11,11 +11,11 @@
 // `migration-notes-drift.test.ts` fails if UPGRADING_MD_CONTENT_HASH below no longer matches
 // the doc's current content — that is the drift detector, not a suggestion.
 //
-// Generated at: 2026-08-20T18:10:09.779Z
+// Generated at: 2026-08-20T18:25:06.273Z
 import type { MigrationNote } from './types.js';
 
 /** sha256Hex (16-char) of UPGRADING.md's full text at compile time. */
-export const UPGRADING_MD_CONTENT_HASH = "edbc0a7a728ff619";
+export const UPGRADING_MD_CONTENT_HASH = "47322b1f5a94e665";
 
 /** Migration notes compiled from UPGRADING.md, keyed by the exact version heading text
  * ("## <version>") it was compiled from. */
@@ -36,6 +36,10 @@ export const COMPILED_NOTES: Readonly<Record<string, readonly MigrationNote[]>> 
     {
       heading: "`import type` edges: layering still counts them, and now says so",
       body: "Two of align's rules have always disagreed about `import type`, and neither said so:\n\n- `arch.no-cycles` **excludes** type-only edges by default. This is why `import type` is a legitimate\n  way to break an import cycle.\n- `arch.layers` / `arch.no-dependency` **count** them, with no way to opt out.\n\nBoth defaults are defensible — a type-only import erases at runtime but is still a compile-time\ncoupling across an architectural boundary — but hitting them in the same session, as one reporter\ndid, looks like align contradicting itself. Nothing in either message mentioned the edge kind.\n\n**The defaults are unchanged.** A type-only import still violates layering, so no existing rule\nbecomes weaker and no baseline churns.\n\n**The message now explains itself:**\n\n```\nsrc/a/index.ts (layer 'a') imports src/b/index.ts (layer 'b') via './b' at line 1, which rule\n'arch.layers:a' forbids. The import is type-only (erased at runtime), which\narch.layers/arch.no-dependency count by default and arch.no-cycles does not; pass\nincludeTypeOnly: false on the rule to exclude it.\n```\n\n**And there is now an opt-out**, on the layer rather than the verb:\n\n```ts\nc.arch.layer(c.ui, { includeTypeOnly: false }).canOnlyDependOn(c.core)\n```\n\nIt applies to every rule that layer builds — both `canOnlyDependOn` and `cannotDependOn`.\n`--json` and MCP consumers get the edge kind as `edgeKind` on the violation.",
+    },
+    {
+      heading: "`external()` is now documented — it always worked, you just could not find it",
+      body: "No behaviour change. `external()` has shipped working since 0.1.x and appeared in **no** guidance\nsurface: `align skill --topic authoring`, `--topic all`, `align docs config`, `docs verbs` and\n`docs rules` all contained zero mentions of it. The verb table described `cannotDependOn(...refs)` as\ntaking \"the listed components\", which implies an external target is not possible.\n\nIt is. A dependency target can be an external package pattern instead of a component:\n\n```ts\n// keep a browser bundle free of node builtins — fires on bare `crypto` as well as `node:crypto`\nc.arch.layer(c.chromeExtension).cannotDependOn(external('node:*'))\n\n// forbid one package outright\nc.arch.layer(c.core).cannotDependOn(external('lodash'))\n\n// type-only imports are excluded by default here; opt in per selector\nc.arch.layer(c.core).cannotDependOn(external('react', { includeTypeOnly: true }))\n```\n\n`align skill --topic authoring` and `align docs verbs` now describe it. If you wrote a `custom.host`\npredicate to express \"this component must not import node modules\", `external('node:*')` replaces it.",
     },
     {
       heading: "align now tells you when it is holding an edge it cannot evaluate",

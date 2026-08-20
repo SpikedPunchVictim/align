@@ -21,7 +21,7 @@ export function getRuleKinds(): readonly string[] {
 // prose, but its *coverage* is enforced: `describeRuleKinds` throws for any live kind missing an
 // entry here, and the skill-completeness test throws for any entry whose kind no longer exists.
 const RULE_KIND_DESCRIPTIONS: Record<string, string> = {
-  'arch.no-dependency': 'One component must not import from another. Authored via `arch.layer(x).cannotDependOn(y)` or `arch.component(x).isIsolated()`.',
+  'arch.no-dependency': 'One component must not import from another, OR must not import an external package. Authored via `arch.layer(x).cannotDependOn(y)`, `arch.layer(x).cannotDependOn(external("node:*"))`, or `arch.component(x).isIsolated()`.',
   'arch.no-cycles': 'No import cycle within a scope (component or the whole repo). Authored via `arch.noCycles(scope?, { includeTypeOnly? })`. Violations carry per-edge chain detail, not just file names.',
   'arch.layers': 'A component may depend only on an explicit allowlist of other components. Authored via `arch.layer(x).canOnlyDependOn(...)`.',
   'arch.metric': 'A component-scoped numeric limit — today only `metric: "loc"` (max lines per file) is promoted; fan-in/fan-out/instability remain reserved pending evidence. Authored via `arch.component(x).maxLinesPerFile(max)`.',

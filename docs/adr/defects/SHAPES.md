@@ -389,8 +389,8 @@ at three, the list stops being a list and starts being a class.
 ## S-13 — A defect that disables the instrument that would find it
 
 **Instances**: D033 (S3, three files at once), **D040 (S3 — in the report about D033)**,
-**D048's near-miss (a fix that disabled Ctrl-C)**. **Rung**: **invariant**, widened on the second
-instance.
+**D048's near-miss (a fix that disabled Ctrl-C)**, **D057 (S2 — a completeness guarantee that could
+not see the surface that drifted)**. **Rung**: **invariant**, widened on the second instance.
 
 Most defects are found by an instrument. This shape is the one that breaks the instrument first, so its
 own detection probability drops to near zero and stays there. D033 is the clean example: three source
@@ -424,6 +424,23 @@ of `execSync('sleep 3')` ignored SIGINT and exited 0; the same loop with one
 > **Ask, for any control you ADD**: fire it. Registration is not evidence it can run, and a control
 > that displaces a working default while being unable to run is a net loss. This is the same question
 > S-05 asks of a test, pointed at a guard.
+
+**Fourth instance, 2026-08-20 (D057), and the first where the disabled instrument is a completeness
+GUARANTEE rather than a search tool.** `dsl-verb-manifest.test.ts` exists to prove every DSL verb
+appears in shipped guidance. It works by introspecting the live builder objects — `Object.keys()` of
+what `arch.layer(x)` returns — so it sees builder METHODS. `external()` is a standalone export passed
+as an ARGUMENT, structurally outside what method introspection can reach. It shipped fully working
+and in zero guidance surfaces, and the verb table's wording ("the listed components") actively
+implied it could not exist. A user wrote sixty lines of custom predicate rather than find it.
+
+The tell was available and unread: `arch.noCycles` had already been hand-pushed into that
+introspected list, so the "live registry" was partly hand-maintained. A completeness guarantee with a
+manual escape hatch in it is worth re-reading as a claim rather than trusting as a control.
+
+> **Ask, of any completeness guarantee**: what KIND of thing can it enumerate, and what kinds exist
+> that it cannot? A guard that enumerates methods cannot see arguments; one that enumerates files
+> cannot see what `.gitignore` forbids committing (D052). Name the category the mechanism operates
+> on, then list the categories it does not.
 
 **Second instance, 2026-08-19 (D040), and it is the sharpest illustration this register will get: the
 report documenting D033 contained a raw NUL of its own**, at the exact spot where it wrote "instead of

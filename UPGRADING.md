@@ -130,6 +130,30 @@ It applies to every rule that layer builds — both `canOnlyDependOn` and `canno
 `--json` and MCP consumers get the edge kind as `edgeKind` on the violation.
 
 
+### `external()` is now documented — it always worked, you just could not find it
+
+No behaviour change. `external()` has shipped working since 0.1.x and appeared in **no** guidance
+surface: `align skill --topic authoring`, `--topic all`, `align docs config`, `docs verbs` and
+`docs rules` all contained zero mentions of it. The verb table described `cannotDependOn(...refs)` as
+taking "the listed components", which implies an external target is not possible.
+
+It is. A dependency target can be an external package pattern instead of a component:
+
+```ts
+// keep a browser bundle free of node builtins — fires on bare `crypto` as well as `node:crypto`
+c.arch.layer(c.chromeExtension).cannotDependOn(external('node:*'))
+
+// forbid one package outright
+c.arch.layer(c.core).cannotDependOn(external('lodash'))
+
+// type-only imports are excluded by default here; opt in per selector
+c.arch.layer(c.core).cannotDependOn(external('react', { includeTypeOnly: true }))
+```
+
+`align skill --topic authoring` and `align docs verbs` now describe it. If you wrote a `custom.host`
+predicate to express "this component must not import node modules", `external('node:*')` replaces it.
+
+
 ### align now tells you when it is holding an edge it cannot evaluate
 
 The silence above is what let that defect survive review, a release, and align's own CI. An edge

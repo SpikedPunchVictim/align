@@ -43,6 +43,16 @@ const VERB_DESCRIPTIONS: Record<string, Omit<DslVerbEntry, 'path'>> = {
     description: 'every file classified into x must stay at or under max lines (metric: loc — the only promoted arch.metric metric today).',
     producesRuleKind: ['arch.metric'],
   },
+  // ARGUMENT FACTORY, not a builder method — LEDGER D057. `introspectVerbPaths()` below cannot see
+  // this by construction: it enumerates `Object.keys()` of the live builder objects, and `external`
+  // is a standalone export passed AS AN ARGUMENT. It shipped fully working and in zero guidance
+  // surfaces for months, and a user wrote a 60-line custom.host predicate rather than find it.
+  // `dsl-argument-factories.test.ts` is what now forces an entry here for any DSL callable.
+  'external(pattern, options?)': {
+    description:
+      'a dependency TARGET for cannotDependOn/canOnlyDependOn that matches external packages by name pattern rather than naming a component — e.g. cannotDependOn(external("node:*")) keeps a browser bundle free of node builtins, cannotDependOn(external("lodash")) forbids one package. Builtin-aware: external("node:*") fires on a bare `crypto` import as well as `node:crypto`. options.includeTypeOnly (default false) widens it to `import type` edges.',
+    producesRuleKind: ['arch.no-dependency', 'arch.layers'],
+  },
   'arch.noCycles(scope?, options?)': {
     description: "no import cycles within scope (defaults to the whole repo). options.includeTypeOnly widens cycle detection to type-only edges (excluded by default).",
     producesRuleKind: ['arch.no-cycles'],
@@ -79,6 +89,10 @@ function introspectVerbPaths(): readonly string[] {
     paths.push(key === 'maxLinesPerFile' ? `arch.component(x).${key}(max)` : `arch.component(x).${key}()`);
   }
   paths.push('arch.noCycles(scope?, options?)');
+  // Argument factories are enumerated explicitly because method introspection structurally cannot
+  // reach them (D057). Kept honest by `dsl-argument-factories.test.ts`, which walks the DSL
+  // entrypoint's real exports rather than this list.
+  paths.push('external(pattern, options?)');
 
   const custom = makeCustomFactory();
   for (const key of Object.keys(custom)) paths.push(`custom.${key}(hostRuleName)`);
