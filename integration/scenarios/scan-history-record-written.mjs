@@ -15,6 +15,13 @@
 // is decided, in `core/test/scan-history-probe.test.ts` and again from the consumer's side in
 // `core/test/scan-history-move-refusal.test.ts`.
 //
+// Note on how it fails there: 0.1.4 reports ERROR rather than FAIL, because the
+// `corrupt-last-scan-record` mutation throws when the file it must corrupt is absent — correctly, a
+// silent no-op would let a scenario assert against a state it never reached. The scenario has
+// ALREADY failed by then (step 6, `assert exists`), so the ERROR is a consequence of a recorded
+// failure, not a harness malfunction. Relabelling it means teaching the runner not to run dependent
+// mutations after a failed assertion, which is a runner-semantics change nobody has needed yet.
+//
 // **No `expectFailOn`.** Nothing here is a defect pinned against a published version: 0.1.4 has no
 // scan history at all, so every assertion below would fail on it for the uninteresting reason that
 // the feature does not exist. The calibrated `expectFailOn` scenarios each reproduce a specific

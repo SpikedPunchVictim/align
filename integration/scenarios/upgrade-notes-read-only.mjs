@@ -3,6 +3,16 @@
 // already stamps `.align/version.json` on `init`/`baseline accept`, per ADR 022's write discipline)
 // so `.align/version.json` genuinely EXISTS before `--notes` ever runs; the assertion that matters
 // is that it is byte-for-byte (normalized) UNCHANGED afterward, not merely that it's still absent.
+// **No `expectFailOn`.** `align upgrade` does not exist in 0.1.4, so this scenario goes red there
+// because the COMMAND is absent, not because 0.1.4 has a defect this pins. ADR 025's calibration is
+// specifically scenarios that reproduce a regression a published version demonstrably has — that is
+// what makes "these N went red on 0.1.4" evidence the harness can still detect real bugs. Declaring
+// feature-absence scenarios would inflate that count with entries proving only that 0.1.4 is old,
+// diluting the one signal the calibration exists to give.
+//
+// (Recorded here because its absence is what let a reviewer file "these three are undeclared
+// tripwires" as a defect on 2026-08-20; the sibling scenarios carried this reasoning and this one
+// did not.)
 export default {
   id: 'upgrade-notes-read-only',
   project: 'nest',

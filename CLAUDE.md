@@ -76,6 +76,15 @@ the harness has stopped working and nothing it reports can be trusted. Recount w
 in those files mention `expectFailOn` far more often than the field is actually declared, so a
 grep for the bare word overcounts by four.
 
+**What earns an `expectFailOn`, and what does not.** Calibration is for a scenario that reproduces a
+**regression a published version demonstrably has** — that is what makes "these ten went red on
+0.1.4" evidence the harness can still detect real defects. A scenario that goes red on 0.1.4 merely
+because the FEATURE did not exist yet (`align upgrade`, `--forget-unscanned`, `.align/last-scan.json`)
+proves only that 0.1.4 is old, and declaring it would dilute the one signal the count exists to give.
+Three scenarios are undeclared for exactly this reason and say so in their own headers. Confirm the
+reason before "fixing" one: a reviewer filed those three as untracked tripwires on 2026-08-20, and
+the reasoning was already written in two of the three files.
+
 ## 1. Rigour on load-bearing claims
 
 **Applies to** any artifact someone will act on without re-deriving it: findings, reviews,
