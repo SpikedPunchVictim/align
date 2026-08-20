@@ -118,6 +118,21 @@ export type Violation =
       readonly edgeKind: EdgeKind;
       readonly fromLayer: ComponentName;
       readonly toLayer: ComponentName;
+      /**
+       * `true` when `toFile` belongs to no component the ruleset DECLARED — LEDGER D065.
+       *
+       * `toLayer` still carries whatever the plugin classified the node as, because that is a
+       * faithful report of the scan and `align doctor` already surfaces the sentinel by name
+       * (`plugin-typescript`'s exported `UNMAPPED_COMPONENT`). What must not happen is align
+       * telling a user their file is in a layer called `__unmapped__`: they never wrote it, it is
+       * not in their config, and greping for it finds nothing. So the FACT lives here, structurally,
+       * and `renderViolationMessage` says it in words.
+       *
+       * `canOnlyDependOn` is an allowlist, so every unmapped target is outside it by construction —
+       * this is not a rare arm. Measured on n8n with `cli canOnlyDependOn core`: 7577 violations,
+       * 7577 of them naming the sentinel.
+       */
+      readonly toIsUnmapped?: true;
       readonly fromFile: RepoRelativePath;
       readonly toFile: RepoRelativePath;
       readonly specifier: string;
@@ -235,8 +250,11 @@ export function renderViolationMessage(v: Violation): string {
     }
     case 'layers':
       return (
-        `${v.fromFile} (layer '${v.fromLayer}') imports ${v.toFile} (layer '${v.toLayer}') via ` +
-        `'${v.specifier}' at line ${v.line}, which rule '${v.ruleId}' forbids.` +
+        `${v.fromFile} (layer '${v.fromLayer}') imports ${v.toFile} ` +
+        // LEDGER D065: never the plugin's `__unmapped__` sentinel. The remedy differs too — you
+        // cannot add a non-component to `canDependOn` — so the two cases must not read alike.
+        (v.toIsUnmapped === true ? '(which matches no component selector) ' : `(layer '${v.toLayer}') `) +
+        `via '${v.specifier}' at line ${v.line}, which rule '${v.ruleId}' forbids.` +
         edgeKindSuffix(v.edgeKind) +
         (v.because !== undefined ? ` ${v.because}` : '')
       );

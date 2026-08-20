@@ -26,7 +26,10 @@ import type { ComponentDefinitionIR } from '@spikedpunch/align-core';
  *      IS a source extension. (The comment there claims it filters `.d.ts`. It does not.)
  *   5. The `build-output-excluded` uncertainty — a reason that exists for exactly this — does not
  *      fire either, because it tests the USER's `excludes`, never `DEFAULT_EXCLUDED_DIR_NAMES`,
- *      which is where `dist` lives.
+ *      which is where `dist` lives. (Step 5 is FIXED SEPARATELY, as LEDGER D066: the marker now
+ *      fires for a target the walk actually skipped, so this arm of the silence is closed on its own
+ *      merits and not only as a consequence of the resolver fix below. Left described in the past
+ *      tense here because it is part of why THIS defect was silent.)
  *   6. The walk skipped `dist/`, so the target is not a graph node, and `evaluators.ts` skips any
  *      edge whose endpoints are not both nodes: `if (fromNode === undefined || toNode === undefined) continue`.
  *

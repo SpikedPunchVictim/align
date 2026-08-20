@@ -283,8 +283,11 @@ export const evaluateNoCycles: RuleEvaluator<ArchNoCyclesRule> = (rule, graph) =
   return violations;
 };
 
-export const evaluateLayers: RuleEvaluator<ArchLayersRule> = (rule, graph) => {
+export const evaluateLayers: RuleEvaluator<ArchLayersRule> = (rule, graph, components) => {
   const nodeByFile = new Map(graph.nodes.map((n) => [n.file, n]));
+  // LEDGER D065. "Declared" is decided the same way D061's contraction decides it — a component the
+  // ruleset names — so core still needs no knowledge of the plugin's sentinel string.
+  const declared = new Set(Object.keys(components));
   const externalNodeById = new Map(graph.externalNodes.map((n) => [n.id, n]));
   const violations: Violation[] = [];
 
@@ -315,9 +318,13 @@ export const evaluateLayers: RuleEvaluator<ArchLayersRule> = (rule, graph) => {
         fixHint: { code: 'remove-import', file: edge.from, line: edge.line },
         ...becauseField(rule.provenance.because),
         kind: 'layers',
-      edgeKind: edge.kind,
+        edgeKind: edge.kind,
         fromLayer: fromNode.component,
         toLayer: toNode.component,
+        // D065: an allowlist excludes an unmapped target by construction, so this arm is common, not
+        // exotic. Recorded as a fact on the violation rather than sniffed from `toLayer`'s value by
+        // the renderer, which would put the plugin's sentinel string into core.
+        ...(declared.has(toNode.component) ? {} : { toIsUnmapped: true as const }),
         fromFile: edge.from,
         toFile: edge.to,
         specifier: edge.specifier,

@@ -28,6 +28,7 @@ import {
   type ScanInput,
   type Scanner,
   type UncertaintyMarker,
+  type UncertaintyReason,
 } from '@spikedpunch/align-core';
 import { extractExportedSymbols } from './exports.js';
 import { TsconfigResolver } from './tsconfig-resolver.js';
@@ -149,6 +150,8 @@ export class TypeScriptScanner implements Scanner {
       blindSpots,
     );
 
+    uncertain.push(...markersForTargetsTheWalkSkipped(nodes, edges, blindSpots));
+
     return {
       nodes,
       edges,
@@ -159,6 +162,72 @@ export class TypeScriptScanner implements Scanner {
       scannedAt,
     };
   }
+}
+
+/**
+ * One marker per import whose target resolved to a real file the WALK skipped — LEDGER D066.
+ *
+ * **The gap this closes.** `recordSpecifier` can only see the config `excludes`; it has no idea
+ * whether the walk descended into the target's directory. So an import into `packages/core/dist/` —
+ * the literal build output `build-output-excluded` is named for — produced an edge pointing at a
+ * file that is not a node, and no marker at all. That silence is why D052 was invisible per-edge:
+ * the detector for it existed, was correctly named, and fired on a different question.
+ *
+ * **A post-pass, not an inline check, because the inline check cannot be correct.** Whether `build`
+ * is build output depends on whether its parent holds a `package.json` (D053), which the resolver
+ * does not know — `mayBeExcludedFromScan` deliberately over-answers for that reason, and
+ * over-answering here would invent markers for real source directories named `build`. After the
+ * walk, `blindSpots` is the FACT: the walk recorded what it skipped and why. This reads that record
+ * rather than re-deriving it, so the two can never disagree.
+ *
+ * **Edges are kept, not removed.** An edge to a non-node is already inert in every evaluator
+ * (`nodeByFile.get(edge.to)` is undefined), `custom.host` predicates can see it, and
+ * `buildUnevaluatableEdgeAdvisories` counts it at graph level. Dropping them here would change what
+ * a predicate sees for a diagnostic's benefit.
+ */
+function markersForTargetsTheWalkSkipped(
+  nodes: readonly DependencyGraphNode[],
+  edges: readonly DependencyGraphEdge[],
+  blindSpots: readonly ScanBlindSpot[],
+): UncertaintyMarker[] {
+  if (blindSpots.length === 0) return [];
+  const nodeFiles = new Set(nodes.map((n) => n.file));
+  const markers: UncertaintyMarker[] = [];
+  for (const edge of edges) {
+    if (nodeFiles.has(edge.to)) continue;
+    const spot = blindSpotCovering(edge.to, blindSpots);
+    if (spot === undefined) continue;
+    markers.push({
+      file: edge.from,
+      specifier: edge.specifier,
+      line: edge.line,
+      reason: reasonForBlindSpot(spot.reason),
+      excludedBy: spot.reason,
+    });
+  }
+  return markers;
+}
+
+/** The most specific recorded blind spot covering `file` — most specific so a `dist/` inside an
+ * excluded subtree reports `dist` rather than whichever ancestor happens to be listed first. */
+function blindSpotCovering(file: RepoRelativePath, blindSpots: readonly ScanBlindSpot[]): ScanBlindSpot | undefined {
+  let best: ScanBlindSpot | undefined;
+  for (const spot of blindSpots) {
+    if (!(spot.path === '' || file === spot.path || file.startsWith(`${spot.path}/`))) continue;
+    if (best === undefined || spot.path.length > best.path.length) best = spot;
+  }
+  return best;
+}
+
+/** `build-output-excluded` ONLY when the target really is build output: a default-excluded
+ * directory whose name is one of the build-output names (D053 already established that these are
+ * matched at a package root, so reaching here means the walk agreed it was output). Everything else
+ * — `node_modules`, a nested checkout, an unreadable directory, a user pattern — is out of scope for
+ * a reason the name would misdescribe. */
+function reasonForBlindSpot(reason: ScanBlindSpotReason): UncertaintyReason {
+  return reason.kind === 'default-excluded-dir' && BUILD_OUTPUT_DIR_NAMES.has(reason.name)
+    ? 'build-output-excluded'
+    : 'excluded-from-scan';
 }
 
 /** Reuses an existing string reference from `cache` for an equal string, or registers `value` as
@@ -404,8 +473,19 @@ function scanFile(
           // not uncertainty, just out of scope for the source-level edge graph.
           return;
         }
-        if (isExcludedPath(targetRel, excludes)) {
-          uncertain.push({ file: relPath, specifier, line, reason: 'build-output-excluded' });
+        // LEDGER D066. This branch is the USER's `excludes`, which is not the same thing as build
+        // output and never was — reporting it as `build-output-excluded` claimed to know what a
+        // pattern MEANT. It names the pattern that matched instead, through ADR 028's blind-spot
+        // vocabulary, so the per-edge marker and the per-subtree record say the same thing.
+        const excludePattern = matchingExcludePattern(targetRel, excludes);
+        if (excludePattern !== undefined) {
+          uncertain.push({
+            file: relPath,
+            specifier,
+            line,
+            reason: 'excluded-from-scan',
+            excludedBy: { kind: 'excluded', pattern: excludePattern },
+          });
           return;
         }
         edges.push({

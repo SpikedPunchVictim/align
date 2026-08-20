@@ -511,3 +511,38 @@ the codebase — a host predicate, a plugin, a config callback — the code cann
 uphold an invariant, because the author is not present when it breaks. `evaluateCustomHost` now
 refuses a collision outright rather than documenting the obligation. The general case (are these two
 `arch.*` violations really the same fact?) is a judgement about semantics and stays a brief.
+
+---
+
+## S-15 — An internal sentinel presented as the user's own vocabulary
+
+**Instances**: D065. **Rung**: **executable invariant**, promoted on the first instance — see below.
+
+A component of the system needs a value for "none of the above": a sentinel component name, a
+synthetic id, a placeholder version, `unknown`. It is correct internally. Then it reaches a message,
+a report, or an API payload, where it occupies the slot a value the USER wrote normally occupies —
+and the user reads it as something they are supposed to recognise.
+
+The tell is that the sentinel is usually *deliberately exported*, which makes it look like a
+considered part of the contract. D065's `__unmapped__` is exported from the scanner precisely so
+`align doctor`'s unmapped-files advisory need not duplicate the literal — and in `doctor` it is fine,
+because the surrounding sentence explains what it means. In a violation message it sat where a
+component name sits: `imports src/shared/r.ts (layer '__unmapped__')`. Nothing distinguished the two
+uses, because from the type system's point of view there is nothing to distinguish.
+
+Severity is not obvious from a single example and is worth measuring rather than guessing. This one
+looked cosmetic; `canOnlyDependOn` is an allowlist, so an unmapped target falls outside it by
+construction, and on n8n **7577 of 7577** violations named the sentinel.
+
+> **Ask**: for every value in a user-facing message, could the user find it in their own
+> configuration? If not, either it is explained where it appears, or it does not belong there.
+>
+> **Ask**: what does the surrounding sentence do for this value? A sentinel that reads correctly in
+> a report with a caption is not thereby safe in a message without one.
+
+**Promoted on the first instance, deliberately, for the same reason S-13's guard was**: the invariant
+is four lines and the alternative is remembering. `unmapped-in-messages.test.ts` drives every rule
+kind over a graph containing an unmapped node and asserts no rendered message contains a component
+the ruleset never declared — the class, not the arm that leaked. Recording the fact on the violation
+(`toIsUnmapped`) rather than sniffing the sentinel string in the renderer is what keeps core free of
+the plugin's vocabulary while still letting it say something true.

@@ -78,14 +78,31 @@ export type UncertaintyReason =
   | 'non-literal-dynamic-specifier' // spike: 1 in 456K LOC, 15 in 3.23M LOC
   | 'unresolvable-specifier'
   | 'asset-specifier' // .css/.svg/.vue/.json-ish — not graph uncertainty (ADR 004)
-  | 'build-output-excluded' // configurable excludes, e.g. .stage/, dist-bundle/
-  | 'fixture-excluded'; // human consent decision, not a layout heuristic (ADR 003)
+  /** The target IS build output: it lives under a default-excluded build directory at a package
+   * root or the repo root (`dist`, `build`, `out`, …). LEDGER D066 narrowed this to the case the
+   * name actually describes — it used to fire for the user's `excludes` patterns and never once for
+   * build output, so the one reason that could have made D052 visible per-edge never fired. */
+  | 'build-output-excluded'
+  /** The target was outside this scan for some OTHER recorded reason — a config `excludes` pattern,
+   * a nested checkout, `node_modules`, an unreadable directory. Deliberately says only that, because
+   * the scanner cannot know what a user's pattern MEANS; `UncertaintyMarker.excludedBy` carries the
+   * fact the walk actually recorded. Replaces `fixture-excluded`, which no code ever produced. */
+  | 'excluded-from-scan';
 
 export interface UncertaintyMarker {
   readonly file: RepoRelativePath;
   readonly specifier: string;
   readonly line: number;
   readonly reason: UncertaintyReason;
+  /**
+   * For the two out-of-scope reasons above: which recorded blind spot put the target outside the
+   * scan — LEDGER D066.
+   *
+   * The same `ScanBlindSpotReason` the walk already stores on `blindSpots`, not a second vocabulary,
+   * so the per-edge marker and the per-subtree record cannot describe the same event differently.
+   * Absent for every other reason (an unresolvable specifier has no blind spot behind it).
+   */
+  readonly excludedBy?: ScanBlindSpotReason;
 }
 
 /**

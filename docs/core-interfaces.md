@@ -264,14 +264,15 @@ type UncertaintyReason =
   | 'non-literal-dynamic-specifier'  // spike: 1 in 456K LOC, 15 in 3.23M LOC
   | 'unresolvable-specifier'
   | 'asset-specifier'                // .css/.svg/.vue/.json-ish — not graph uncertainty (ADR 004)
-  | 'build-output-excluded'          // configurable excludes, e.g. .stage/, dist-bundle/
-  | 'fixture-excluded';              // human consent decision, not a layout heuristic (ADR 003)
+  | 'build-output-excluded'          // the target IS build output (default-excluded dir at a package root)
+  | 'excluded-from-scan';            // outside the scan for some other RECORDED reason — see excludedBy
 
 interface UncertaintyMarker {
   readonly file: RepoRelativePath;
   readonly specifier: string;
   readonly line: number;
   readonly reason: UncertaintyReason;
+  readonly excludedBy?: ScanBlindSpotReason;  // which recorded blind spot put the target out of scope (D066)
 }
 
 interface DependencyGraph {
