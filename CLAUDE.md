@@ -55,10 +55,14 @@ pnpm integration:dev                           # Docker; real project, real comm
 **`pnpm integration:dev` runs EVERY project; do not call `run.mjs` directly for a gate.** `run.mjs`
 takes one `--project` (default `nest`) and filters its scenario pool by it, so invoking it directly
 silently skips every scenario declared against another project — today that is
-`prune-incomplete-scan-requires-allow-incomplete`, the only coverage ADR 023 tier 2 has at the
-integration level. A release-gate scenario the release-gate command does not execute is not
-calibration; found by review on 2026-08-18 (`docs/adr/defects/LEDGER.md` D012) after the consent gate
-broke that scenario and nothing reported it.
+`prune-incomplete-scan-requires-allow-incomplete`, the only ADR 023 tier-2 coverage a default
+`run.mjs` invocation would MISS. (Two scenarios assert the tier-2 refusal —
+`prune-forget-unscanned-retained` is the other, and it runs on `nest`, so a default invocation does
+execute it. This sentence read "the only coverage ADR 023 tier 2 has at the integration level" until
+2026-08-20, which was false; the corrected claim is narrower and is the one the paragraph actually
+needs.) A release-gate scenario the release-gate command does not execute is not calibration; found
+by review on 2026-08-18 (`docs/adr/defects/LEDGER.md` D012) after the consent gate broke that
+scenario and nothing reported it.
 
 This block used to list the two `run.mjs` invocations by hand, which made the coverage a thing a
 human had to remember — and the release script `integration:release` never ran the second one at all
@@ -67,23 +71,32 @@ DISCOVERS the project list from `integration/projects/` rather than enumerating 
 project is covered the day it is added.
 
 The full cross-version matrix (`pnpm integration:release`, i.e. `--targets 0.1.4,local` across every
-project) is a release gate — **ten** scenarios carry
-`expectFailOn: ['0.1.4']` as its calibration (recounted 2026-08-19 after
-`accept-does-not-restamp-provenance` was calibrated; it was three when this line was written, and
+project) is a release gate — **eleven** scenarios carry
+`expectFailOn: ['0.1.4']` as its calibration (recounted 2026-08-21 after
+`build-positional-doc-is-not-discarded` was calibrated; it was three when this line was written, and
 grows whenever a defect is pinned against a published version), and if those ever pass against 0.1.4
 the harness has stopped working and nothing it reports can be trusted. Recount with
 `grep -c '^  expectFailOn' integration/scenarios/*.mjs` rather than from memory — the comment blocks
 in those files mention `expectFailOn` far more often than the field is actually declared, so a
 grep for the bare word overcounts by four.
 
+A pin is broken by a pinned pair that PASSES **and** by one that ERRORS: an error means the
+assertions never ran, so the pair demonstrated nothing. Until 2026-08-20 the check counted only
+passes and reported "all N pinned scenario(s) went RED as required" over pairs that had blown up
+(LEDGER D068). Both are release blockers now, and the run says which of the two happened.
+
 **What earns an `expectFailOn`, and what does not.** Calibration is for a scenario that reproduces a
-**regression a published version demonstrably has** — that is what makes "these ten went red on
+**regression a published version demonstrably has** — that is what makes "these eleven went red on
 0.1.4" evidence the harness can still detect real defects. A scenario that goes red on 0.1.4 merely
 because the FEATURE did not exist yet (`align upgrade`, `--forget-unscanned`, `.align/last-scan.json`)
 proves only that 0.1.4 is old, and declaring it would dilute the one signal the count exists to give.
-Three scenarios are undeclared for exactly this reason and say so in their own headers. Confirm the
-reason before "fixing" one: a reviewer filed those three as untracked tripwires on 2026-08-20, and
-the reasoning was already written in two of the three files.
+Five scenarios are undeclared for exactly this reason and say so in their own headers (the three
+feature-did-not-exist-yet ones, plus `stale-exported-ir-is-reported`, and
+`host-rule-collision-refused` — whose reason is the rarer one: 0.1.4 does NOT have D063, because its
+custom.host fingerprint still folded in `String(range.startLine)`; the regression is 0.2.0's, and a
+pin against 0.1.4 would be a false claim). Confirm the reason before "fixing" one: a reviewer filed
+three of them as untracked tripwires on 2026-08-20, and the reasoning was already written in two of
+the three files.
 
 ## 1. Rigour on load-bearing claims
 

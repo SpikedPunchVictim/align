@@ -16,6 +16,7 @@
     "test": "pnpm -r --filter=./packages/* run test",
     "typecheck": "pnpm -r --filter=./packages/* run typecheck",
     "check": "node packages/cli/dist/index.js check",
+    "test:harness": "node --test integration/lib/*.test.mjs",
     "release:version": "node scripts/bump-version.mjs",
     "integration:dev": "node scripts/integration-all-projects.mjs --targets local",
     "integration:release": "node scripts/integration-all-projects.mjs --targets 0.1.4,local"

@@ -10,6 +10,10 @@
 // scenario data: a scenario object that parses is a scenario object that is valid, full stop.
 import * as path from 'node:path';
 
+// The scenario object's OWN vocabulary (LEDGER D069). Every other key set in this file was
+// enumerated when its level was written; this one never was, so the file that exists to reject a
+// silently-ignored key accepted any number of them at the outermost level. See `validateScenario`.
+const KNOWN_SCENARIO_KEYS = new Set(['id', 'project', 'description', 'steps', 'writeSet', 'tags', 'expectFailOn']);
 const KNOWN_STEP_ACTION_KEYS = ['install', 'run', 'mutate', 'snapshot', 'assert', 'mcpCall'];
 // `keepVersion` (increment 2): opts a `run`/`mcpCall` step OUT of the `known-align-versions`
 // normalization rule (lib/normalize.mjs) — needed by any scenario that asserts on a LITERAL
@@ -235,12 +239,39 @@ export function validateScenario(scenario) {
   if (scenario === null || typeof scenario !== 'object') throw new Error('scenario module default export must be a plain object');
   if (typeof scenario.id !== 'string' || scenario.id.length === 0) throw new Error(`scenario is missing a non-empty string 'id'`);
   const label = `scenario '${scenario.id}'`;
+  // The outermost level, added last and for the same reason as all the others (LEDGER D069): a key
+  // this file does not recognize is a key nothing downstream reads, and the author cannot tell the
+  // difference between "I declared it" and "it was ignored". A typo'd `expectFailOn` un-pins a
+  // calibration scenario silently, which is the worst of the three because the pin count is the
+  // harness's own evidence that it still works.
+  const unknownTopLevel = unknownKeys(scenario, KNOWN_SCENARIO_KEYS);
+  if (unknownTopLevel.length > 0) {
+    throw new Error(
+      `${label}: unknown key(s) [${unknownTopLevel.join(', ')}] — known scenario keys: ${[...KNOWN_SCENARIO_KEYS].join(', ')}. ` +
+        'An unrecognized key is silently ignored by every consumer, so this is a load-time hard error.',
+    );
+  }
   if (typeof scenario.project !== 'string' || scenario.project.length === 0) throw new Error(`${label}: missing a non-empty string 'project'`);
+  if (scenario.description !== undefined && (typeof scenario.description !== 'string' || scenario.description.length === 0)) {
+    throw new Error(`${label}: 'description' must be a non-empty string when present`);
+  }
   if (!Array.isArray(scenario.steps) || scenario.steps.length === 0) throw new Error(`${label}: 'steps' must be a non-empty array`);
   if (scenario.expectFailOn !== undefined) {
     if (!Array.isArray(scenario.expectFailOn) || scenario.expectFailOn.some((t) => typeof t !== 'string' || t.length === 0)) {
       throw new Error(`${label}: 'expectFailOn' must be an array of non-empty target strings`);
     }
+    // A pin asserts that a PUBLISHED version demonstrably has the defect this scenario reproduces
+    // — that is what makes "these N went red on 0.1.4" evidence the harness still detects real
+    // regressions. `local` is the gate target: pinning it asserts the code being released is
+    // broken, and would turn a genuine gate failure into an expected one.
+    if (scenario.expectFailOn.includes('local')) {
+      throw new Error(
+        `${label}: 'expectFailOn' must not contain 'local' — a pin names a published version that HAS the defect, ` +
+          `and 'local' is the gate target (a pinned gate failure would read as the expected result).`,
+      );
+    }
+    const dupeTargets = scenario.expectFailOn.filter((t, i) => scenario.expectFailOn.indexOf(t) !== i);
+    if (dupeTargets.length > 0) throw new Error(`${label}: 'expectFailOn' has duplicate target(s): ${[...new Set(dupeTargets)].join(', ')}`);
   }
   // ADR 026: absent entirely is the fail-closed default (an empty write-set — see
   // lib/scenario-runner.mjs's `writeSetDeclared = scenario.writeSet ?? []`), so `undefined` is
@@ -298,4 +329,29 @@ export function validateScenario(scenario) {
       }
     }
   });
+}
+
+/**
+ * Scenario ids are unique across the whole corpus (LEDGER D069).
+ *
+ * Nothing enforced this, and three separate consumers silently take the FIRST match: `--scenarios
+ * <id>` selection, the `results/<runId>/<target>/<scenario>/` output directory, and — the one that
+ * matters — `lib/calibration.mjs`'s `matrix.find((m) => m.scenarioId === s.id)`. With a duplicate,
+ * a pin declared on one scenario can be satisfied by the other's result.
+ *
+ * @param {readonly {id: string}[]} scenarios every scenario on disk, not the filtered pool
+ */
+export function validateNoDuplicateIds(scenarios) {
+  const seen = new Set();
+  const dupes = new Set();
+  for (const s of scenarios) {
+    if (seen.has(s.id)) dupes.add(s.id);
+    seen.add(s.id);
+  }
+  if (dupes.size > 0) {
+    throw new Error(
+      `duplicate scenario id(s): ${[...dupes].join(', ')} — ids must be unique across integration/scenarios/, because ` +
+        `selection, result directories and the red/green calibration lookup all resolve an id to the first match.`,
+    );
+  }
 }

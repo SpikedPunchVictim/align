@@ -59,6 +59,29 @@ if (projectIds.length === 0) {
   process.exit(2);
 }
 
+// The harness's own unit tests, before the harness runs anything (LEDGER D068/D069).
+//
+// `lib/calibration.mjs` decides whether the ten pinned scenarios still prove the regressions they
+// exist to prove, and `lib/spec-validate.mjs` decides whether a scenario asserts what its author
+// wrote. Both fail toward a FALSE PASS — a broken calibration check reports "all pinned scenarios
+// went RED as required" and exits 0 — so a run that cannot vouch for them must not report a result
+// at all. D068 was exactly this: the function the gate's calibration claim rests on was the one
+// function nothing could call.
+//
+// Files are listed explicitly rather than passed as a directory: `node --test <dir>` is not a
+// directory scan on Node 24, it tries to LOAD the path as a module and dies MODULE_NOT_FOUND.
+const libDir = path.join(repoRoot, 'integration', 'lib');
+const harnessTestFiles = fs.readdirSync(libDir).filter((f) => f.endsWith('.test.mjs')).sort().map((f) => path.join(libDir, f));
+if (harnessTestFiles.length === 0) {
+  console.error(`[integration-all] no harness tests found in ${libDir} — refusing to run with an unverified harness.`);
+  process.exit(2);
+}
+const harnessTests = spawnSync(process.execPath, ['--test', ...harnessTestFiles], { stdio: 'inherit' });
+if (harnessTests.status !== 0) {
+  console.error('\n[integration-all] the harness\'s OWN tests failed — refusing to run scenarios with an unverified harness.');
+  process.exit(2);
+}
+
 console.log(`[integration-all] projects: ${projectIds.join(', ')} (discovered from integration/projects/)`);
 
 const failed = [];

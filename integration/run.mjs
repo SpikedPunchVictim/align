@@ -18,7 +18,8 @@ import { fileURLToPath } from 'node:url';
 import { prepareProjectBase, materializeWorkingCopy } from './lib/project.mjs';
 import { runScenario } from './lib/scenario-runner.mjs';
 import { ensureDir, removeDir, writeJson } from './lib/fs-utils.mjs';
-import { validateScenario, validateNoDuplicateKeys } from './lib/spec-validate.mjs';
+import { validateScenario, validateNoDuplicateKeys, validateNoDuplicateIds } from './lib/spec-validate.mjs';
+import { calibrationBreaks, describeBreaks } from './lib/calibration.mjs';
 // Injected into `validateNoDuplicateKeys` rather than imported inside it, so `spec-validate.mjs`
 // stays a pure, dependency-free module the way the rest of `lib/` is — and so a unit-style check of
 // the validator can drive it without the harness. Resolves from the repo root's devDependencies
@@ -120,6 +121,9 @@ async function loadScenarios(filterIds, projectId, tagFilter) {
     }
     all.push(scenario);
   }
+  // D069: across the whole corpus, not per file — an id collision is invisible to `validateScenario`,
+  // which only ever sees one scenario at a time.
+  validateNoDuplicateIds(all);
   // A scenario declares the project it was authored against (mutations like
   // 'introduce-arch-violation' read project-specific component names) — running it against a
   // mismatched --project would silently mutate the wrong component names. Filtered here, not left
@@ -217,19 +221,17 @@ async function main() {
   /** @type {{target: string, scenarioId: string, pass: boolean, errored: boolean}[]} */
   const matrix = [];
 
-  /** Pinned scenario/target pairs that were exercised this run and PASSED anyway — the calibration
-   * break. Shared by the per-target line and `finishRun` so the two can never disagree. */
-  const calibrationBreaksIn = (targets) => {
-    const breaks = [];
-    for (const scenario of scenarios) {
-      for (const target of scenario.expectFailOn ?? []) {
-        if (!targets.includes(target)) continue; // not exercised this run — nothing to check
-        const m = matrix.find((m2) => m2.target === target && m2.scenarioId === scenario.id);
-        if (m !== undefined && m.pass) breaks.push(`${scenario.id}@${target}`);
-      }
-    }
-    return breaks;
-  };
+  /**
+   * The calibration check lives in `lib/calibration.mjs` and is unit-tested there
+   * (`calibration.test.mjs`, run by `pnpm test:harness` ahead of every integration run).
+   *
+   * It used to be an inline closure over `scenarios`/`matrix`, and that is why LEDGER D068
+   * survived: the one function the release gate's calibration claim rests on was the one function
+   * nothing could call. It counted only `m.pass`, so a pinned pair that ERRORED before reaching its
+   * assertions satisfied its pin, and the run printed "all N pinned scenario(s) went RED as
+   * required" on evidence it never collected [S-13].
+   */
+  const calibrationBreaksIn = (targets) => calibrationBreaks(scenarios, matrix, targets);
 
   const logTargetCalibration = (target) => {
     const pinned = scenarios.filter((s) => (s.expectFailOn ?? []).includes(target));
@@ -238,7 +240,7 @@ async function main() {
     log(
       broke.length === 0
         ? `\n[run] target '${target}' calibration: all ${pinned.length} pinned scenario(s) went RED as required.`
-        : `\n[run] target '${target}' CALIBRATION BROKEN: ${broke.join(', ')}`,
+        : `\n[run] target '${target}' CALIBRATION BROKEN: ${describeBreaks(broke)}`,
     );
   };
 
@@ -321,20 +323,23 @@ async function main() {
     // F3: enforce the red-on-known-buggy-version proof instead of treating it as purely
     // informational. A scenario's `expectFailOn` (e.g. `['0.1.4']` on
     // prune-errored-run-destroys-baseline) names targets it is PINNED to fail against — if one of
-    // those targets was actually tested this run and it PASSED, the harness's ability to detect the
-    // bug it exists to catch has broken (a normalization change, an F1-style typo, or an actual
-    // upstream fix landing in a version this harness still expects to be buggy). This check is
+    // those targets was actually tested this run and did not go red BY FAILING ITS ASSERTIONS, the
+    // harness's ability to detect the bug it exists to catch has broken (a normalization change, an
+    // F1-style typo, an actual upstream fix landing in a version this harness still expects to be
+    // buggy — or, per LEDGER D068, the pair erroring out before its assertions ran). This check is
     // independent of `--gate-target`: a calibration break is a harness-integrity failure, not a
     // per-target result, so it fails the run regardless of which target is being gated on.
     //
-    // Safe on a partial matrix: a pair that never ran has no row, and only a row that PASSED counts
-    // as a break — so an interrupted run under-reports rather than inventing a break.
-    const calibrationBreaks = calibrationBreaksIn(args.targets);
-    if (calibrationBreaks.length > 0) {
+    // Safe on a partial matrix: a pair that never ran has no row, so an interrupted run
+    // under-reports rather than inventing a break.
+    const breaks = calibrationBreaksIn(args.targets);
+    if (breaks.length > 0) {
       log(
         `\n[run] RED/GREEN CALIBRATION BROKEN: these scenario/target pairs are pinned (via 'expectFailOn') to prove a real bug by ` +
-          `going RED, but they PASSED instead: ${calibrationBreaks.join(', ')}. The harness can no longer demonstrate the regression ` +
-          `it exists to catch — treat this as a release blocker, not an informational note.`,
+          `failing their assertions, and did not: ${describeBreaks(breaks)}. ` +
+          `PASSED means the bug is no longer detected; ERRORED means the assertions never ran, which proves nothing either way. ` +
+          `The harness can no longer demonstrate the regression it exists to catch — treat this as a release blocker, not an ` +
+          `informational note.`,
       );
       process.exitCode = 1;
     }

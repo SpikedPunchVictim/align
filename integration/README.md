@@ -93,8 +93,11 @@ pnpm run integration:release    # full cross-version release gate — --targets 
 `integration:dev` is the tier to run while iterating on a change — Docker/network cost but no
 cross-version matrix (see "Timings" below for measured numbers). `integration:release` is the
 release gate CLAUDE.md's "Verifying a change" section and ADR 025 §6 describe: required before
-publish, and where the three `expectFailOn` scenarios' red/green calibration is actually exercised
-(0.1.4 is only installed in this tier).
+publish, and where the pinned scenarios' red/green calibration is actually exercised (0.1.4 is only
+installed in this tier). The count is deliberately not written here: it was "three" for long enough
+to go stale (ten as of 2026-08-20) and a stale count in prose is worse than none, because it reads
+as verified. `run.mjs` prints the live number per target — "all N pinned scenario(s) went RED as
+required" — and CLAUDE.md gives the recount command.
 
 `--tags` (see "Flags" above) is the finer-grained selector underneath both scripts — e.g.
 `node integration/run.mjs --tags destructive --targets local` runs only the scenarios exercising a
@@ -190,9 +193,23 @@ A scenario file may declare `expectFailOn: ['0.1.4']` (a plain array of target s
 its `id`/`project`/`steps`. This makes the scenario's whole reason for existing — "this MUST go red
 against a version known to have the bug" (ADR 025 §5) — a machine-checked property of the run, not
 prose in a comment. If any target named in `expectFailOn` is included in `--targets` for this
-invocation, and that scenario PASSES against it, `run.mjs` reports a **red/green calibration
-break** and exits non-zero — independent of `--gate-target`, since this represents the harness's
-own ability to detect a known bug breaking, not a per-target result. `scenarios/prune-errored-run-
+invocation and that scenario does not go red **by failing its assertions**, `run.mjs` reports a
+**red/green calibration break** and exits non-zero — independent of `--gate-target`, since this
+represents the harness's own ability to detect a known bug breaking, not a per-target result.
+
+Two outcomes break a pin, and the run says which:
+
+| outcome | verdict | what it means |
+| --- | --- | --- |
+| FAIL (assertions failed, no harness error) | the pin holds | the bug is still detected |
+| `PASSED` | **break** | the scenario no longer detects the bug it exists to detect |
+| `ERRORED` | **break** | the assertions never ran, so the pair proved nothing either way |
+
+`ERRORED` was counted as the pin holding until 2026-08-20 (LEDGER D068) — the check only ever asked
+`m.pass`, so a pinned pair that blew up during install satisfied its pin and the run printed "went
+RED as required" over it. The check now lives in `lib/calibration.mjs` and is unit-tested
+(`lib/calibration.test.mjs`, run by `pnpm test:harness` before any scenario executes); it was an
+inline closure inside `run.mjs`'s `main`, which is why nothing could test it. `scenarios/prune-errored-run-
 destroys-baseline.mjs` sets `expectFailOn: ['0.1.4']`; run it with `--targets 0.1.4,local` (or any
 target list including `0.1.4`) and both the ordinary gate AND the calibration check are exercised.
 
@@ -205,6 +222,14 @@ with more than one action key, or a `project` field that doesn't match a real `p
 throws immediately and the run never starts. This closes the class of false green where a typo'd
 key (`stdouContains`, `exitCode`) silently degrades a real assertion into a no-op that passes on
 every version, including the buggy one the scenario exists to catch.
+
+The scenario object's own top-level keys are validated the same way (`id`, `project`, `description`,
+`steps`, `writeSet`, `tags`, `expectFailOn` — anything else throws), and ids must be unique across
+the corpus. That level was unchecked until 2026-08-20 (LEDGER D069): every nested vocabulary in the
+file was enumerated when it was written, and the outermost one never was, so `expectFailsOn`
+silently un-pinned a calibration scenario and `tag` silently dropped one out of every `--tags`
+selection. `expectFailOn: ['local']` is also refused — a pin names a *published* version that has
+the defect, and `local` is the gate target.
 
 A scenario result is one of three things, and they mean different things:
 

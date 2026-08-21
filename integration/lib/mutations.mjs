@@ -678,6 +678,117 @@ export function deleteSingleComponentTree(workingDir) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+/**
+ * Writes `ARCHITECTURE.md` at the REPO ROOT — deliberately not `docs/ARCHITECTURE-RULES.md`
+ * (`commands/build.ts`'s `DEFAULT_DOC_PATH`), and that is the entire point.
+ *
+ * LEDGER D064: `align build <doc>` accepted the positional, discarded it, and built the default
+ * path instead. With a doc AT the default path the two are indistinguishable from the output, so a
+ * scenario written that way would pass against the defect. A non-default path makes "which doc did
+ * align actually read" answerable from the report alone [S-05].
+ *
+ * `ARCHITECTURE.md` at the root is the reporter's own filename, not an invented one.
+ */
+export function writeRootArchitectureDoc(workingDir) {
+  writeText(
+    path.join(workingDir, 'ARCHITECTURE.md'),
+    '# Architecture\n\n## core-isolation\n\n`core` must not depend on `common`.\n' +
+      "(Written by the integration harness's 'write-root-architecture-doc' mutation, at a path that is NOT\n" +
+      'align build\'s default, so the report names whichever doc was actually read.)\n',
+  );
+}
+
+/** The `custom.host` predicate body shared by the two host-rule mutations below, parameterized by
+ * the two messages it emits. Same file, same rule, different lines — the D063 shape. */
+function hostRuleConfigBlock(mutationName, firstMessage, secondMessage) {
+  return (
+    `\n// Appended by the integration harness's '${mutationName}' mutation (LEDGER D063).\n` +
+    `// Two findings, SAME file, DIFFERENT lines. align identifies a custom.host finding by\n` +
+    `// rule + file + message and never by line number, so whether these are one finding or two\n` +
+    `// is decided entirely by the two 'message' strings below.\n` +
+    `export const hostRules = {\n` +
+    `  'harness-two-findings': (ctx) => {\n` +
+    `    const target = ctx.files.find((f) => String(f).endsWith('${HOST_RULE_TARGET_FILE}'));\n` +
+    `    if (target === undefined) return [];\n` +
+    `    return [\n` +
+    `      { file: target, range: { startLine: 1, endLine: 1 }, snippet: 'first', message: ${JSON.stringify(firstMessage)} },\n` +
+    `      { file: target, range: { startLine: 2, endLine: 2 }, snippet: 'second', message: ${JSON.stringify(secondMessage)} },\n` +
+    `    ];\n` +
+    `  },\n` +
+    `};\n`
+  );
+}
+
+/** The file the harness's host predicate reports against. Any real, stable source file in the
+ * pinned checkout works — the predicate never reads it, it only needs a path the scan produced, so
+ * that `align check` has a live file to attribute the findings to. */
+const HOST_RULE_TARGET_FILE = 'packages/core/index.ts';
+
+/**
+ * Registers a `custom.host` rule whose predicate returns two findings for one file under ONE
+ * message — LEDGER D063, the collision that used to collapse into a single baseline signature.
+ *
+ * Accepting the collapsed entry accepted BOTH findings, including any added later that nobody had
+ * reviewed: a green run over unreviewed findings, which is this project's severity-zero class.
+ * A fixed align refuses the run rather than guessing which finding the human meant.
+ */
+export function addCollidingHostRule(workingDir) {
+  const { file } = readConfig(workingDir);
+  const anchor = 'rules: (c) => [\n';
+  const withRule = replaceAnchorOnce(
+    fs.readFileSync(file, 'utf8'),
+    anchor,
+    `rules: (c) => [\n` +
+      `    // Inserted by the integration harness's 'add-colliding-host-rule' mutation (LEDGER D063).\n` +
+      `    c.custom.host('harness-two-findings').because('integration harness: two findings that share one message'),\n`,
+    'add-colliding-host-rule',
+  );
+  fs.writeFileSync(file, withRule + hostRuleConfigBlock('add-colliding-host-rule', 'harness finding', 'harness finding'), 'utf8');
+}
+
+/**
+ * Rewrites the predicate `add-colliding-host-rule` installed so its two findings carry DISTINCT
+ * messages — the fix align's own refusal text tells the user to make ("give each finding a message
+ * that identifies it").
+ *
+ * Pairing the two mutations is what makes the scenario a proof rather than an assertion that align
+ * refuses things: the refusal has to LIFT once the ambiguity is gone, or "refuse" would just be a
+ * more elaborate way of being broken.
+ */
+export function distinguishHostRuleMessages(workingDir) {
+  const { file, text } = readConfig(workingDir);
+  const marker = "\n// Appended by the integration harness's 'add-colliding-host-rule' mutation";
+  const idx = text.indexOf(marker);
+  if (idx === -1) {
+    throw new Error(
+      "mutation 'distinguish-host-rule-messages': the 'add-colliding-host-rule' block is not in align.config.ts — " +
+        'run that mutation first.',
+    );
+  }
+  fs.writeFileSync(
+    file,
+    text.slice(0, idx) + hostRuleConfigBlock('distinguish-host-rule-messages', 'harness finding: first', 'harness finding: second'),
+    'utf8',
+  );
+}
+
+/**
+ * Appends a COMMENT to `align.config.ts` — no rule, no component, no exclude changes.
+ *
+ * LEDGER D067's asymmetry, made executable. The trusted staleness check compares the loaded ruleset
+ * and must stay quiet here, because the effective rules genuinely did not move. The untrusted check
+ * cannot execute the config — that is the whole contract of `--untrusted` — so it compares a
+ * fingerprint over the config SOURCE BYTES, which a comment does move, and it warns.
+ *
+ * That over-warning is the honest direction and the reason this mutation exists: the alternative
+ * would be an untrusted check that stays quiet on edits it cannot evaluate, which is silence
+ * standing in for verification [S-10].
+ */
+export function appendCommentToConfig(workingDir) {
+  const { file } = readConfig(workingDir);
+  fs.appendFileSync(file, "\n// Appended by the integration harness's 'append-comment-to-config' mutation (LEDGER D067).\n", 'utf8');
+}
+
 export const MUTATIONS = {
   'shadow-component': (ctx) => shadowComponent(ctx.workingDir),
   'use-single-component-tree': (ctx) => useSingleComponentTree(ctx.workingDir),
@@ -704,6 +815,10 @@ export const MUTATIONS = {
   'write-architecture-rules-doc-with-fenced-rule': (ctx) => writeArchitectureRulesDocWithFencedRule(ctx.workingDir),
   'edit-architecture-rules-doc': (ctx) => editArchitectureRulesDoc(ctx.workingDir),
   'enable-allow-baseline-from-mcp': (ctx) => enableAllowBaselineFromMcp(ctx.workingDir),
+  'write-root-architecture-doc': (ctx) => writeRootArchitectureDoc(ctx.workingDir),
+  'add-colliding-host-rule': (ctx) => addCollidingHostRule(ctx.workingDir),
+  'distinguish-host-rule-messages': (ctx) => distinguishHostRuleMessages(ctx.workingDir),
+  'append-comment-to-config': (ctx) => appendCommentToConfig(ctx.workingDir),
 };
 
 export function applyMutation(name, ctx) {

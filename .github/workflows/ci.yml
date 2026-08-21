@@ -6,9 +6,14 @@ on:
   pull_request:
     branches: [main]
   # ADR 025: the cross-version integration harness needs Docker-adjacent tooling and takes
-  # minutes, so it does NOT run on every push/PR — it's manually dispatchable (for a pre-release
-  # check on a branch) and runs automatically when a GitHub Release is published, which is exactly
-  # ADR 025 §6's "required before publish" gate. `targets` defaults to the calibration pair
+  # minutes, so it does NOT run on every push/PR — it is manually dispatchable, for a pre-release
+  # check on a branch.
+  #
+  # It does NOT run on a published Release. This comment claimed it did until 2026-08-20, and the
+  # `integration` job below has always been `if: github.event_name == 'workflow_dispatch'` with no
+  # `release:` trigger in this file. ADR 025 §6's "required before publish" gate is real, but it
+  # lives in `release.yml`, which runs `pnpm integration:release`. Do not read this workflow as
+  # that gate. `targets` defaults to the calibration pair
   # (`0.1.4,local`) so a manual run exercises both the ordinary gate (against `local`, the code
   # under review) AND the red/green `expectFailOn` proof (against the real published `0.1.4`) in
   # one invocation — see integration/README.md's "Enforcing the red/green proof" section.
@@ -126,22 +131,34 @@ jobs:
       - name: Build all packages
         run: pnpm -r build
 
-      # Two projects, both run unconditionally on the default (release/no-override) path: `nest`
-      # covers the large majority of ADR 025 §7's coverage table; `nest-incomplete`
-      # (`integration/projects/nest-incomplete.mjs`) is the dependencies-never-installed variant
-      # that exercises ADR 023 tier 2 specifically. A manual dispatch can narrow to one project (and
-      # optionally one scenario) via the `project`/`scenarios` inputs for a fast, targeted debug run.
-      - name: Run harness — nest
-        if: github.event.inputs.project == '' || github.event.inputs.project == 'nest'
+      # The harness's own unit tests, ahead of the harness (LEDGER D068/D069). The red/green
+      # calibration check and the scenario-spec validator are the two pieces of this job whose
+      # failure mode is a FALSE PASS, so they are gated before anything expensive runs.
+      - name: Test the harness itself
+        run: pnpm test:harness
+
+      # Every project, DISCOVERED from integration/projects/ — never enumerated here.
+      #
+      # This step used to be two hardcoded `run.mjs --project <id>` invocations, which is the exact
+      # defect `scripts/integration-all-projects.mjs` was written to close one level down (LEDGER
+      # D012, then D049 when the mitigation turned out to be a sentence in CLAUDE.md asking a human
+      # to remember a second line). A third project added to integration/projects/ would have been
+      # absent from the release gate with nothing to notice — the failure mode is silence, not a red
+      # run. Found by review 2026-08-20, in the same file whose own header comment cites D012.
+      #
+      # A manual dispatch can still narrow to one project (and optionally one scenario) for a fast,
+      # targeted debug run; that path calls run.mjs directly because narrowing is the whole point.
+      - name: Run harness — every project
+        if: github.event.inputs.project == ''
         run: >
-          node integration/run.mjs --project nest
+          node scripts/integration-all-projects.mjs
           --targets "${{ github.event.inputs.targets || '0.1.4,local' }}"
           ${{ github.event.inputs.scenarios != '' && format('--scenarios {0}', github.event.inputs.scenarios) || '' }}
 
-      - name: Run harness — nest-incomplete
-        if: github.event.inputs.project == '' || github.event.inputs.project == 'nest-incomplete'
+      - name: Run harness — single project (manual dispatch only)
+        if: github.event.inputs.project != ''
         run: >
-          node integration/run.mjs --project nest-incomplete
+          node integration/run.mjs --project "${{ github.event.inputs.project }}"
           --targets "${{ github.event.inputs.targets || '0.1.4,local' }}"
           ${{ github.event.inputs.scenarios != '' && format('--scenarios {0}', github.event.inputs.scenarios) || '' }}
 
