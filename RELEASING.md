@@ -187,9 +187,21 @@ reconciliation that never happened.
 
 ```bash
 git commit -am "release: v<x.y.z>"
-git tag v<x.y.z>
+git tag -a v<x.y.z> -m "v<x.y.z>"    # -a is REQUIRED, see below
 git push --follow-tags               # pushing the tag triggers .github/workflows/release.yml
 ```
+
+> **The tag must be ANNOTATED (`-a`), and this line used to say `git tag v<x.y.z>`.**
+> `git push --follow-tags` pushes only *annotated* tags. A lightweight tag — what plain `git tag`
+> creates — is silently left behind: the branch pushes, git reports success, and
+> `.github/workflows/release.yml` never fires because no tag ref arrives. Nothing publishes and
+> nothing says why. Caught 2026-08-21 while releasing 0.2.1, by checking `git cat-file -t` against
+> the previous release (`v0.2.0` is `tag`, i.e. annotated; `v0.1.4` is `commit`, i.e. lightweight —
+> so the repo has shipped both and the procedure never settled it). Verify before pushing:
+>
+> ```bash
+> git cat-file -t v<x.y.z>    # must print: tag
+> ```
 
 > **`pnpm install --lockfile-only` is NOT needed for a version bump.** `scripts/bump-version.mjs`
 > used to print that line, contradicting its own header. Verified 2026-08-21: internal deps are

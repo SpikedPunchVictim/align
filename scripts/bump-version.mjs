@@ -53,4 +53,6 @@ console.log(`Both fail loudly if skipped. Then verify and ship:\n`);
 console.log(`  pnpm build && pnpm typecheck && pnpm test && pnpm test:harness`);
 console.log(`  pnpm integration:release        # ~25min; read the calibration line, not just the exit code`);
 console.log(`  git commit -am "release: v${version}"`);
-console.log(`  git tag v${version} && git push --follow-tags   # CI publishes on the tag`);
+console.log(`  git tag -a v${version} -m "v${version}"    # -a REQUIRED: --follow-tags skips lightweight tags`);
+console.log(`  git cat-file -t v${version}                     # must print 'tag', not 'commit'`);
+console.log(`  git push --follow-tags                         # CI publishes on the tag`);
