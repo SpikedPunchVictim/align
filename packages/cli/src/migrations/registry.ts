@@ -51,16 +51,32 @@ import { globDoubleStarSelectorDriftValidator } from './validators/glob-double-s
 import { baselineEntriesInSkippedCheckoutsValidator } from './validators/baseline-entries-in-skipped-checkouts.js';
 import { globDoubleStarSelectorRewriteTransform } from './transforms/glob-double-star-rewrite.js';
 
-const CURRENT_ENTRY_VERSION = '0.2.0';
+/**
+ * One constant per released version with an entry, NOT a single mutable "current" pointer.
+ *
+ * This was `const CURRENT_ENTRY_VERSION = '0.2.0'` feeding the registry's only entry, and bumping
+ * that literal to `'0.2.1'` re-keyed the 0.2.0 entry instead of adding one — silently taking
+ * 0.2.0's two validators and its `**`-selector transform away from every user who had not yet
+ * upgraded past 0.2.0. That is precisely the re-key defect this file's header already describes
+ * happening once before (keyed to 0.1.4, describing work that shipped later), and it is why this
+ * registry is a LIST applied in ascending order across a detected range rather than a pointer at
+ * the newest thing. Caught by three tests in `migration-skipped-checkout-baseline-validator.test.ts`
+ * plus `upgrade.test.ts`'s `--notes` case, which are named for the 0.2.0 entry precisely so a
+ * re-key cannot pass quietly.
+ *
+ * Adding a release means adding a constant and an entry here. It does not mean editing one.
+ */
+const V0_2_0 = '0.2.0';
+const V0_2_1 = '0.2.1';
 
 export const MIGRATION_REGISTRY: readonly VersionRegistryEntry[] = [
   {
-    version: CURRENT_ENTRY_VERSION,
+    version: V0_2_0,
     // Sourced from the compiled notes by key, never hand-typed here (ADR 021's one-record
     // invariant) — `UPGRADING.md` is the single authored record and `notes.generated.ts` is its
     // compiled form. `hasNotesForVersion` is what turns an empty result into a build failure now
     // that this version is the released one.
-    notes: COMPILED_NOTES[CURRENT_ENTRY_VERSION] ?? [],
+    notes: COMPILED_NOTES[V0_2_0] ?? [],
     validators: [globDoubleStarSelectorDriftValidator, baselineEntriesInSkippedCheckoutsValidator],
     // task #16 slice E: "rewrite this selector so its match set is exactly what it was before
     // 0.2.0" (ADR 022's headline 0.2.0 transform candidate), paired with the validator above per
@@ -75,6 +91,29 @@ export const MIGRATION_REGISTRY: readonly VersionRegistryEntry[] = [
     // "anything requiring authorial intent stays validator-only", and ADR 022 names that a correct
     // end state, not an unfinished one: "Some validators will never acquire a transform."
     transforms: [{ validator: globDoubleStarSelectorDriftValidator, transform: globDoubleStarSelectorRewriteTransform }],
+  },
+  {
+    version: V0_2_1,
+    notes: COMPILED_NOTES[V0_2_1] ?? [],
+    // **No validators and no transforms, and that is a claim, not an omission.** ADR 022's entries
+    // exist to carry a user across a change align made to their repository's state. 0.2.1's fixes
+    // (LEDGER D063–D067) change what align REPORTS, not how it identifies anything:
+    //
+    //   - D065 rewords the `arch.layers` message for an unmapped target. Verified against
+    //     `git diff` on `evaluators.ts`: no `computeFingerprint` call site changed, so no accepted
+    //     baseline entry is re-identified and there is nothing to migrate.
+    //   - D063 makes a `custom.host` predicate that cannot distinguish its own findings an ERROR
+    //     rather than a silent collapse. The fingerprint formula is untouched; the refusal is its
+    //     own signal, and it names the file and the fix in the message.
+    //   - D066 renames an uncertainty REASON on a per-edge marker — a diagnostic, never a
+    //     fingerprint input.
+    //   - D064 and D067 are a CLI argument fix and a new advisory. Neither touches stored state.
+    //
+    // A validator that fires on nothing would be worse than none: it would imply align had checked
+    // something. If a later 0.2.x does move fingerprints, it earns its own entry with its own
+    // validator — that is what the list is for.
+    validators: [],
+    transforms: [],
   },
 ];
 

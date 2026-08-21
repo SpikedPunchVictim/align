@@ -15,10 +15,10 @@
 //     steady state for the whole span between a publish and the next bump — installing the
 //     `align-cli` tarball naively would have npm resolve its declared `align-core@<that version>`
 //     dependency from the REGISTRY, silently testing a Frankenstein mix of local cli/core and
-//     published agent/plugin-typescript. (Right now the tree sits at the other end of that cycle:
-//     bumped to 0.2.0, not yet published, so the numbers differ and the collision is momentarily
-//     absent. It returns the moment 0.2.0 ships, which is why this is fixed structurally rather
-//     than by relying on the numbers to differ.) Fixed with npm's `overrides` field (npm >= 8.3): forces
+//     published agent/plugin-typescript. Whether the numbers happen to collide RIGHT NOW depends
+//     only on where in the publish/bump cycle the tree is sitting, which is why this is fixed
+//     structurally rather than by relying on them to differ — a comment naming the version of the
+//     day would be stale by the next release and was, twice. Fixed with npm's `overrides` field (npm >= 8.3): forces
 //     every transitive resolution of the four `@spikedpunch/*` package names to their local
 //     tarball, regardless of what version range is declared anywhere in the tree — no version
 //     bump needed, no publish-time coordination, package.json `version` fields stay untouched.
@@ -115,10 +115,11 @@ function writePackageJsonFor(workingDir, version, tarballs, options = {}) {
  * `align-cli`/`align-core` from the REGISTRY, and the version check alone could not tell that apart
  * from a genuine local install: both report the same number.
  *
- * The tree is momentarily on the other side of that cycle (bumped to 0.2.0, unpublished), so today
- * the numbers happen to differ. That is a coincidence of timing, not a property to lean on — it
- * ends when 0.2.0 ships — which is exactly why the two checks below do not consult the version
- * string at all.
+ * Whether the numbers happen to differ at any given moment is a coincidence of the publish/bump
+ * cycle, not a property to lean on — which is exactly why the two checks below do not consult the
+ * version string at all. (This paragraph used to say "the tree is momentarily bumped to 0.2.0,
+ * unpublished, so today the numbers differ"; that sentence survived 0.2.0 actually shipping and
+ * would need rewriting at every release. It now states the invariant instead of the date.)
  *
  * Two INDEPENDENT, stronger checks, both required to pass:
  *

@@ -16,6 +16,8 @@
 // Every rule is documented with what it normalizes and — the part ADR 025 explicitly asks for —
 // what getting it wrong would MASK. Read this file before trusting a byte-identical diff.
 
+import { knownAlignVersions } from './align-version.mjs';
+
 const PLACEHOLDER_TIMESTAMP = '<normalized-timestamp>';
 const PLACEHOLDER_DURATION = '<normalized-duration>';
 const PLACEHOLDER_REPO = '<repo>';
@@ -129,9 +131,16 @@ const TEXT_RULES = [
  * number a scenario legitimately prints (a violation count, a line number, a nest package
  * version like `11.1.26` embedded in a scanned file path) and that is exactly the "wrong
  * direction" failure ADR 025 warns about ("wrong in the other [direction] and real regressions
- * are hidden"). Confined to align's own six published versions plus the literal string `local`.
+ * are hidden"). Confined to align's own released versions plus the working tree's, and the literal
+ * string `local`.
+ *
+ * **Derived, not written down.** This was a hand-maintained literal list ending at the current
+ * release, and a bump that forgot to extend it failed SILENTLY — see `lib/align-version.mjs`, which
+ * is now the single place the harness learns the working tree's version (from
+ * `packages/cli/package.json`, the same file `ALIGN_VERSION` reads). The release checklist lost a
+ * step rather than gaining a warning.
  */
-const KNOWN_ALIGN_VERSIONS = ['0.1.0', '0.1.1', '0.1.2', '0.1.3', '0.1.4', '0.2.0'];
+const KNOWN_ALIGN_VERSIONS = knownAlignVersions();
 
 function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

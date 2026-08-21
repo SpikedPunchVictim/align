@@ -102,15 +102,115 @@ Once all five are registered, CI can publish without any stored npm credentials.
 
 ## Step 3 — Routine release (every version after bootstrap)
 
+The full checklist. **Three edits, then two gates, then the tag.** It used to be documented as one
+command, which is why the two non-obvious edits were repeatedly missed.
+
+`packages/cli/package.json`'s `version` is the **single source of truth** for align's version.
+Nothing else hardcodes it: `ALIGN_VERSION` reads that file at module load
+(`packages/cli/src/telemetry/process-context.ts`), `migration-registry-completeness.test.ts` reads
+it directly rather than trusting the constant, and the integration harness derives it through
+`integration/lib/align-version.mjs`. Do not add a fourth place that stores a version — derive it.
+
+### 3.1 — Bump the five packages
+
 ```bash
-pnpm release:version 0.2.0          # writes 0.2.0 into all five package.json files
-pnpm install --lockfile-only        # refresh pnpm-lock.yaml to match
-git commit -am "release: v0.2.0"
-git tag v0.2.0
-git push --follow-tags              # pushing the tag triggers .github/workflows/release.yml
+pnpm release:version <x.y.z>
 ```
 
-The `release.yml` workflow then, on the `v0.2.0` tag:
+Writes `<x.y.z>` into all five publishable `package.json` files, in lockstep. It prints the
+remaining steps too, so you do not have to come back here.
+
+### 3.2 — Add a migration-registry entry
+
+`packages/cli/src/migrations/registry.ts`. Add a **new** constant and a **new** entry to the
+`MIGRATION_REGISTRY` list.
+
+> **Do not re-key the existing entry.** The registry is *one entry per released version, applied in
+> ascending order across a detected range*. Editing the newest entry's version does not add a
+> release — it withdraws the previous release's validators and transforms from everyone who has not
+> upgraded past it. Doing this during the 0.2.0 → 0.2.1 bump would have silently dropped 30 upgrade
+> notes, two validators and the `**`-selector transform for every 0.1.4 user. This repo has shipped
+> the same defect once before, keyed to 0.1.4; the file's own header describes it.
+
+If the release moves no fingerprints and needs no migration, the entry still exists and carries the
+notes, with `validators: []` and a comment saying that emptiness is a **claim** rather than an
+omission — a validator that fires on nothing is worse than none, because it implies align checked
+something.
+
+*Fails loudly if forgotten* — `migration-registry-completeness.test.ts` asserts the version in
+`packages/cli/package.json` has an entry, and `hasNotesForVersion` asserts the entry carries notes.
+
+### 3.3 — Author the `UPGRADING.md` section, then recompile
+
+Add a `## <x.y.z>` section with one `###` note per user-visible change. Then:
+
+```bash
+node packages/cli/scripts/compile-upgrading-notes.mjs   # UPGRADING.md -> notes.generated.ts
+```
+
+`UPGRADING.md` is the single authored record (ADR 021); `notes.generated.ts` is its compiled form
+and is what ships in the npm package. Never hand-edit the generated file.
+
+*Fails loudly if forgotten* — `migration-notes-drift.test.ts` compares an embedded content hash.
+
+### 3.4 — Verify
+
+```bash
+pnpm build && pnpm typecheck && pnpm test    # ~26s — the three edits above must be green together
+pnpm test:harness                            # the integration harness's own unit tests
+node packages/cli/dist/index.js check        # align on align; red is blocking
+node packages/cli/dist/index.js doctor       # advisory only, always exits 0
+pnpm integration:release                     # THE GATE: every project x 0.1.4,local (ADR 025 §6)
+```
+
+`integration:release` is the one that matters and the one that takes ~25 minutes. Read two things in
+its output rather than only its exit code:
+
+- **`gate target 'local': all scenarios passed`** — for every project.
+- **`target '0.1.4' calibration: all N pinned scenario(s) went RED as required`** — the pinned
+  scenarios reproduce defects a published version demonstrably has. If one of them *passes*, the
+  harness has stopped being able to detect the regression it exists to catch. If one *errors*, its
+  assertions never ran and it proved nothing; both are release blockers and both are reported.
+
+### 3.5 — Regenerate the dogfood artifacts (only if they changed)
+
+```bash
+node packages/cli/dist/index.js skill --install    # .claude/skills/align/SKILL.md carries a version stamp
+node packages/cli/dist/index.js export-ir          # .align/ruleset-ir.json, if align.config.ts changed
+```
+
+`.align/version.json` is **not** edited by hand. It records which version last reconciled the
+baseline, and align stamps it on the next baseline-writing command. Editing it would assert a
+reconciliation that never happened.
+
+### 3.6 — Commit, tag, push
+
+```bash
+git commit -am "release: v<x.y.z>"
+git tag v<x.y.z>
+git push --follow-tags               # pushing the tag triggers .github/workflows/release.yml
+```
+
+> **`pnpm install --lockfile-only` is NOT needed for a version bump.** `scripts/bump-version.mjs`
+> used to print that line, contradicting its own header. Verified 2026-08-21: internal deps are
+> recorded in `pnpm-lock.yaml` as `specifier: workspace:*` / `version: link:packages/core` — no
+> version number appears anywhere — every `0.2.0` string in that file belongs to a third-party
+> package (`forwarded`, `ip-address`), and the `v0.2.0` release commit did not touch it. Run it when
+> you change dependencies; never for a bump.
+
+### What is NOT on this list, and why
+
+- **`KNOWN_ALIGN_VERSIONS`** (the harness's version scrub list) used to be step 4 here, and it was
+  the only step whose omission **no test could detect** — it silently stopped normalizing `local`'s
+  own version in captured output. It is now derived from `packages/cli/package.json` via
+  `integration/lib/align-version.mjs`, so the step no longer exists. `align-version.test.mjs` guards
+  the derivation, mutation-checked against the hand-written list it replaced.
+- **`PUBLISHED_ALIGN_VERSIONS`** in that same module lists versions live on npm. Append after a
+  release ships if you want its version string scrubbed when it is used as an explicit `--targets`
+  entry. Forgetting is cosmetic, not silent breakage.
+- **The lockfile** — see above.
+
+The `release.yml` workflow then, on the `v<x.y.z>` tag:
 
 1. checks that the tag matches `packages/core`'s version (guards a forgotten `release:version`),
 2. builds, typechecks, tests, and runs the align self-dogfood,

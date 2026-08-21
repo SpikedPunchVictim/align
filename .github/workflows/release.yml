@@ -9,10 +9,11 @@ name: Release
 # the OIDC token below authenticates the publish and attaches provenance.
 #
 # Typical flow:
-#   pnpm release:version 0.2.0
-#   pnpm install --lockfile-only
-#   git commit -am "release: v0.2.0"
-#   git tag v0.2.0 && git push --follow-tags
+#   pnpm release:version <x.y.z>
+#   ...then the three non-automated edits RELEASING.md Step 3 lists (migration-registry entry,
+#      UPGRADING.md + recompiled notes, KNOWN_ALIGN_VERSIONS) — the last fails silently if skipped
+#   git commit -am "release: v<x.y.z>"
+#   git tag v<x.y.z> && git push --follow-tags
 
 on:
   push:
